@@ -67,6 +67,7 @@ class SIP:
         """
         start = timer()
         for i in self.layers[1:-1]:
+            i.reset_state_flags()
             if i.activation == Activations.linear:
                 continue
             i.pre_bounds = self.get_pre_ia_bounds(i)
