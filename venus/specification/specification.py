@@ -15,15 +15,16 @@ from venus.specification.formula import *
 
 class Specification:
 
-    def __init__(self, input_layer, output_formula, name=None):
+    def __init__(self, input_node, output_formula, name=None):
         """
         Arguments:
 
-            input_layer: input_layer
-
-            output_formula: formula encoding output constraints.
+            input_node:
+                The input node.
+            output_formula:
+                The formula encoding output constraints.
         """
-        self.input_layer = input_layer
+        self.input_node = input_node
         self.output_formula = output_formula
         self.name = name
 
@@ -233,21 +234,22 @@ class Specification:
             
         return constrs
 
-    def copy(self, input_layer=None):
+    def copy(self, input_node=None):
         """
         Returns a copy of the specificaton
 
         Arguments:
 
-            input_layer: input layer to optionally update in the copy
+            input_node:
+                The input node to optionally update in the copy
 
         Returns:
 
             Specification
         """
-        il = input_layer if not input_layer is None else self.input_layer.copy()
+        innode = input_node if input_node is not None else self.input_node.copy()
 
-        return Specification(il, self.output_formula, self.name)
+        return Specification(innode, self.output_formula, self.name)
 
     def normalise(self, mean, std):
         """

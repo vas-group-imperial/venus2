@@ -10,13 +10,11 @@
 """
 
 from __future__ import annotations
-from abc import ABC, abstractmethod
-from typing import Union
+
 import math
 import numpy as np
 
-from venus.network.activations import Activations, ReluApproximation
-from venus.network.layers import Layer, FullyConnected, Conv2D
+from venus.network.node import Node, Gemm, Conv, Relu, MatMul, Add, Sub, Constant
 
 
 class Equation():
@@ -38,14 +36,13 @@ class Equation():
         self.matrix = matrix
         self.const = const
         self.size = matrix.shape[0]
-        self.plus_matrix = None
-        self.minus_matrix = None
-        self.lower_bounds = None
-        self.upper_bounds = None
 
-    @abstractmethod
     def copy(self, matrix=None, const=None) -> Equation:
-        pass
+        return Equation(
+            self.matrix.copy(),
+            self.const.copy(),
+            self.size
+        )
  
     def _get_plus_matrix(self) -> np.array:
         """
@@ -178,25 +175,26 @@ class Equation():
 
         return c
 
-
-    def transpose(self, layer):
+    def transpose(self, node: Node):
         return Equation(
-            layer.transpose(self.matrix),
-            self.matrix.dot(Equation._get_const(layer, np.ones(layer.output_size, bool)))
+            node.transpose(self.matrix),
+            self.matrix.dot(
+                Equation._get_const(node, np.ones(node.output_size, bool))
+            ) + self.const
         )
 
 
-    def interval_transpose(self, layer, bound):
-        assert layer.activation == Activations.relu, "Interval transpose is not supported for {layer.activation}"
-        lower_slope = layer.get_lower_relu_slope()
-        lower_const = Equation._get_const(layer, np.ones(layer.output_size, bool))
+    def interval_transpose(self, node, bound):
+        assert node.has_relu_activation() is True, "Interval transpose is not supported for nodes without relu activation."
+        lower_slope = node.to_node[0].get_lower_relaxation_slope()
+        lower_const = Equation._get_const(node, np.ones(node.output_size, bool))
         upper_const = lower_const.copy()
-        upper_slope = layer.get_upper_relu_slope()
+        upper_slope = node.to_node[0].get_upper_relaxation_slope()
         lower_const *= lower_slope
         upper_const *= upper_slope
-        upper_const[layer.get_unstable_flag()]  -= \
-            upper_slope[layer.get_unstable_flag()] * \
-            layer.pre_bounds.lower.flatten()[layer.get_unstable_flag()]
+        upper_const[node.to_node[0].get_unstable_flag()]  -= \
+            upper_slope[node.to_node[0].get_unstable_flag()] * \
+            node.bounds.lower.flatten()[node.to_node[0].get_unstable_flag()]
 
         if bound == 'lower':
             plus = self._get_plus_matrix() * lower_slope
@@ -211,79 +209,94 @@ class Equation():
         else:
             raise ValueError(f'Bound {bound} is not recognised.')
 
-        matrix = layer.transpose(plus) + layer.transpose(minus)
+        matrix = node.transpose(plus) + node.transpose(minus)
         const += self.const
 
         return Equation(matrix, const)
 
 
     @staticmethod
-    def derive(layer: Layer, previous_layer: Layer, flag: np.array) -> Equation:
+    def derive(node: Node, flag: np.array) -> Equation:
 
-        if previous_layer.get_unstable_count() == 0  and previous_layer.get_active_count() == 0:
+        if isinstance(node.from_node[0], Relu) and \
+        node.from_node[0].get_unstable_count() == 0  and \
+        node.from_node[0].get_active_count() == 0:      
             return Equation(
                 np.zeros((np.sum(flag), 0)),
-                Equation._get_const(layer, flag)
+                Equation._get_const(node, flag)
             )
 
         return Equation(
-            Equation._get_matrix(layer, flag),
-            Equation._get_const(layer, flag)
+            Equation._get_matrix(node, flag),
+            Equation._get_const(node, flag)
         )
         
 
     @staticmethod
-    def _get_matrix(layer: Conv2D, flag: np.array) -> np.array:
-        if isinstance(layer, Conv2D):
-            height, width, _, filters = layer.kernels.shape
+    def _get_matrix(node: Node, flag: np.array) -> np.array:
+        if isinstance(node, Conv):
+            # transpose kernel for tf conv operations
+            kernels = node.kernels.transpose(2, 3, 1, 0)
             flag_size = np.sum(flag)
-            prop_flag = np.zeros(layer.get_input_padded_size(), bool)
-            prop_flag[layer.get_non_pad_idxs()] = True
+            prop_flag = np.zeros(node.get_input_padded_size(), bool)
+            prop_flag[node.get_non_pad_idxs()] = True
             pad = np.ones(
-                layer.get_input_padded_size(),
+                node.get_input_padded_size(),
                 dtype=np.uint
-            ) * layer.input_size
-            pad[prop_flag] = np.arange(layer.input_size)
+            ) * node.input_size
+            pad[prop_flag] = np.arange(node.input_size)
             conv_indices = np.repeat(
-                Conv2D.im2col(
-                    pad.reshape(layer.get_input_padded_shape()),
-                    (height, width),
-                    layer.strides
+                Conv.im2col(
+                    pad.reshape(node.get_input_padded_shape()),
+                    (node.height, node.width),
+                    node.strides
                 ),
-                filters,
+                node.out_ch,
                 axis=1
             )[:, flag]
-            matrix = np.zeros((flag_size, layer.input_size + 1), dtype=layer.kernels.dtype)
+            matrix = np.zeros((flag_size, node.input_size + 1), dtype=node.config.PRECISION)
             matrix[range(flag_size), conv_indices] = np.array(
                 [
-                    layer.kernels[..., i].flatten()
-                    for j in range(int(layer.output_size / filters)) for i in range(filters)
+                    kernels[..., i].flatten()
+                    for j in range(int(node.output_size / node.out_ch)) for i in range(node.out_ch)
                 ]
             ).T[:, flag]
 
-            return matrix[:, :layer.input_size]
+            return matrix[:, :node.input_size]
 
-        elif isinstance(layer, FullyConnected):
-            return layer.weights[flag, :]
+        elif type(node) in [Gemm, MatMul]:
+            return node.weights[flag, :]
 
+        elif isinstance(node, Add):
+            if node.const is not None:
+                return np.identity(node.input_size, dtype=node.config.PRECISION)[:, flag] 
+            else:
+                matrix = np.zeros((node.output_size, 2 * node.output_size), dtype=node.config.PRECISION)
+                matrix[range(node.output_size), range(node.output_size)] = 1
+                matrix[range(node.output_size), range(node.output_size, 2 * node.output_size)] = 1
         else:
-            raise  TypeError(f'Layer {layer} is not supported')
+            raise  TypeError(f'Node {node} is not supported')
 
     @staticmethod
-    def _get_const(layer: Layer, flag: np.array) -> np.array:
-        if isinstance(layer, Conv2D):
-            filters = layer.kernels.shape[-1]
-            out_ch_size = int(layer.output_size / filters)
+    def _get_const(node: Node, flag: np.array) -> np.array:
+        if isinstance(node, Conv):
+            out_ch_size = int(node.output_size / node.out_ch)
 
             return np.array(
-                [layer.bias for i in range(out_ch_size)]
+                [node.bias for i in range(out_ch_size)]
             ).flatten()[flag]
 
-        elif isinstance(layer, FullyConnected):
-            return layer.bias[flag]
+        elif isinstance(node, Gemm):
+            return node.bias[flag]
+
+        elif isinstance(node, MatMul):
+            return np.zeros(node.output_size, dtype=node.weights.dtype)
+
+        elif type(node) in [Sub, Add]:
+            return np.zeros(node.output_size, dtype=node.const.dtype)
 
         else:
-            raise  TypeError(f'Layer {layer} is not supported')
+            raise  TypeError(f'Node {node} is not supported')
 
 
     # def set_lower_slope(self, lbound, ubound):

@@ -19,3 +19,46 @@ class DFSState(Enum):
     VISITING = 'visiting'
     VISITED = 'visited'
 
+class ReluState(Enum):
+
+    ACTIVE = 0
+    INACTIVE = 1
+    UNSTABLE = 2
+
+    @staticmethod
+    def inverse(s):
+        """
+        Inverts a given relu state.
+
+        Arguments:
+
+            s:
+                ReluState Item
+
+        Returns
+
+            ReluState Item
+        """
+        if s == ReluState.INACTIVE:
+            return ReluState.ACTIVE
+
+        elif s == ReluState.ACTIVE:
+            return ReluState.INACTIVE
+
+        return None
+
+class ReluApproximation(Enum):
+    ZERO = 0
+    IDENTITY = 1
+    PARALLEL = 2
+    MIN_AREA = 3
+    VENUS_HEURISTIC = 4
+    OPT_HEURISTIC = 5
+
+class OSIPMode(Enum):
+    """
+    Modes of operation.
+    """
+    OFF = 0
+    ON = 1
+    SPLIT = 2

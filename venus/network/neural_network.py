@@ -17,17 +17,16 @@ import itertools
 from venus.input.onnx_parser import ONNXParser
 from venus.specification.specification import Specification
 from venus.specification.formula import TrueFormula
-from venus.network.layers import Input, FullyConnected, Conv2D
+from venus.network.node import Input, Gemm, Relu, MatMul, Add, Constant
 from venus.bounds.sip import SIP
 from venus.common.logger import get_logger
-from venus.network.activations import Activations
 from venus.common.configuration import Config
 
-class NeuralNetwork():
+class NeuralNetwork:
     
     logger = None
 
-    def __init__(self, model_path, config: Config):
+    def __init__(self, model_path: str, config: Config):
         """
         Arguments:
 
@@ -39,7 +38,9 @@ class NeuralNetwork():
         self.config = config
         if NeuralNetwork.logger is None and not config.LOGGER.LOGFILE is None:
             NeuralNetwork.logger = get_logger(__name__, config.LOGGER.LOGFILE)
-        self.layers = None
+        self.head = None
+        self.tail = None
+        self.node = {}
         self.mean = 0
         self.std = 1
 
@@ -58,29 +59,48 @@ class NeuralNetwork():
 
         """
         _,model_format = os.path.splitext(self.model_path)
-        if not model_format in ['.h5', '.onnx', '.onnx.gz']:
-            raise Exception('only .h5 and .onnx models are supported')
-        if model_format == '.h5':
-            keras_parser = KerasParser()
-            self.layers = keras_parser.load(self.model_path)
-        else:
-            onnx_parser = ONNXParser(self.config)
-            self.layers = onnx_parser.load(self.model_path)
-            self.mean = onnx_parser.mean
-            self.std = onnx_parser.std
-
-        self.simplify()
+        if not model_format == '.onnx':
+            raise Exception('only .onnx models are supported')
+        
+        onnx_parser = ONNXParser(self.config)
+        self.head, self.tail, self.node = onnx_parser.load(self.model_path)
+        self.mean = onnx_parser.mean
+        self.std = onnx_parser.std
  
     def copy(self):
         """
-        Returns: 
+        Returns:
 
             a copy of the calling object 
         """
         nn = NeuralNetwork(self.model_path, self.config)
-        nn.layers = [layer.copy() for layer in self.layers]
-        
+
+        for i in self.node:
+            nn.node[i] = self.node[i].copy()
+
+        nn.head = nn.node[self.head.id]
+        nn.tail = nn.node[self.tail.id]
+
+        for i in self.node:
+            nn.node[i].from_node = [nn.node[j.id] for j in self.node[i].from_node if isinstance(j, Input) is not True]
+            nn.node[i].to_node = [nn.node[j.id] for j in self.node[i].to_node]
+
         return nn
+
+    def get_node_by_depth(self, depth: int) -> list:
+        """
+        Finds all nodes of certain depth.
+
+        Arguments:
+                
+            depth:
+                the depth. 
+
+        Returns:
+            List of nodes with specified depth.
+        """
+        return [self.node[i] for i in self.node if self.node[i].depth == depth]
+
 
     def clean_vars(self):
         """
@@ -90,28 +110,29 @@ class NeuralNetwork():
 
             None
         """
-        for layer in self.layers + [self.input] + [self.output]:
-            layer.clean_vars()
+        for i in self.node:
+            i.clean_vars()
 
-    def predict(self, input, mean=0, std=1):
+    def predict(self, inp: np.array, mean: float=0, std: float=1):
         """
         Computes the output of the network on a given input.
         
         Arguments:
                 
-            input: input vector to the network.
-
-            mean: normalisation mean.
-
-            std: normalisation standard deviation.
+            input:
+                input vector to the network.
+            mean:
+                normalisation mean.
+            std:
+                normalisation standard deviation.
         
-        Returns 
+        Returns:
 
-            vector of the network's output on input
+            vector of the network's output on input.
         """
         nn = self.copy()
-        input_layer = Input(input,input)
-        spec = Specification(input_layer,TrueFormula())
+        input_layer = Input(inp, inp)
+        spec = Specification(input_layer, TrueFormula())
         spec.normalise(mean, std)
         config = Config()
         config.SIP.OSIP_CONV = False
@@ -121,17 +142,18 @@ class NeuralNetwork():
 
         return nn.layers[-1].post_bounds.lower
 
-    def classify(self, input, mean=0, std=1):
+    def classify(self, inp: np.array, mean: float=0, std: float=1):
         """
         Computes the classification of a given input by the network.
         
         Arguments:
                 
-            input: input vector to the network.
-
-            mean: normalisation mean.
-
-            std: normalisation standard deviation.
+            input:
+                input vector to the network.
+            mean:
+                normalisation mean.
+            std:
+                normalisation standard deviation.
         
         Returns 
 
@@ -141,8 +163,8 @@ class NeuralNetwork():
         return np.argmax(pred)
 
     def is_fc(self):
-        for layer in self.layers:
-            if not isinstance(layer, FullyConnected):
+        for i in self.node:
+            if not isinstance(i, Gemm) and not isinstance(i, Relu):
                 return False
         return True
 
@@ -154,12 +176,10 @@ class NeuralNetwork():
 
             int of the number of ReLU nodes.
         """
-        count = 0
-        for layer in self.layers:
-            if layer.activation == Activations.relu:
-                count += len(layer.get_outputs())
+        return sum([
+            self.node[i].output_size for i in self.node if isinstance(self.node[i], Relu)
+        ])
 
-        return count
 
     def get_n_stabilised_nodes(self):
         """
@@ -169,12 +189,9 @@ class NeuralNetwork():
 
             int of the number of stabilised ReLU nodes.
         """
-        count = 0 
-        for layer in self.layers:
-            if layer.activation == Activations.relu:
-                count += len(layer.get_stable())
-
-        return count
+        return sum([
+            self.node[i].get_stable_count() for i in self.node if isinstance(self.node[i], Relu)
+        ])
 
     def get_stability_ratio(self):
         """
@@ -197,106 +214,37 @@ class NeuralNetwork():
             float of the range.
         """
 
-        diff = self.layers[-1].post_bounds.upper - self.layers[-1].post_bounds.lower
-        rng = np.average(diff)
+        diff = self.tail.bounds.upper - self.tail.bounds.lower
+        return np.average(diff)
         
-        return rng
 
-
-    def neighbours_from_p_layer(self, depth, node):
+    def calc_neighbouring_units(self, p_node, s_node, index):
         """
-        Determines the neighbouring nodes to the given node from the previous
-        layer.
+        Determines the neighbouring units of two given nodes. 
 
         Arguments:
 
-            depth: the depth of the layer of the node.
-
-            node: the index of the node.
+            p_node:
+                the preceding node.
+            n_node:
+                the subsequent node.
+            index: 
+                the index of the node.
 
         Returns:
 
-            a list of neighbouring nodes.
+            a list of indices of neighbouring units.
         """
-        l, p_l = self.layers[depth - 1], self.layers[depth - 2]
-        if isinstance(l, FullyConnected):
-            return p_l.get_outputs()
-        elif isinstance(l, Conv2D):
-            x_start = node[0] * l.strides[0] - l.padding[0]
-            x_rng = range(x_start, x_start + l.kernels.shape[0])
-            x = [i for i in x_rng if i >= 0 and i < l.input_shape[0]]
-            y_start = node[1] * l.strides[1] - l.padding[1]
-            y_rng = range(y_start, y_start + l.kernels.shape[1])
-            y = [i for i in y_rng if i>=0 and i < l.input_shape[1]]
-            z = [i for i in range(l.kernels.shape[2])]
+        if isinstance(s_node, Gemm):
+            return p_node.get_outputs()
+
+        elif isinstance(s_node, Conv):
+            x_start = index[0] * s_node.strides[0] - s_node.padding[0]
+            x_rng = range(x_start, x_start + s_node.height)
+            x = [i for i in x_rng if i >= 0 and i < s_node.height]
+            y_start = index[1] * s_node.strides[1] - s_node.padding[1]
+            y_rng = range(y_start, y_start + s_node.width)
+            y = [i for i in y_rng if i >= 0 and i < s_node.width]
+            z = [i for i in range(l.kernels.in_ch)]
+
             return [i for i in itertools.product(*[x,y,z])]
-
-    def simplify(self):
-        if self.layers is None:
-            return
-
-        # find first non linear layer
-        non_linear_idx = 0
-        for i in self.layers:
-            if i.activation != Activations.relu:
-                non_linear_idx += 1
-            else:
-                break
- 
-        if non_linear_idx == 0:
-            return 
-
-        # merge linear layers into one fully connected
-        weights, bias  = self._simplify_layer(self.layers[non_linear_idx])
-        for i in range(non_linear_idx - 1, -1, -1):
-            w, b = self._simplify_layer(self.layers[i])
-            bias = weights @ b + bias 
-            weights = weights @ w 
-       
-        # simplify 
-        fc = FullyConnected(
-            (self.layers[0].input_size, ), 
-            (self.layers[non_linear_idx].output_size, ),
-            weights,
-            bias,
-            self.layers[non_linear_idx].activation,
-            1
-        )
-        for i in self.layers[non_linear_idx + 1:]:
-            i.depth -= non_linear_idx
-
-        self.layers = [fc] + self.layers[non_linear_idx + 1:]
-
-    def _simplify_layer(self, layer):
-        if isinstance(layer, FullyConnected):
-            weights, bias =  layer.weights, layer.bias
-        elif isinstance(layer, Conv2D):
-            M, N, O, K = layer.kernels.shape
-            sz_kernel = int(layer.output_size / K)
-            pad = Conv2D.pad(
-                np.arange(layer.input_size).reshape(layer.input_shape),
-                layer.padding, 
-                values=(layer.input_size, layer.input_size)
-            )
-            im2col = np.repeat(
-                Conv2D.im2col(pad, (M, N), layer.strides), 
-                K,
-                axis=1
-            )
-            kernel = np.array(
-                [
-                    layer.kernels[:,:,:,i].flatten()
-                    for j in range(sz_kernel) for i in range(K)
-                ]
-            ).T  
-            weights = np.zeros((layer.output_size, layer.input_size+1), dtype='float64')
-            weights[range(layer.output_size), im2col] = kernel
-            weights = np.delete(weights, layer.input_size, 1)
-            bias = np.array([layer.bias for i in range(sz_kernel)], dtype='float64').flatten()
-        else:
-            assert False, 'Layer not currently supported'
-
-        return weights, bias
-
-
-

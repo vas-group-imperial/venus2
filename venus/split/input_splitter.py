@@ -13,7 +13,7 @@
 import random
 
 from venus.verification.verification_problem import VerificationProblem
-from venus.network.layers import Input
+from venus.network.node import Input
 
 class InputSplitter:
     """
@@ -24,15 +24,13 @@ class InputSplitter:
         """
         Arguments:
 
-            prob: VerificationProblem to split.
-
+            prob:
+                The VerificationProblem.
             init_st_ratio:
-                double of the stability ratio of the original
-                VerificationProblem.
+                Dtability ratio of the original VerificationProblem.
             config:
-                configuration.
+                Configuration.
         """
-
         self.prob = prob
         self.init_st_ratio = init_st_ratio
         self.config = config
@@ -67,25 +65,25 @@ class InputSplitter:
 
             list of VerificationProblem
         """
-        if prob is None: prob = self.prob
-        size = prob.spec.input_layer.input_size
+        if prob is None:
+            prob = self.prob
         best_ratio = 0
         best_prob1 = None
         best_prob2 = None
 
-        if size < self.config.SPLITTER.SMALL_N_INPUT_DIMENSIONS:
+        if prob.spec.input_node.output_size < self.config.SPLITTER.SMALL_N_INPUT_DIMENSIONS:
             #If the number of input dimensions is not big, choose the best
             #dimension to split
-            for dim in range(size):
+            for dim in prob.spec.input_node.get_outputs():
                 prob1, prob2 = self.split_dimension(prob, dim)
-                ratio = (prob1.stability_ratio + prob2.stability_ratio)/2
-                if ratio > best_ratio:
+                ratio = (prob1.stability_ratio + prob2.stability_ratio) / 2
+                if ratio >= best_ratio:
                     best_ratio = ratio
                     best_prob1 = prob1
                     best_prob2 = prob2
         else:
             #Otherwise split randomly
-            dim = random.randint(0, size - 1)
+            dim = random.choice(prob.spec.input_node.get_outputs())
             best_prob1, best_prob2 =  self.split_dimension(prob, dim)
 
         return [best_prob1, best_prob2]
@@ -107,23 +105,24 @@ class InputSplitter:
 
             pair of VerificationProblem
         """
-        l = prob.spec.input_layer.pre_bounds.lower
-        u = prob.spec.input_layer.pre_bounds.upper
+        l = prob.spec.input_node.bounds.lower
+        u = prob.spec.input_node.bounds.upper
         split_point = (l[dim] + u[dim]) / 2
         l1 = l.copy()
         l1[dim] = split_point
         prob1 = VerificationProblem(
             prob.nn.copy(),
-            prob.spec.copy(Input(l1,u)),
+            prob.spec.copy(Input(l1, u, self.config)),
             prob.depth + 1,
             self.config
         )
         prob1.bound_analysis()
+
         u2 = u.copy()
         u2[dim] = split_point
         prob2 = VerificationProblem(
             prob.nn.copy(),
-            prob.spec.copy(Input(l,u2)),
+            prob.spec.copy(Input(l, u2, self.config)),
             prob.depth + 1,
             self.config
         )

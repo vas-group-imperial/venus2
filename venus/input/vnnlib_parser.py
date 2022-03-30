@@ -18,29 +18,33 @@ from sly import Parser
 from venus.specification.formula import Formula, StateCoordinate, VarConstConstraint, VarVarConstraint, ConjFormula, \
     DisjFormula, NAryConjFormula, NAryDisjFormula, NegationFormula
 from venus.specification.specification import Specification
-from venus.network.layers import Input
+from venus.network.node import Input
 
 
 
 class VNNLIBParser:
 
-    def __init__(self, pf, X_SZ, Y_SZ, config):
+    def __init__(self, pf, input_shape, config):
         self.pf = pf
-        self.X_SZ = X_SZ
-        self.Y_SZ = Y_SZ
+        self.input_shape = input_shape
+        self.X_SZ = np.prod(input_shape)
         self.config = config
 
     def parse(self):
         with open(self.pf, 'r') as f:
             s = f.read()
         lexer = VNNLexer()
-        parser = VNNParser(self.X_SZ, self.Y_SZ, self.config)
+        parser = VNNParser(self.X_SZ, self.config)
         i_b, o_f, i_cl = parser.parse(lexer.tokenize(s))
         specs = []
         if len(i_cl) == 0:
             specs.append(
                 Specification(
-                    Input(i_b[0], i_b[1]),
+                    Input(
+                        i_b[0].reshape(self.input_shape),
+                        i_b[1].reshape(self.input_shape),
+                        self.config
+                    ),
                     NegationFormula(o_f).to_NNF(),
                     os.path.basename(self.pf)[1]
                 )
@@ -105,10 +109,9 @@ class VNNParser(Parser):
     tokens = VNNLexer.tokens
     TermTuple = collections.namedtuple('term_tuple', ['type', 'index', 'sense', 'bound'])
 
-    def __init__(self, X_SZ, Y_SZ, config):
+    def __init__(self, X_SZ, config):
         self.env = { }
         self.X_SZ = X_SZ
-        self.Y_SZ = Y_SZ
         self.config = config
         self.i_b = [np.ones(self.X_SZ, dtype=config.PRECISION) * -math.inf, 
                     np.ones(self.X_SZ, dtype=config.PRECISION) * math.inf]
@@ -265,7 +268,6 @@ class VNNParser(Parser):
     def output_logic_clauses(self, p):
         return p.output_logic_clauses + [p.output_logic_clause]
 
-
     @_('LPAR AND output_logic_clauses RPAR')
     def output_and_clause(self, p):
         if len(p.output_logic_clauses) == 1:
@@ -292,7 +294,6 @@ class VNNParser(Parser):
             return DisjFormula(p.output_logic_clauses[0], p.output_logic_clauses[1])
         else:
             return NAryDisjFormula(p.output_logic_clauses)
-
 
     @_('LPAR OR output_terms RPAR')
     def output_or_clause(self, p):

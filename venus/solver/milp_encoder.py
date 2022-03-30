@@ -10,9 +10,12 @@
 # ************
 
 from gurobipy import *
-from venus.network.layers import Input, FullyConnected, Conv2D, GlobalAveragePooling
+from venus.network.node import Node, Relu, Input, Gemm, Conv, Sub, Add, Flatten, MatMul, BatchNormalization
 from venus.dependency.dependency_graph import DependencyGraph
-from venus.network.activations import Activations, ReluState
+from venus.dependency.dependency_type import DependencyType
+from venus.common.utils import ReluState
+from venus.verification.verification_problem import VerificationProblem
+from venus.common.configuration import Config
 from venus.common.logger import get_logger
 from timeit import default_timer as timer
 import numpy as np
@@ -21,7 +24,7 @@ class MILPEncoder:
 
     logger = None
     
-    def __init__(self, prob, config):
+    def __init__(self, prob: VerificationProblem, config: Config):
         """
         Arguments:
     
@@ -54,38 +57,13 @@ class MILPEncoder:
             env.start()
 
             gmodel = Model(env=env)
-            layers = [self.prob.spec.input_layer] + self.prob.nn.layers
-            
-            # Add MILP variables
-            for l in layers:
-                self.add_node_vars(l, gmodel)
-                if l.activation == Activations.relu:
-                    self.add_relu_delta_vars(l, gmodel)
-            # Add MILP constraints
-            for i in range(1,len(layers)):
-                if isinstance(layers[i],GlobalAveragePooling):
-                    self.add_global_average_pooling_constrs(layers[i],layers[i-1].out_vars,gmodel)
-                else:
-                    if isinstance(layers[i],Conv2D):
-                        preact = self.get_conv_preact(layers[i], layers[i-1].out_vars.reshape(layers[i].input_shape))
-                    elif isinstance(layers[i],FullyConnected):
-                        preact = self.get_fc_preact(layers[i], layers[i-1].out_vars.flatten())
-                    if layers[i].activation == Activations.linear:
-                        self.add_linear_constrs(layers[i], preact, gmodel)
-                    else:
-                        self.add_relu_constrs(layers[i], preact, gmodel)
-            self.add_output_constrs(layers[-1].out_vars, gmodel)
-            # Add dependency constraints
-            if self.config.SOLVER.INTRA_DEP_CONSTRS or self.config.SOLVER.INTER_DEP_CONSTRS:
-                dg = DependencyGraph(
-                    self.prob.spec.input_layer,
-                    self.prob.nn, 
-                    self.config.SOLVER.INTRA_DEP_CONSTRS,
-                    self.config.SOLVER.INTER_DEP_CONSTRS,
-                    self.config
-                )
-                self.add_dep_constrs(dg, gmodel) 
-                dg.build()
+            self.add_node_vars(gmodel)
+            self.add_node_constrs(gmodel)
+            self.add_output_constrs(self.prob.nn.tail, gmodel)
+            if self.config.SOLVER.INTRA_DEP_CONSTRS is True or \
+            self.config.SOLVER.INTER_DEP_CONSTRS is True:
+                self.add_dep_constrs(gmodel)
+
             gmodel.update()
             MILPEncoder.logger.info('Encoded verification problem {} into MILP, time: {:.2f}'.format(self.prob.id, timer() - start))
 
@@ -119,231 +97,227 @@ class MILPEncoder:
         gmodel.update()
 
         return gmodel
-     
-    def add_node_vars(self, layer, gmodel):
-        """
-        Creates a real-valued MILP variable for each of the nodes of a given
-        layer
-   
-        Arguments:
-            
-            layer: any layer  apart from output
-            
-            gmodel: gurobi model
-    
-        Returns: 
 
-            None
+    def add_node_vars(self, gmodel):
         """
+        Assigns MILP variables for encoding each of the outputs of a given
+        node.
+
+        Arguments:
+
+            gmodel:
+                The gurobi model
+        """
+        self.add_output_vars(self.prob.spec.input_node, gmodel)
+
+        for i in range(self.prob.nn.tail.depth + 1):
+            nodes = self.prob.nn.get_node_by_depth(i)
+            for j in nodes:
+                if isinstance(j, Relu):
+                    self.add_output_vars(j, gmodel)
+                    self.add_relu_delta_vars(j, gmodel)
+
+                elif isinstance(j, Flatten):
+                    j.out_vars = j.from_node[0].out_vars.flatten()
+
+                elif type(j) in [Gemm, Conv, Sub, BatchNormalization]:
+                    self.add_output_vars(j, gmodel)
+
+                else:
+                    raise TypeError(f'The MILP encoding of node {j} is not supported')
  
-        layer.out_vars = np.empty(shape=layer.output_shape, dtype=Var)
-        for i in layer.get_outputs():
-            layer.out_vars[i] = gmodel.addVar(lb=layer.post_bounds.lower[i], ub=layer.post_bounds.upper[i])
-    
-    def add_relu_delta_vars(self, layer, gmodel):
+    def add_output_vars(self, node: Node, gmodel: Model):
         """
-        Creates a binary MILP variable for encoding each of the nodes in a given
-        ReLU layer. The variables are prioritised for branching according to the
-        depth of the layer.
+        Creates a real-valued MILP variable for each of the outputs of a given
+        node.
+   
+        Arguments:
+            
+            node:
+                The node.
+            gmodel:
+                The gurobi model
+        """ 
+        node.out_vars = np.empty(shape=node.output_shape, dtype=Var)
+        for i in node.get_outputs():
+            node.out_vars[i] = gmodel.addVar(
+                lb=node.bounds.lower[i],
+                ub=node.bounds.upper[i]
+            )
+    
+    def add_relu_delta_vars(self, node: Relu, gmodel: Model):
+        """
+        Creates a binary MILP variable for encoding each of the units in a given
+        ReLU node. The variables are prioritised for branching according to the
+        depth of the node.
    
         Arguments: 
         
-            layer: any layer with ReLU activation
-            
-            gmodel: gurobi model
+            node:
+                The Relu node. 
+            gmodel:
+                The gurobi model
+        """
+        assert(isinstance(node, Relu)), "Cannot add delta variables to non-relu nodes."
     
-        Returns: 
+        node.delta_vars = np.empty(shape=node.output_shape, dtype=Var)
+        for i in node.get_outputs():
+            node.delta_vars[i] = gmodel.addVar(vtype=GRB.BINARY)
+            node.delta_vars[i].setAttr(GRB.Attr.BranchPriority, node.depth)
 
-            None
+    def add_node_constrs(self, gmodel):
         """
-        assert(layer.activation == Activations.relu)
+        Computes the output constraints of a node given the MILP variables of its
+        inputs. It assumes that variables have already been added.
+
+        Arguments:
+
+            gmodel:
+                The gurobi model.
+        """
+        for i in range(self.prob.nn.tail.depth + 1):
+            nodes = self.prob.nn.get_node_by_depth(i)
+            for j in nodes:
+                if isinstance(j, Relu):
+                    self.add_relu_constrs(j, gmodel)
+
+                elif isinstance(j, Flatten):
+                    pass
+
+                elif type(j) in [Gemm, MatMul, Sub, Add, BatchNormalization]:
+                    self.add_linear_constrs(j, gmodel)
+
+                else:
+                    raise TypeError(f'The MILP encoding of node {j} is not supported')
     
-        layer.delta_vars = np.empty(shape=layer.output_shape,dtype=Var)
-        for i in layer.get_outputs():
-            layer.delta_vars[i] = gmodel.addVar(vtype=GRB.BINARY)
-            layer.delta_vars[i].setAttr(GRB.Attr.BranchPriority, layer.depth)
-   
-   
-    def get_fc_preact(self, layer, in_vars):
+
+    def add_linear_constrs(self, node: Gemm, gmodel: Model):
         """
-        Computes the pre-activation of a dense layer given the MILP variables of
-        the activation of the previous layer.
+        Computes the output constraints of a linar node given the MILP
+        variables of its inputs. It assumes that variables have already been
+        added.
     
         Arguments:
             
-            layer: dense layer.
+            node: 
+                The node. 
+            gmodel:
+                Gurobi model.
+        """
+        assert type(node) in [Gemm, MatMul, Sub, Add, BatchNormalization], f"Cannot compute sub onstraints for type(j) nodes."
         
-            in_vars: vector of the MILP variables of  the activations of the
-            previous layer.
-    
-        Returns: 
+        if type(node) in ['Sub', 'Add'] and node.const is not None:
+            output = node.forward(node.from_node[0].out_vars, node.from_node[1].out_vars)
+        
+        else:
+            output = node.forward(node.from_node[0].out_vars)
 
-            Vector of the pre-activations of the layer.
+
+        for i in node.get_outputs():
+            gmodel.addConstr(
+                node.out_vars[i] == output[i]
+            )
+ 
+
+    def add_relu_constrs(self, node: Relu, gmodel: Model, linear_approx=False):
         """
-        assert(isinstance(layer,FullyConnected))
-    
-        return layer.weights.dot(in_vars) + layer.bias
-    
-    def get_conv_preact(self, layer, in_vars):
-        """
-        Computes the pre-activation of a convolutional layer given the MILP
-        variables of the activation of the previous layer.
-    
+        Computes the output constraints of a relu node given the MILP variables
+        of its inputs.
+
         Arguments:  
-            
-            layer: convolutional layer.
-        
-            in_vars: matrix of the MILP variables of  the activations of the
-            previous layer.
-    
-        Returns: 
 
-            Matrix of the pre-activations of the layer.
+            node: 
+                Relu node. 
+            gmodel:
+                Gurobi model.
         """
-        assert(isinstance(layer,Conv2D))
-        KS = layer.kernels.shape[0:-2]
-        inp = Conv2D.pad(in_vars, layer.padding)
-        inp_strech = Conv2D.im2col(inp, KS, layer.strides)
-        kernel_strech = np.array( [ layer.kernels[:,:,:,i].flatten() for i in range(layer.kernels.shape[-1])],dtype='float64')
-        conv = kernel_strech.dot(inp_strech).T.reshape(layer.output_shape) + layer.bias
-
-        return conv
-
-    def add_linear_constrs(self, layer, preact, gmodel): 
-        """
-        Creates MILP constraints for the output of a layer with linear
-        activations.
+        assert(isinstance(node, Relu)), "Cannot compute relu constraints for non-relu nodes."
    
-        Arguments:
-        
-            layer: layer with linear activation.
-            
-            preact: array of MILP expressions of the pre-activation of the
-            layer.
-    
-        Returns: 
-            
-            None
-        """
-        assert(layer.activation == Activations.linear)
-    
-        for i in layer.get_outputs():
-            gmodel.addConstr(layer.out_vars[i] == preact[i])
-    
-    def add_relu_constrs(self, layer, preact, gmodel,
-                         linear_approx=False):
-        """
-        Creates MILP constraints for the output of a layer with relu
-        activations
-   
-        Arguments: 
-            
-            layer: layer with relu activation.
-        
-            preact: array of MILP expressions of the pre-activation of the
-            layer.
-    
-        Returns: 
+        inp = node.from_node[0].out_vars
+        out = node.out_vars
+        delta = node.delta_vars
+        l = node.from_node[0].bounds.lower
+        u = node.from_node[0].bounds.upper
 
-            None
-        """
-        assert(layer.activation == Activations.relu)
-    
-        out = layer.out_vars
-        delta = layer.delta_vars
-        l = layer.pre_bounds.lower
-        u = layer.pre_bounds.upper
-        for i in layer.get_outputs():
-            if l[i] >= 0 or layer.state[i] == ReluState.ACTIVE:
+        for i in node.get_outputs():
+            if l[i] >= 0 or node.state[i] == ReluState.ACTIVE:
                 # active node as per bounds or as per branching
-                gmodel.addConstr(out[i] == preact[i])
+                gmodel.addConstr(out[i] == inp[i])
+
             elif u[i] <= 0:
                 # inactive node as per bounds
                 gmodel.addConstr(out[i] == 0)
-            elif layer.dep_root[i]==False and layer.state[i]==ReluState.INACTIVE:
+
+            elif node.dep_root[i] == False and node.state[i] == ReluState.INACTIVE:
                 # non-root inactive node as per branching
                 gmodel.addConstr(out[i] == 0)
-            elif layer.dep_root[i]==True and layer.state[i] == ReluState.INACTIVE:
+
+            elif node.dep_root[i] == True and node.state[i] == ReluState.INACTIVE:
                 # root inactive node as per branching
                 gmodel.addConstr(out[i] == 0)
-                gmodel.addConstr(preact[i] <= 0)
+                gmodel.addConstr(inp[i] <= 0)
+
             else:
                 # unstable node
-                if linear_approx:
-                    gmodel.addConstr(out[i] >= preact[i])
+                if linear_approx is True:
+                    gmodel.addConstr(out[i] >= inp[i])
                     gmodel.addConstr(out[i] >= 0)
-                    gmodel.addConstr( out[i] <=
-                                (u[i]/(u[i]-l[i]))*(preact[i]-l[i]) )
+                    gmodel.addConstr( out[i] <= (u[i] / (u[i] - l[i])) * (inp[i] - l[i]))
                 else:
-                    gmodel.addConstr(out[i] >= preact[i])
-                    gmodel.addConstr(out[i] <= preact[i] - l[i] * (1 - delta[i]))
+                    gmodel.addConstr(out[i] >= inp[i])
+                    gmodel.addConstr(out[i] <= inp[i] - l[i] * (1 - delta[i]))
                     gmodel.addConstr(out[i] <= u[i] * delta[i])
-    
-    
-    def add_global_average_pooling_constrs(self, layer, inp, gmodel):
-        """
-        Creates MILP constraints for a global average pooling layer.  [it is
-        assumed that inp is a four dimensional output of a convulutional layer]
-   
-        Arguments: 
-
-            layer: global average pooling layer.
-            
-            inp: array of MILP expressions of the input to the layer.
-    
-        Returns: 
-
-            None
-        """
-        for i in range(layer.output_shape[-1]):
-            gmodel.addConstr(layer.out_vars[i] == np.average(inp[:,:,i]))
-    
-    def add_output_constrs(self, out_vars, gmodel):
+     
+    def add_output_constrs(self, node: Node, gmodel: Model):
         """
         Creates MILP constraints for the output of the output layer.
    
         Arguments:
             
-            out_vars: np.araat of output MILP variables of the output layer.
-            
-            gmodel: gurobi model
-    
-        Returns: 
-
-            None
+            node:
+                The output node.
+            gmodel:
+                The gurobi model.
         """
-        constrs = self.prob.spec.get_output_constrs(gmodel, out_vars)
+        constrs = self.prob.spec.get_output_constrs(gmodel, node.out_vars)
         for constr in constrs:
             gmodel.addConstr(constr)
 
-    def add_dep_constrs(self, dg, gmodel):
+    def add_dep_constrs(self, gmodel):
         """
         Adds dependency constraints.
 
         Arguments:
 
-            dg: dependency graph.
-
-        Returns:
-
-            None
+            gmodel:
+                The gurobi model.
         """
-        for lhs_node in dg.nodes:
-            for rhs_node, dep in dg.nodes[lhs_node].adjacent:
+        dg = DependencyGraph(
+            self.prob.nn, 
+            self.config.SOLVER.INTRA_DEP_CONSTRS,
+            self.config.SOLVER.INTER_DEP_CONSTRS,
+            self.config
+        )
+        dg.build()
+
+        for i in dg.nodes:
+            for j in dg.nodes[i].adjacent:
                 # get the nodes in the dependency
-                l1 = node1.layer 
-                n1 = node1.index
-                delta1 = self.prob.nn.layers[l1].delta_vars[n1]
-                l2 = node2.layer 
-                n2 = node2.index
-                delta1 = self.prob.nn.layers[l2].delta_vars[n2]
+                lhs_node, lhs_idx = dg.nodes[i].nodeid, dg.nodes[i].index
+                delta1 = self.prob.nn.node[lhs_node].delta_vars[lhs_idx]
+                rhs_node, rhs_idx = dg.nodes[j].nodeid, dg.nodes[j].index
+                delta2 = self.prob.nn.node[rhs_node].delta_vars[rhs_idx]
+                dep = dg.nodes[i].adjacent[j]
+
                 # add the constraint as per the type of the dependency
                 if dep == DependencyType.INACTIVE_INACTIVE:
                     gmodel.addConstr(delta2 <= delta1)
-                elif dep == DepType.INACTIVE_ACTIVE:
-                    gmodel.addConstr(1 - delta2 <= delta1)
-                elif dep == DepType.ACTIVE_INACTIVE:
-                    gmodel.addConstr(delta2 <= 1 - delta1)
-                elif dep == DepType.ACTIVE_ACTIVE:
-                    gmodel.addConstr(1 - delta2 <= 1 - delta1)
 
+                elif dep == DependencyType.INACTIVE_ACTIVE:
+                    gmodel.addConstr(1 - delta2 <= delta1)
+
+                elif dep == DependencyType.ACTIVE_INACTIVE:
+                    gmodel.addConstr(delta2 <= 1 - delta1)
+
+                elif dep == DependencyType.ACTIVE_ACTIVE:
+                    gmodel.addConstr(1 - delta2 <= 1 - delta1)

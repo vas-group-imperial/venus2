@@ -13,8 +13,7 @@
 
 from venus.dependency.dependency_graph import DependencyGraph
 from venus.verification.verification_problem import VerificationProblem
-from venus.network.activations import ReluState
-from venus.common.utils import DFSState
+from venus.common.utils import DFSState, ReluState
 from venus.common.logger import get_logger
 
 class NodeSplitter(object):
@@ -52,7 +51,6 @@ class NodeSplitter(object):
         if self.initial_prob.depth >= self.config.SPLITTER.BRANCHING_DEPTH:
             return  []
         dg = DependencyGraph(
-            self.initial_prob.spec.input_layer,
             self.initial_prob.nn,
             self.config.SOLVER.INTRA_DEP_CONSTRS,
             self.config.SOLVER.INTER_DEP_CONSTRS,
@@ -75,6 +73,7 @@ class NodeSplitter(object):
                 node = dg.nodes[sn[next_node]]
                 next_node += 1
                 subprobs = self.split_node(prob, dg, node)
+
                 # if len(subprobs) != 0 and prob.check_bound_tightness(subprobs):
                 if len(subprobs) != 0: 
                     for subprob in subprobs:
@@ -83,10 +82,10 @@ class NodeSplitter(object):
                 else:
                     self.add_to_subprobs(prob)
        
-        return self.subprobs if split_flag else []
+        return self.subprobs if split_flag is True else []
 
 
-    def split_node(self, prob, dg, node):
+    def split_node(self, prob, dg, dgnode):
         """
         Splits a given verification problem  into a pair of subproblems.
         Splitting is via branching on the states of the ReLU node with the
@@ -94,11 +93,12 @@ class NodeSplitter(object):
 
         Arguments:
 
-            prob: VerificationProblem to split.
-
-            dg: DependencyGraph build for the initial VerificationProblem.
-
-            node: node to split.
+            prob:
+                VerificationProblem to split.
+            dg:
+                DependencyGraph build for the initial VerificationProblem.
+            node:
+                dependency graph node to split.
 
         Returns:
             
@@ -109,41 +109,44 @@ class NodeSplitter(object):
         prob1 = VerificationProblem(
             prob.nn.copy(),
             prob.spec.copy(),
-            prob.depth+1,
+            prob.depth + 1,
             self.config
         )
-        prob1.nn.layers[node.layer-1].dep_root[node.index] = True
-        if self.set_states(prob1, dg, node, ReluState.ACTIVE):
+        prob1.nn.node[dgnode.nodeid].dep_root[dgnode.index] = True
+        if self.set_states(prob1, dg, dgnode, ReluState.ACTIVE):
             prob1.bound_analysis()
             subprobs.append(prob1)
+
 
         prob2 = VerificationProblem(
             prob.nn.copy(),
             prob.spec.copy(),
-            prob.depth+1,
+            prob.depth + 1,
             self.config
         )
-        prob2.nn.layers[node.layer-1].dep_root[node.index] = True
-        if self.set_states(prob2, dg, node, ReluState.INACTIVE):
+
+        prob2.nn.node[dgnode.nodeid].dep_root[dgnode.index] = True
+        if self.set_states(prob2, dg, dgnode, ReluState.INACTIVE):
             prob2.bound_analysis()
             subprobs.append(prob2)
 
         return subprobs
 
-    def set_states(self, prob, dg, node, state):
+    def set_states(self, prob, dg, dgnode, state):
         """
         Sets the ReLU states of a given verification problem as per the
         dependency chain origininating from a given node. 
 
         Arguments:
 
-            prob: VerificationProblem.
-
-            dg: DependencyGraph build for the initial VerificationProblem.
-
-            node: node from which the dependency chain originates.
-
-            state: ReLU state of node.
+            prob:
+                VerificationProblem.
+            dg:
+                DependencyGraph build for the initial VerificationProblem.
+            dgnode:
+                dependency graph node from which the dependency chain originates.
+            state:
+                ReLU state of node.
 
         Returns:
             
@@ -151,24 +154,24 @@ class NodeSplitter(object):
             i.e., it was not the case that a stabilised node should (as per the
             dependency chain) be set to a different state.
         """
-        l, n = node.layer - 1, node.index
-
-        if prob.nn.layers[l].state[n] == state:
+        if prob.nn.node[dgnode.nodeid].state[dgnode.index] == state:
             return True
-        if prob.nn.layers[l].state[n] == ReluState.inverse(state):
+
+        if prob.nn.node[dgnode.nodeid].state[dgnode.index] == ReluState.inverse(state):
             # self.logger.warning(f'Inconsisteny in setting states, layer {l}, node {n}.')
             return False
         
-        prob.nn.layers[l].state[n] = state
+        prob.nn.node[dgnode.nodeid].state[dgnode.index] = state
 
-        node.dfs_state[state] = DFSState.VISITING
-        for key in node.adjacent:
+        dgnode.dfs_state[state] = DFSState.VISITING
+        for key in dgnode.adjacent:
             u = dg.nodes[key]
-            t = dg.get_state_for_dep(node, u, state)
+            t = dg.get_state_for_dep(dgnode, u, state)
             if not t is None and u.dfs_state[t] == DFSState.UNVISITED:
                 if not self.set_states(prob, dg, u, t):
                     return False
-        node.dfs_state[state] = DFSState.VISITED
+
+        dgnode.dfs_state[state] = DFSState.VISITED
 
         return True
 
@@ -178,7 +181,8 @@ class NodeSplitter(object):
 
         Arguments:
             
-            prob: VerificationProblem
+            prob:
+                VerificationProblem
 
         Returns:
             
@@ -193,7 +197,8 @@ class NodeSplitter(object):
 
         Arguments:
             
-            prob: VerificationProblem
+            prob:
+                VerificationProblem
 
         Returns:
             

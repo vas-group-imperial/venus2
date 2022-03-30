@@ -10,7 +10,6 @@
 # Mixed-Integer Programming Formulations for Trained Neural Networks.
 # ************
 
-from venus.network.activations import Activations
 from venus.solver.cuts import Cuts
 from venus.common.logger import get_logger
 from timeit import default_timer as timer
@@ -55,26 +54,29 @@ class IdealFormulation(Cuts):
             self.logger.info(f'Added ideal cuts, #cuts: {len(cuts)}, time: {te - ts}')
 
     def build_cuts(self):
+        """
+        Constructs ideal cuts.
+        """
         ts = timer()
         cuts = [] 
-        p_l = self.prob.spec.input_layer
-        for l in self.prob.nn.layers:
-            if not l.activation == Activations.relu or not self.freq_check(l.depth):
-                p_l = l
+        p_l = self.prob.spec.input_node
+        for _, i in self.prob.nn.node.items():
+            if i.has_relu_activation() is not True or \
+            len(i.from_node) != 1 or \
+            self.freq_check(i.depth) is not True:
                 continue
             counter = 0
-            s, e = self.prob.get_var_indices(l.depth, 'delta')
+            s, e = self.prob.get_var_indices(i.to_node[0].id, 'delta')
             delta = self.gmodel._vars[s: e]
-            _delta = np.asarray(self.gmodel.cbGetNodeRel(delta)).reshape(l.output_shape)
-            delta = np.asarray(delta).reshape(l.output_shape)
-            for nd in l.get_outputs():
-                if not l.is_stable(nd):
-                    if _delta[nd] > 0 and _delta[nd] < 1:
-                        ineqs = self.get_inequalities(l, p_l, nd, _delta)
-                        if self.cut_condition(ineqs, l, p_l, nd, _delta):
-                            lhs, rhs = self.build_constraint(ineqs, l, p_l, nd, delta)
+            _delta = np.asarray(self.gmodel.cbGetNodeRel(delta)).reshape(i.output_shape)
+            delta = np.asarray(delta).reshape(i.output_shape)
+            for j in i.get_outputs():
+                if not i.to_node[0].is_stable(j):
+                    if _delta[j] > 0 and _delta[j] < 1:
+                        ineqs = self.get_inequalities(i, j, _delta)
+                        if self.cut_condition(ineqs, i, j, _delta):
+                            lhs, rhs = self.build_constraint(ineqs, i, j, delta)
                             cuts.append((lhs,rhs))
-            p_l = l
         te = timer()
         if len(cuts) > 0:
             self.logger.info(f'Constructed ideal cuts, #cuts: {len(cuts)}, time: {te - ts}')
@@ -82,41 +84,42 @@ class IdealFormulation(Cuts):
         return cuts
 
 
-    def get_inequalities(self, layer, p_layer, node, _delta):
+    def get_inequalities(self, node, unit, _delta):
         """
         Derives set of inequality nodes. See Anderson et al. Strong
         Mixed-Integer Programming Formulations for Trained Neural Networks
 
         Arguments:
 
-            layer: Layer for deriving ideal cuts.
-
-            p_layer: the previous layer of layer
-
-            node: index of node of layer for deriving ideal cuts.
+            node:
+                node for deriving ideal cuts.
+            unit:
+                index of the unit in the node.
 
         Returns:
             
             list of indices of nodes of p_layer.
         """
 
-        (s, e) = self.prob.get_var_indices(p_layer.depth, 'out')
+        (s, e) = self.prob.get_var_indices(node.from_node[0].id, 'out')
         in_vars = self.gmodel._vars[s:e]
-        _in = np.asarray(self.gmodel.cbGetNodeRel(in_vars)).reshape(p_layer.output_shape)
-        neighbours = self.prob.nn.neighbours_from_p_layer(layer.depth, node)
-        pos_connected = [n for n in neighbours if layer.edge_weight(p_layer,node,n) > 0]
+        _in = np.asarray(self.gmodel.cbGetNodeRel(in_vars)).reshape(node.from_node[0].output_shape)
+        neighbours = self.prob.nn.calc_neighbouring_units(node.from_node[0], node, unit)
+        pos_connected = [i for i in neighbours if node.edge_weight(unit, i) > 0]
         ineqs = []
-        for p_node in pos_connected:
-            l = self._get_lb(p_layer, layer, p_node, node)
-            u = self._get_ub(p_layer, layer, p_node, node)
-            w = layer.edge_weight(p_layer,node,p_node) 
-            lhs = w * _in[p_node]
-            rhs = w * (l * (1 - _delta[node]) + u * _delta[node])
-            if lhs < rhs: ineqs.append(p_node)
+            
+        for p_unit in pos_connected:
+            l = self._get_lb(node.from_node[0], node, p_unit, unit)
+            u = self._get_ub(node.from_node[0], node, p_unit, unit)
+            w = node.edge_weight(unit, p_unit) 
+            lhs = w * _in[p_unit]
+            rhs = w * (l * (1 - _delta[unit]) + u * _delta[unit])
+            if lhs < rhs: 
+                ineqs.append(p_unit)
 
         return ineqs
 
-    def cut_condition(self, ineqs, layer, p_layer, node, _delta):
+    def cut_condition(self, ineqs, node, unit, _delta):
         """
         Checks required  inequality condition  on inequality nodes for adding a
         cut.  See Anderson et al. Strong Mixed-Integer Programming Formulations
@@ -124,88 +127,84 @@ class IdealFormulation(Cuts):
         
         Arguments:
             
-            ineqs: list of inequality nodes.
-
-            layer: Layer for deriving ideal cuts.
-
-            p_layer: the previous layer of layer
-
-            node: index of node of layer for deriving ideal cuts.
-
-            _delta: value of the binary variable associated with node.
+            ineqs:
+                list of inequality units.
+            node: 
+                The node for deriving ideal cuts.
+            unit:
+                the index of the unit in node.
+            _delta:
+                the value of the binary variable associated with the unit.
         
         Returns:
 
             bool expressing whether or not to add cuts.
         """
-
-        (s, e) = self.prob.get_var_indices(p_layer.depth, 'out')
+        (s, e) = self.prob.get_var_indices(node.from_node[0].id, 'out')
         in_vars = self.gmodel._vars[s:e]
-        _in = np.asarray(self.gmodel.cbGetNodeRel(in_vars)).reshape(p_layer.output_shape)
-        (s, e) = self.prob.get_var_indices(layer.depth, 'out')
+        _in = np.asarray(self.gmodel.cbGetNodeRel(in_vars)).reshape(node.from_node[0].output_shape)
+        (s, e) = self.prob.get_var_indices(node.to_node[0].id, 'out')
         out_vars = self.gmodel._vars[s:e]
-        _out = np.asarray(self.gmodel.cbGetNodeRel(out_vars)).reshape(layer.output_shape)
+        _out = np.asarray(self.gmodel.cbGetNodeRel(out_vars)).reshape(node.to_node[0].output_shape)
         s1 = 0
         s2 = 0
 
-        # for p_node in layer.neighbours(node):
-        for p_node in self.prob.nn.neighbours_from_p_layer(layer.depth, node):
-            l = self._get_lb(p_layer, layer, p_node, node)
-            u = self._get_ub(p_layer, layer, p_node, node)
-            if p_node in ineqs:
-                s1 += layer.edge_weight(p_layer,node,p_node) * (_in[p_node] - l * (1 - _delta[node]))
+        for p_unit in self.prob.nn.calc_neighbouring_units(node.from_node[0], node,  unit):
+            l = self._get_lb(node.from_node[0], node, p_unit, unit)
+            u = self._get_ub(node.from_node[0], node, p_unit, unit)
+            if p_unit in ineqs:
+                s1 += node.edge_weight(unit, p_unit) * (_in[p_unit] - l * (1 - _delta[unit]))
             else:
-                s2 += layer.edge_weight(p_layer,node,p_node) * u * _delta[node]
-        p = layer.get_bias(node) * _delta[node]
+                s2 += node.edge_weight(unit, p_unit) * u * _delta[unit]
+            
+            p = node.get_bias(unit) * _delta[unit]
         
-        return True if _out[node] > p + s1 + s2 else False
+        return bool(_out[unit] > p + s1 + s2)
 
 
-    def build_constraint(self, ineqs, layer, p_layer, node, delta):
+    def build_constraint(self, ineqs, node, unit, delta):
         """
         Builds the linear cut. See Anderson et al. Strong Mixed-Integer
         Programming Formulations for Trained Neural Networks.
 
         Arguments:
             
-            ineqs: list of inequality nodes.
-
-            layer: Layer for deriving ideal cuts.
-
-            p_layer: the previous layer of layer
-
-            node: index of node of layer for deriving ideal cuts.
-
-            _delta: binary variable associated with node.
+            ineqs:
+                list of inequality nodes.
+            node: 
+                Node for deriving ideal cuts.
+            unit: 
+                The index of the unit of node.
+            _delta:
+                The binary variable associated with the unit.
         
         Returns:
 
             a pair of Grurobi linear expression for lhs and the rhs of the
             linear cut.
         """
-
-        (s, e) = self.prob.get_var_indices(p_layer.depth, 'out')
-        in_vars = np.asarray(self.gmodel._vars[s:e]).reshape(p_layer.output_shape)
-        (s, e) = self.prob.get_var_indices(layer.depth, 'out')
-        out_vars = np.asarray(self.gmodel._vars[s:e]).reshape(layer.output_shape)
+        (s, e) = self.prob.get_var_indices(node.from_node[0].id, 'out')
+        in_vars = np.asarray(self.gmodel._vars[s:e]).reshape(node.from_node[0].output_shape)
+        (s, e) = self.prob.get_var_indices(node.to_node[0].id, 'out')
+        out_vars = np.asarray(self.gmodel._vars[s:e]).reshape(node.to_node[0].output_shape)
         le = LinExpr()
         s = 0
-        # for p_node in layer.neighbours(node):
-        for p_node in self.prob.nn.neighbours_from_p_layer(layer.depth, node):
-            l = self._get_lb(p_layer, layer, p_node, node)
-            u = self._get_ub(p_layer, layer, p_node, node)
-            if p_node in ineqs:
-                le.addTerms(layer.edge_weight(p_layer,node,p_node), in_vars[p_node])
-                le.addConstant(- l * layer.edge_weight(p_layer,node,p_node))
-                le.addTerms(l * layer.edge_weight(p_layer,node,p_node), delta[node])
+        for p_unit in self.prob.nn.calc_neighbouring_units(node.from_node[0], node, unit):
+            l = self._get_lb(node.from_node[0], node, p_unit, unit)
+            u = self._get_ub(node.from_node[0], node, p_unit, unit)
+            if p_unit in ineqs:
+                le.addTerms(node.edge_weight(unit, p_unit), in_vars[p_unit])
+                le.addConstant(- l * node.edge_weight(unit, p_unit))
+                le.addTerms(l * node.edge_weight(unit, p_unit), delta[unit])
             else:
-                s += layer.edge_weight(p_layer,node,p_node) * u
-        le.addTerms(s + layer.get_bias(node), delta[node])
+                s += node.edge_weight(unit, p_unit) * u
+        
+        le.addTerms(s + node.get_bias(unit), delta[unit])
 
-        return out_vars[node], le
+        return out_vars[unit], le
 
 
-    def _get_lb(self, p_l, l, p_n, n):
+    def _get_lb(self, p_n, n, p_idx, idx):
         """
         Helper function. Given two connected nodes, it returns the upper bound
         of the pointing node if the weight of the connecting edge negative;
@@ -213,21 +212,23 @@ class IdealFormulation(Cuts):
 
         Arguments:
 
-            p_l, l: two consequtive layers.
-
-            p_n, n: indices of nodes within p_l, l.
+            p_n, n:
+                two consequtive nodes.
+            p_idx, idx: 
+                indices of units in p_n and n.
 
         Returns:
                 
-            float of the lower or upper bound of p_n
+            float of the lower or upper bound of p_idx.
         """
         
-        if l.edge_weight(p_l,n,p_n) < 0:
-            return p_l.post_bounds.upper[p_n]
-        else:
-            return p_l.post_bounds.lower[p_n]
+        if n.edge_weight(idx, p_idx) < 0:
+            return p_n.bounds.upper[p_idx]
 
-    def _get_ub(self, p_l, l, p_n, n):
+        else:
+            return p_n.bounds.lower[p_idx]
+
+    def _get_ub(self, p_n, n, p_idx, idx):
         """
         Helper function. Given two connected nodes, it returns the lower bound
         of the pointing node if the weight of the connecting edge negative;
@@ -235,15 +236,17 @@ class IdealFormulation(Cuts):
 
         Arguments:
 
-            p_l, l: two consequtive layers.
-
-            p_n, n: indices of nodes within p_l, l.
+            p_n, n:
+                two consequtive nodes.
+            p_idx, idx: 
+                indices of units in p_n and n.
 
         Returns:
                 
             float of the lower or upper bound of p_n
         """
-        if l.edge_weight(p_l,n,p_n) < 0:
-            return p_l.post_bounds.lower[p_n] 
+        if n.edge_weight(idx, p_idx) < 0:
+            return p_n.bounds.lower[p_idx] 
+
         else:
-            return p_l.post_bounds.upper[p_n]
+            return p_n.bounds.upper[p_idx]

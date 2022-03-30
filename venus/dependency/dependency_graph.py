@@ -11,9 +11,9 @@
 
 from venus.dependency.dependency_graph_node import DependencyGraphNode
 from venus.dependency.dependency_type import DependencyType
+from venus.network.node import Gemm
 from venus.common.logger import get_logger
-from venus.network.activations import Activations, ReluState
-from venus.common.utils import DFSState
+from venus.common.utils import ReluState, DFSState
 from timeit import default_timer as timer
 import numpy as np
 import itertools
@@ -27,12 +27,10 @@ class DependencyGraph:
     logger = None
     DEP_DEGREE_THRESHOLD = 3
 
-    def __init__(self, input_layer, nn, intra, inter, config):
+    def __init__(self, nn, intra, inter, config):
         """
         Arguments:
 
-            input_layer: 
-                Input.
             nn:
                 Neural Network.
             intra:
@@ -43,7 +41,6 @@ class DependencyGraph:
                 Configuration. 
         """
 
-        self.input_layer = input_layer
         self.nn = nn
         self.config = config
         self.intra = intra
@@ -81,7 +78,8 @@ class DependencyGraph:
             '#inter deps: {}.'.format(
                 te-ts,
                 self.intra_deps_count,
-                self.inter_deps_count))
+                self.inter_deps_count
+            ))
 
     def build_inter_deps(self, delta_vals=None):
         """
@@ -97,79 +95,83 @@ class DependencyGraph:
             
             None
         """
-        layers = self.nn.layers
-        for i in range(len(layers)-1):
-            if not layers[i].activation==Activations.relu or not \
-            layers[i+1].activation == Activations.relu:
-                continue
-            v = None if delta_vals is None else delta_vals[i-1]
-            n_v = None if delta_vals is None else delta_vals[i]
-            self._layer_inter_deps(layers[i], layers[i+1], v, n_v)
+        for i in range(self.nn.tail.depth): 
+            nodes = self.nn.get_node_by_depth(i)
+            for j in nodes:
+                if j.has_relu_activation() is not True or \
+                len(j.to_node[0].to_node) != 1 or \
+                j.to_node[0].to_node[0].has_relu_activation() is not True:
+                    continue
+                v = None if delta_vals is None else delta_vals[j.to_node[0].id]
+                n_v = None if delta_vals is None else delta_vals[j.to_node[0].to_node[0].to_node[0].id]
+                self._layer_inter_deps(j, j.to_node[0].to_node[0], v, n_v)
                                                
 
-    def _layer_inter_deps(self, l, n_l, v=None, n_v=None):
+    def _layer_inter_deps(self, n, n_n, v=None, n_v=None):
         """
         Identifies inter-layer dependencies between a pair of consequtive
         layers.
 
         Arguments:
             
-            l: a ReLU-activation layer.
-
-            n_l: a ReLU-activation layer next to l.
-
-            v: list of current values of Gurobi binary variables for layer l.
-
-            n_v: list of current values of Gurobi binary variables for layer
-            n_l.
+            n:
+                a node with relu activatin.
+            n_n: 
+                a subsequent node with relu activation.
+            v:
+                list of current values of Gurobi binary variables for node n.
+            n_v:
+                list of current values of Gurobi binary variables for noden_n.
 
         Returns:
 
             None
         """ 
-        for j in n_l.get_outputs():
+        for j in n_n.get_outputs():
             d = None if n_v is None else n_v[j]
-            if n_l.is_stable(j,d): 
+            if n_n.to_node[0].is_stable(j, d): 
                 continue
-            for i in self.nn.neighbours_from_p_layer(n_l.depth, j):
+            for i in self.nn.calc_neighbouring_units(n, n_n, j):
                 d = None if v is None else v[i]
-                if l.is_stable(i,d):
+                if n.to_node[0].is_stable(i, d):
                     continue  
-                dep = self._node_inter_deps(l, n_l, i, j)
+                dep = self._node_inter_deps(n, n_n, i, j)
                 if dep is None:
                     continue
-                self.add_edge(l.depth, i, n_l.depth, j, dep)
-                self.add_edge(n_l.depth, j, l.depth, i, DependencyType.inverse(dep))
+
+                self.add_edge(n.to_node[0].id, i, n_n.to_node[0].id, j, dep)
+                self.add_edge(n_n.to_node[0].id, j, n.to_node[0].id, i, DependencyType.inverse(dep))
                 self.inter_deps_count += 1
 
-    def _node_inter_deps(self, l, n_l, nd, n_nd):
+    def _node_inter_deps(self, n, n_n, idx, n_idx):
         """
-        Identifies inter-layer dependencies between a pair of nodes in
-        consequtive layers.
+        Identifies inter-layer dependencies between a pair of units in
+        consequtive nodes.
 
         Arguments:
             
-            l: a ReLU-activation layer.
+            n: 
+                a node with relu activation.
+            n_n:
+                a subsequent node with relu activation.
+            idx:
+                the index of the unit in n.
+            n_idx:
+                the index of the unit in n_n.
 
-            n_l: a ReLU-activation layer next of l.
-
-            nd: index of a node within l.
-
-            n_nd: index of a node within n_l.
-    
         Returns:
 
             None
         """ 
-        weight = n_l.edge_weight(l,n_nd,nd)
+        weight = n_n.edge_weight(n_idx, idx)
         if weight > 0:
             # inactive -> inactive dependency
-            ub = n_l.pre_bounds.upper[n_nd] - weight * l.post_bounds.upper[nd]
+            ub = n_n.bounds.upper[n_idx] - weight * n.to_node[0].bounds.upper[idx]
             if ub <= 0:
                 return DependencyType.INACTIVE_INACTIVE
         else:
             # inactive -> active dependency
-            lb = n_l.pre_bounds.lower[n_nd] - weight * l.post_bounds.upper[nd]
+            lb = n_n.bounds.lower[n_idx] - weight * n.to_node[0].bounds.upper[idx]
             if lb >= 0:
                 return DependencyType.INACTIVE_ACTIVE
 
@@ -190,83 +192,84 @@ class DependencyGraph:
             
             None
         """
-        layers = [self.input_layer] + self.nn.layers
-        for i in range(1,len(layers)):
-            if not layers[i].activation == Activations.relu:
-                continue
-            # if not isinstance(layers[i], FullyConnected) \
-            # or not layers[i].activation == Activations.relu:
-                # continue
-            dvals = None if delta_vals is None else delta_vals[i-1]
-            self._layer_intra_deps(layers[i-1],layers[i],dvals)
+        for i in range(self.nn.tail.depth): 
+            nodes = self.nn.get_node_by_depth(i)
+            for j in nodes:
+                if isinstance(j, Gemm) is not True or j.has_relu_activation() is not True:
+                    continue
+                dvals = None if delta_vals is None else delta_vals[j.to_node[0].id]
+                self._layer_intra_deps(j, dvals)
 
 
-    def _layer_intra_deps(self, p_l, l, v=None):
+    def _layer_intra_deps(self, n, v=None):
         """
         Identifies intra-layer dependencies within a layer.
         
         Arguments:
             
-            l: ReLU-activation layer for which to identify dependencies.
-
-            p_l: the: previous layer to l.
-
-            v: list of current values of Gurobi binary variables for layer l.
+            n: 
+                a node with relu activation. 
+            v: 
+                list of current values of Gurobi binary variables for node n.
 
         Returns:
 
             None
         """ 
-        for (i,j) in list(itertools.combinations(l.get_outputs(), 2)):
-            # rnd = np.random.randint(0, 10, 1)
-            # if not rnd == 0: continue
+        for (i,j) in list(itertools.combinations(n.get_outputs(), 2)):
             d_i = None if v is None else v[i]
             d_j = None if v is None else v[j]
-            if l.is_stable(i,d_i) or l.is_stable(j,d_j) or not l.intra_connected(i,j):
+            if n.to_node[0].is_stable(i, d_i) or n.to_node[0].is_stable(j, d_j):
                 continue
-            dep = self._node_intra_dep(p_l, l, i, j)
+            dep = self._node_intra_dep(n, i, j)
             if dep is None:
                 continue 
-            self.add_edge(l.depth,i,l.depth,j,dep)
-            self.add_edge(l.depth,j,l.depth,i,DependencyType.inverse(dep))
+            self.add_edge(n.to_node[0].id, i, n.to_node[0].id, j, dep)
+            self.add_edge(n.to_node[0].id, j, n.to_node[0].id, i, DependencyType.inverse(dep))
             self.intra_deps_count += 1
     
-    def _node_intra_dep(self, p_l, l, n1, n2):
+    def _node_intra_dep(self, n, idx1, idx2):
         """
-        Identifies intra-layer dependencies between a pair of nodes within the
-        same layer.
+        Identifies intra-layer dependencies between a pair of units within the
+        same node.
 
         Arguments:
             
-            l: a ReLU-activation layer containing the nodes.
-
-            p_l: the previous layer to l.
-
-            nd: index of the firsr node.
-
-            n_nd: index of the second node.
+            n:
+                a node with relu activation.
+            idx1:
+                the index of the first unit.
+            idx2:
+                the index of the second unit.
     
         Returns:
 
             None
         """ 
-        bounds = p_l.post_bounds
-        bounds, w, b = l.joint_product(bounds, n1, n2)
-        # w = (l.weights[n1,:], l.weights[n2,:])
-        # b = (l.bias[n1], l.bias[n2])
-        min0, max0 = self._node_intra_dep_helper(w[0],w[1],b[0],b[1],bounds)
-        if min0 is None: return None
-        min1, max1 = self._node_intra_dep_helper(w[1],w[0],b[1],b[0],bounds)
-        if min1 is None: return None
+        bounds = n.from_node[0].bounds
+        w = (n.weights[idx1, :], n.weights[idx2, :])
+        b = (n.bias[idx1], n.bias[idx2])
+
+        min0, max0 = self._node_intra_dep_helper(w[0], w[1], b[0], b[1], bounds)
+        if min0 is None:
+            return None
+
+        min1, max1 = self._node_intra_dep_helper(w[1], w[0], b[1], b[0], bounds)
+        if min1 is None:
+            return None
 
         if max0 < 0 and max1 < 0:
             return DependencyType.ACTIVE_INACTIVE 
+
         elif min0 > 0 and min1 > 0:
             return DependencyType.INACTIVE_ACTIVE
+
         elif max0 < 0 and min1 > 0:
             return DependencyType.ACTIVE_ACTIVE
+
         elif min0 > 0 and max1 < 0:
             return DependencyType.INACTIVE_INACTIVE
+
         else:
             return None
  
@@ -293,20 +296,18 @@ class DependencyGraph:
             None
         """ 
         nonzero_index = 0
-        while w1[nonzero_index]==0 or w2[nonzero_index]==0:
+        while w1[nonzero_index] == 0 or w2[nonzero_index] == 0:
             nonzero_index += 1
-            if nonzero_index == len(w1): return None, None
-        wp = w1 - (w1[nonzero_index]/w2[nonzero_index])*w2
-        bp = b1 - (w1[nonzero_index]/w2[nonzero_index])*b2
-        weights_plus = np.clip(wp,0,math.inf)
-        weights_minus = np.clip(wp,-math.inf,0)
+            if nonzero_index == len(w1):
+                return None, None
+
+        wp = w1 - (w1[nonzero_index] / w2[nonzero_index]) * w2
+        bp = b1 - (w1[nonzero_index] / w2[nonzero_index]) * b2
+        weights_plus = np.clip(wp, 0, math.inf)
+        weights_minus = np.clip(wp, -math.inf, 0)
         _min = _max = 0
-        _min +=  weights_plus.dot(bounds.lower.flatten()) + \
-            weights_minus.dot(bounds.upper.flatten()) + \
-            bp
-        _max +=  weights_plus.dot(bounds.upper.flatten()) + \
-            weights_minus.dot(bounds.lower.flatten()) + \
-            bp
+        _min +=  weights_plus.dot(bounds.lower) + weights_minus.dot(bounds.upper) + bp
+        _max +=  weights_plus.dot(bounds.upper) + weights_minus.dot(bounds.lower) + bp
 
         return _min, _max
 

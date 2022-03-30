@@ -15,7 +15,8 @@ from venus.solver.ideal_formulation import IdealFormulation
 from venus.solver.dep_cuts import DepCuts
 from venus.solver.solve_result import SolveResult
 from venus.solver.solve_report import SolveReport
-from venus.network.activations import Activations, ReluState
+from venus.split.split_strategy import SplitStrategy
+from venus.common.utils import ReluState
 from venus.common.logger import get_logger
 from timeit import default_timer as timer
 import numpy as np
@@ -36,6 +37,7 @@ class MILPSolver:
                 Whether to use linear relaxation.
 
         """
+
         MILPSolver.prob = prob
         MILPSolver.config = config
         MILPSolver.status = SolveResult.UNDECIDED
@@ -53,17 +55,20 @@ class MILPSolver:
         start = timer()
         # encode into milp
         me = MILPEncoder(MILPSolver.prob, MILPSolver.config)
+
         if MILPSolver.lp == True:
             gmodel = me.lp_encode()
+
         else:
             gmodel = me.encode()
+
         # Set gurobi parameters
-        pgo = 1 if MILPSolver.config.SOLVER.PRINT_GUROBI_OUTPUT  == True else 0
-        gmodel.setParam('OUTPUT_FLAG', pgo)
-        tl = MILPSolver.config.SOLVER.TIME_LIMIT
-        if tl != -1 : gmodel.setParam('TIME_LIMIT', tl)
+        gmodel.setParam('OUTPUT_FLAG', 1 if MILPSolver.config.SOLVER.PRINT_GUROBI_OUTPUT  == True else 0)
+        if MILPSolver.config.SOLVER.TIME_LIMIT != -1: 
+            gmodel.setParam('TIME_LIMIT', MILPSolver.config.SOLVER.TIME_LIMIT)
         if not MILPSolver.config.SOLVER.DEFAULT_CUTS: 
             MILPSolver.disable_default_cuts(gmodel)
+        gmodel.setParam('FeasibilityTol', MILPSolver.config.SOLVER.FEASIBILITY_TOL)
         gmodel._vars = gmodel.getVars()
         # set callback cuts 
         MILPSolver.id_form = IdealFormulation(
@@ -87,10 +92,10 @@ class MILPSolver:
         if MILPSolver.status == SolveResult.BRANCH_THRESHOLD:
             result = SolveResult.BRANCH_THRESHOLD
         elif gmodel.status == GRB.OPTIMAL:
-            cex_shape = MILPSolver.prob.spec.input_layer.input_shape
+            cex_shape = MILPSolver.prob.spec.input_node.input_shape
             cex = np.zeros(cex_shape)
             for i in itertools.product(*[range(j) for j in cex_shape]):
-                cex[i] = MILPSolver.prob.spec.input_layer.out_vars[i].x
+                cex[i] = MILPSolver.prob.spec.input_node.out_vars[i].x
             result = SolveResult.UNSAFE
         elif gmodel.status == GRB.TIME_LIMIT:
             result = SolveResult.TIMEOUT
@@ -127,7 +132,9 @@ class MILPSolver:
                     MILPSolver.id_form.add_cuts()
                 if MILPSolver.config.SOLVER.dep_cuts_enabled():
                     MILPSolver.dep_cuts.add_cuts()
-        elif MILPSolver.config.SOLVER.MONITOR_SPLIT == True and where == GRB.Callback.MIP:
+        elif MILPSolver.config.SOLVER.MONITOR_SPLIT == True and \
+        MILPSolver.config.SPLITTER.SPLIT_STRATEGY != SplitStrategy.NONE and \
+        where == GRB.Callback.MIP:
             MILPSolver.monitor_milp_nodes(model)
 
 

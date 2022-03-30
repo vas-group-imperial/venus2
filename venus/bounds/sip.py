@@ -12,15 +12,11 @@
 import math
 import numpy as np
 from timeit import default_timer as timer
-
-from venus.network.layers import Layer, FullyConnected, Conv2D, MaxPooling
+import venus
+from venus.network.node import Node, Input, Gemm, Conv, Relu, Flatten, Sub, MatMul, Add
 from venus.bounds.bounds import Bounds
 from venus.bounds.equation import Equation
-from venus.network.activations import ReluApproximation
-from venus.network.activations import ReluState
-from venus.network.activations import Activations
 from venus.common.logger import get_logger
-from venus.bounds.osip import OSIP, OSIPMode
 from venus.common.configuration import Config
 from venus.specification.formula import Formula, TrueFormula, VarVarConstraint, DisjFormula, \
     NAryDisjFormula, ConjFormula, NAryConjFormula
@@ -31,12 +27,12 @@ class SIP:
 
     logger = None
 
-    def __init__(self, layers: list, config: Config, delta_flags=None):
+    def __init__(self, nn, config: Config, delta_flags=None):
         """
         Arguments:
 
-            layers:
-                A list [input,layer_1,....,layer_k] of the networks layers
+            nodes:
+                A list [input,layer_1,....,layer_k] of the networks nodes
                 including an input layer defining the input.
             config:
                 Configuration.
@@ -44,7 +40,7 @@ class SIP:
                 The logfile.
         """
 
-        self.layers = layers
+        self.nn = nn
         self.config = config
         self.delta_flags = delta_flags
         if SIP.logger is None and config.LOGGER.LOGFILE is not None:
@@ -66,161 +62,143 @@ class SIP:
                 None
         """
         start = timer()
-        for i in self.layers[1:-1]:
-            i.reset_state_flags()
-            if i.activation == Activations.linear:
-                continue
-            i.pre_bounds = self.get_pre_ia_bounds(i)
-            if i.get_unstable_count() == 0:
-                continue
-            if i.depth > 1:
-                pre_symb_concr_bounds = self.get_pre_symb_concr_bounds(i)
-                i.pre_bounds.lower[i.get_unstable_flag().reshape(i.output_shape)] = pre_symb_concr_bounds.lower
-                i.pre_bounds.upper[i.get_unstable_flag().reshape(i.output_shape)] = pre_symb_concr_bounds.upper
-                i.reset_state_flags()
-            
-            i.post_bounds = self.get_post_bounds(i)
+        saw_non_linear_node = False
+        for i in range(self.nn.tail.depth):
+            nodes = self.nn.get_node_by_depth(i)
+            for j in nodes:
+                j.bounds = self.compute_ia_bounds(j)
 
-        self.layers[-1].pre_bounds = self.get_pre_symb_concr_bounds(self.layers[-1])
-        self.layers[-1].post_bounds = self.get_post_bounds(self.layers[-1])
+                if j.has_relu_activation() is not True:
+                    continue
+
+                j.to_node[0].reset_state_flags()
+
+                if saw_non_linear_node is not True:
+                    saw_non_linear_node = True
+                    continue
+
+                if j.to_node[0].get_unstable_count() == 0:
+                    continue
+
+                symb_concr_bounds = self.compute_symb_concr_bounds(j)
+                j.bounds.lower[j.to_node[0].get_unstable_flag().reshape(j.output_shape)] = symb_concr_bounds.lower
+                j.bounds.upper[j.to_node[0].get_unstable_flag().reshape(j.output_shape)] = symb_concr_bounds.upper
+                j.to_node[0].reset_state_flags()
+
+
+        self.nn.tail.bounds = self.compute_symb_concr_bounds(self.nn.tail)
+        # print(np.average(self.nn.tail.bounds.lower))
 
         if self.logger is not None:
             SIP.logger.info('Bounds computed, time: {:.3f}, '.format(timer()-start))
 
 
-    def get_pre_ia_bounds(self, layer: Layer) -> list:
-        input_bounds = self.layers[layer.depth - 1].post_bounds
-        lower = layer.forward(input_bounds.lower, clip='+', add_bias=False) + \
-             layer.forward(input_bounds.upper, clip='-', add_bias=True)
-        upper = layer.forward(input_bounds.lower, clip='-', add_bias=False) + \
-             layer.forward(input_bounds.upper, clip='+', add_bias=True)
-        if self.delta_flags is not None:
-            lower[self.delta_flags[layer.depth - 1][0]] = 0
-            upper[self.delta_flags[layer.depth - 1][0]] = 0
-            lower[self.delta_flags[layer.depth - 1][1]] = np.clip(
-                lower[self.delta_flags[layer.depth - 1][1]],
+    def compute_ia_bounds(self, node: Node) -> list:
+        inp = node.from_node[0].bounds
+
+        if isinstance(node, Relu):
+            lower, upper = node.forward(inp.lower), node.forward(inp.upper)
+
+        elif isinstance(node, Flatten):
+            lower, upper = inp.lower, inp.upper
+
+        elif isinstance(node, Sub):
+            const_lower = node.const if node.const is not None else node.from_node[1].bounds.lower
+            const_upper = node.const if node.const is not None else node.from_node[1].bounds.upper
+            lower, upper = inp.lower - const_upper, inp.upper - const_lower
+
+        elif isinstance(node, Add):
+            const_lower = node.const if node.const is not None else node.from_node[1].bounds.lower
+            const_upper = node.const if node.const is not None else node.from_node[1].bounds.upper
+            lower, upper = inp.lower + const_lower, inp.upper + const_upper
+
+        elif type(node) in [Gemm, Conv]:
+            lower = node.forward(inp.lower, clip='+', add_bias=False) + \
+                node.forward(inp.upper, clip='-', add_bias=True)
+            upper = node.forward(inp.lower, clip='-', add_bias=False) + \
+                node.forward(inp.upper, clip='+', add_bias=True)
+
+        elif isinstance(node, MatMul):
+            lower = node.forward(inp.lower, clip='+') + node.forward(inp.upper, clip='-')
+            upper = node.forward(inp.lower, clip='-') + node.forward(inp.upper, clip='+')
+
+        else:
+            raise TypeError(f"IA Bounds computation for {type(node)} is not supported")
+        
+        if self.delta_flags is not None and node.has_relu_activation() is True:
+            lower[self.delta_flags[node.to_node[0].id][0]] = 0
+            upper[self.delta_flags[node.to_node[0].id][0]] = 0
+            lower[self.delta_flags[node.to_node[0].id][1]] = np.clip(
+                lower[self.delta_flags[node.to_node[0].id][1]],
                 0,
                 math.inf
             )
-            upper[self.delta_flags[layer.depth - 1][1]] = np.clip(
-                upper[self.delta_flags[layer.depth - 1][1]],
+            upper[self.delta_flags[node.to_node[0].id][1]] = np.clip(
+                upper[self.delta_flags[node.to_node[0].id][1]],
                 0,
                 math.inf
             )
 
         return Bounds(
-            lower.reshape(layer.output_shape),
-            upper.reshape(layer.output_shape)
+            lower.reshape(node.output_shape),
+            upper.reshape(node.output_shape)
         )
 
-    def get_pre_symb_concr_bounds(self, layer: Layer) -> Bounds:
-        pre_symb_eq = self.get_pre_symb_eq(layer)
-        return self.back_substitution(pre_symb_eq, layer.depth)
+    def compute_symb_concr_bounds(self, node: Node) -> Bounds:
+        symb_eq = self.compute_symb_eq(node)
 
-    def get_pre_symb_eq(self, layer: Layer) -> Equation:
-        flag = np.ones(layer.output_size, bool) if layer.depth == self.layers[-1].depth else layer.get_unstable_flag()
+        return self.back_substitution(symb_eq, node)
+
+    def compute_symb_eq(self, node: Node) -> Equation:
+        if len(node.to_node) == 0 or node.has_relu_activation() is not True:
+            flag = np.ones(node.output_size, bool)
+        else:
+            flag = node.to_node[0].get_unstable_flag()
         
-        return Equation.derive(
-                layer,
-                self.layers[layer.depth - 1],
-                flag
-        )
-
-
-    def get_post_bounds(self, layer):
-        if layer.activation == Activations.relu:
-            bounds = Bounds(
-                np.clip(layer.pre_bounds.lower, 0, math.inf),
-                np.clip(layer.pre_bounds.upper, 0, math.inf)
-            )
-
-            return bounds
-
-        return layer.pre_bounds
-
-
-    def __get_post_bounds(self, layer, pre_eqs, pre_b, relu_states):
-
-        if layer.activation == Activations.linear:
-            post_eqs = [(i, i) for i in pre_eqs]
-            post_b = pre_b
-
-        elif layer.activation == Activations.relu:
-            # if self.osip_eligibility(layer):
-                # approx = ReluApproximation.IDENTITY
-            # else:
-                # approx = self.params.RELU_APPROXIMATION
-            approx = self.config.SIP.RELU_APPROXIMATION
-
-            if relu_states is None:
-                post_eqs, post_b = self.relu(
-                    pre_eqs,
-                    pre_b,
-                    layer.get_inactive_flag(),
-                    layer.get_unstable_flag(),
-                    approx
-                )
-            else:
-                post_eq_r, post_b_r = self.relu(
-                    eq,
-                    pre_b[0],
-                    pre_b[1],
-                    approx
-                )
-                post_eq, post_b = self.runtime_bounds(
-                    post_eq_r[0],
-                    post_eq_r[1],
-                    eq,
-                    post_b_r[0],
-                    post_b_r[1],
-                    pre_b[0],
-                    pre_b[1],
-                    relu_states
-                )
-
-        return post_eqs,  post_b
+        return Equation.derive(node, flag)
 
     def osip_eligibility(self, layer):
-        if layer.depth == len(self.layers) - 1:
+        if layer.depth == len(self.nodes) - 1:
             return False
         if self.config.SIP.OSIP_CONV != OSIPMode.ON:
-            if isinstance(self.layers[layer.depth+1], Conv2D) \
+            if isinstance(self.nodes[layer.depth+1], Conv2D) \
             or isinstance(layer, Conv2D):
                 return False
         if self.config.SIP.OSIP_FC != OSIPMode.ON:
-            if isinstance(self.layers[layer.depth+1], FullyConnected) \
+            if isinstance(self.nodes[layer.depth+1], FullyConnected) \
             or isinstance(layer, FullyConnected):
                 return False
         
         return True
 
-    def back_substitution(self, eq, depth):
+    def back_substitution(self, eq, node):
         return Bounds(
-            self._back_substitution(eq, depth, 'lower'),
-            self._back_substitution(eq, depth, 'upper'),
+            self._back_substitution(eq, node.from_node[0], 'lower'),
+            self._back_substitution(eq, node.from_node[0], 'upper'),
         )
 
-    def _back_substitution(self, eq, depth, bound):
+    def _back_substitution(self, eq, node, bound):
         if bound not in ['lower', 'upper']:
             raise ValueError("Bound type {bound} not recognised.")
 
-        if self.layers[depth - 1].get_unstable_count() == 0  and  \
-        self.layers[depth - 1].get_active_count() == 0:
-            return eq.const
+        if isinstance(node, Input):
+            return eq.concrete_values(node.bounds.lower.flatten(), node.bounds.upper.flatten(), bound)
 
-        for i in range(depth - 1, 0, -1):
-            if self.layers[i].activation == Activations.relu:
-                eq = eq.interval_transpose(self.layers[i], bound)
-            elif self.layers[i].activation == Activations.linear:
-                eq = eq.transpose(self.layers[i])
+        elif type(node) in [Relu, Flatten]:
+            pass
+
+        elif node.has_relu_activation() is True:
+            if node.to_node[0].get_unstable_count() == 0  and  \
+            node.to_node[0].get_active_count() == 0:
+                return eq.const
             else:
-                raise ValueError("Activation {self.layers[i].activation} is not supported")
+                eq = eq.interval_transpose(node, bound)
 
-        return eq.concrete_values(
-            self.layers[0].pre_bounds.lower,
-            self.layers[0].pre_bounds.upper,
-            bound
-        )
+        else:
+            eq = eq.transpose(node)
+
+        return self._back_substitution(eq, node.from_node[0], bound)
+
 
     def max_pooling(self, layer, eqs, layer_bounds, input_bounds):
         if layer.pool_size == (2,2):
@@ -285,7 +263,7 @@ class SIP:
         [it is assumed that the previous layer is a convolutional layer]
 
         layer: a GlobalAveragePooling layer
-        eqs: list of linear equations of the outputs of the preceding layers in terms of their input variables
+        eqs: list of linear equations of the outputs of the preceding nodes in terms of their input variables
         input_bounds: the lower and upper bounds of the input layer 
 
         returns: linear equations of the outputs of the layer in terms of its input variables
@@ -381,7 +359,7 @@ class SIP:
 
     def simplify_formula(self, formula):
         if isinstance(formula, VarVarConstraint):
-            coeffs = np.zeros(shape=(1, self.layers[-1].output_size), dtype=self.config.PRECISION)
+            coeffs = np.zeros(shape=(1, self.nn.tail.output_size), dtype=self.config.PRECISION)
             const = np.array([0], dtype=self.config.PRECISION)
             if formula.sense == Formula.Sense.GT:
                 coeffs[0, formula.op1.i], coeffs[0, formula.op2.i] = 1, -1
@@ -392,7 +370,7 @@ class SIP:
             equation = Equation(coeffs, const)
             diff = self._back_substitution(
                 equation,
-                self.layers[-1].depth + 1,
+                self.nn.tail,
                 'lower'
             )
 

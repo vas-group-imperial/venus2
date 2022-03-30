@@ -9,7 +9,7 @@
 # Description: Dependency graph node class.
 # ************
 
-from venus.network.activations import ReluState
+from venus.common.utils import ReluState
 from venus.common.utils import DFSState
 
 class DependencyGraphNode(object):
@@ -17,19 +17,20 @@ class DependencyGraphNode(object):
     Node in a dependency graph
     """
 
-    def __init__(self, id, layer, index):
+    def __init__(self, id, nodeid, index):
         """
         Arguments: 
             
-            id: int of the id of the node.
-
-            layer: the layer the node.
-
-            index: the index of the node in layer.
+            id:
+                int of the id of the node.
+            node:
+                id of the network node.
+            index:
+                the index of the node in the network node.
         """
-        self.layer = layer
+        self.nodeid = nodeid
         self.index = index
-        self.id = (layer,index)
+        self.id = (nodeid, index)
         self.adjacent = {}
         self.dfs_state = {ReluState.ACTIVE: DFSState.UNVISITED, 
                           ReluState.INACTIVE: DFSState.UNVISITED}

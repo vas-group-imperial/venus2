@@ -15,7 +15,7 @@ from venus.split.node_splitter import NodeSplitter
 from venus.split.input_splitter import InputSplitter
 from venus.split.split_strategy import SplitStrategy
 from venus.verification.verification_problem import VerificationProblem
-from venus.network.activations import ReluApproximation
+from venus.common.utils import ReluApproximation
 from venus.common.logger import get_logger
 import time
 
@@ -170,7 +170,7 @@ class SplitProcess(Process):
 
     def node_split(self, prob):
         """
-        Does node split. 
+        Does node split.
 
         Arguments:
             
@@ -183,7 +183,8 @@ class SplitProcess(Process):
         nsplitter = NodeSplitter(prob, self.config)
         subprobs = nsplitter.split()
         SplitProcess.logger.info(f"Finished node splitting - {len(subprobs)} subproblems")
-        if len(subprobs) > 0: self.node_split_count += 1
+        if len(subprobs) > 0:
+            self.node_split_count += 1
 
         return subprobs 
    

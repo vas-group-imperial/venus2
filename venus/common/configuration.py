@@ -6,12 +6,11 @@
 # Copyright: 2019-2021 by the authors listed in the AUTHORS file in the
 # top-level directory.
 # License: BSD 2-Clause (see the file LICENSE in the top-level directory).
-# Description: config class
+# Description: configuration class
 # ************
 
 from venus.split.split_strategy import SplitStrategy
-from venus.network.activations import ReluApproximation
-from venus.bounds.osip import OSIPMode
+from venus.common.utils import ReluApproximation, OSIPMode
 import multiprocessing
 import numpy as np
 
@@ -44,12 +43,14 @@ class Solver():
     INTRA_DEP_CONSTRS: bool = True
     # whether to monitor the number of MILP nodes solved and initiate
     # splititng only after BRANCH_THRESHOLD is reached.
-    MONITOR_SPLIT: bool = True
+    MONITOR_SPLIT: bool = False
     # Number of MILP nodes solved before initiating splitting. Splitting
     # will be initiated only if MONITOR_SPLIT is True.
     BRANCH_THRESHOLD: int = 500
     # Whether to print gurobi output
     PRINT_GUROBI_OUTPUT: bool = False
+    # Gurobi feasibility tolerance
+    FEASIBILITY_TOL: float = 10e-6
 
     def callback_enabled(self):
         """
@@ -102,7 +103,7 @@ class Splitter():
     STABILITY_RATIO_CUTOFF: float = 0.7
     # the number of parallel splitting processes is 2^d where d is the
     # number of the parameter
-    SPLIT_PROC_NUM: int = 0
+    SPLIT_PROC_NUM: int = 4
     # macimum splitting depth
     MAX_SPLIT_DEPTH: int = 1000
     INTER_DEPS = True
@@ -117,9 +118,9 @@ class SIP():
         self.OPTIMISE_MEMORY = False
         # formula simplificaton
         self.SIMPLIFY_FORMULA: bool = True
-        # whether to use oSIP for convolutional layers
+        # whether to use osip for convolutional layers
         self.OSIP_CONV = OSIPMode.OFF
-        # number of optimised nodes during oSIP for convolutional layers
+        # number of optimised nodes during osip for convolutional layers
         self.OSIP_CONV_NODES = 200
         # whether to use oSIP for fully connected layers
         self.OSIP_FC = OSIPMode.OFF
@@ -256,15 +257,16 @@ class Config:
 
     def set_nn_defaults(self, nn):
         if nn.is_fc():
+            print('asdsada')
             self.set_fc_defaults(nn)
-        else:
+        else: 
             self.set_conv_defaults(nn)
 
     def set_fc_defaults(self, nn):
         self.set_param_if_not_set('inter_deps', False)
         self.set_param_if_not_set('relu_approximation', 'venus')
         relus = nn.get_n_relu_nodes()
-        if nn.layers[0].input_size < 10:
+        if nn.head.input_size < 10:
             self.set_param_if_not_set('inter_dep_constrs', False)
             self.set_param_if_not_set('intra_dep_constrs', False)
             self.set_param_if_not_set('inter_dep_cuts', False)
@@ -292,7 +294,7 @@ class Config:
     def set_conv_defaults(self, nn):
         self.set_param_if_not_set('stability_ratio_cutoff', 0.9)
         relus = nn.get_n_relu_nodes()
-        if relus <= 10000 and len(nn.layers) <=5:
+        if relus <= 10000 and len(nn.node) <=5:
             self.set_param_if_not_set('relu_approximation', 'venus')
         else:
             self.set_param_if_not_set('relu_approximation', 'min_area')

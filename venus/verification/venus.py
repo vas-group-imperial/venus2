@@ -1,6 +1,5 @@
 # ************
-# File: venus.py
-# Top contributors (to current version): 
+# File: venus# Top contributors (to current version): 
 # 	Panagiotis Kouvaros (panagiotis.kouvaros@gmail.com)
 # This file is part of the Venus project.
 # Copyright: 2019-2021 by the authors listed in the AUTHORS file in the
@@ -74,8 +73,7 @@ class Venus:
             # load spec
             vnn_parser = VNNLIBParser(
                 query[1],
-                nn.layers[0].input_size,
-                nn.layers[-1].output_size,
+                nn.head.input_shape,
                 self.config
             )
             spec = vnn_parser.parse()

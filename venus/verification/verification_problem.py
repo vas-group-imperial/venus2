@@ -21,6 +21,8 @@ class VerificationProblem(object):
         self.id = VerificationProblem.prob_count
         self.nn = nn
         self.spec = spec
+        # couple neural network with spec
+        self.nn.head.from_node.insert(0, spec.input_node)
         self.depth = depth
         self.config = config
         self.stability_ratio = -1
@@ -50,7 +52,7 @@ class VerificationProblem(object):
                 if self._sip_bounds_computed:
                     return None
         # compute bounds
-        sip = SIP([self.spec.input_layer] + self.nn.layers, self.config, delta_flags)
+        sip = SIP(self.nn, self.config, delta_flags)
         sip.set_bounds()
         # flag the computation
         if delta_flags is None:
@@ -116,39 +118,56 @@ class VerificationProblem(object):
             return True
         if not self._sip_bounds_computed and not self.osip_bounds_computed:
             raise Exception('Bounds not computed')
-        lower_bounds = self.nn.layers[-1].post_bounds.lower
-        upper_bounds = self.nn.layers[-1].post_bounds.upper
-        return self.spec.is_satisfied(lower_bounds, upper_bounds)
+        
+        return self.spec.is_satisfied(
+            self.nn.tail.bounds.lower,
+            self.nn.tail.bounds.upper
+        )
 
-    def get_var_indices(self, layer, var_type):
+    def get_var_indices(self, nodeid, var_type):
         """
         Returns the indices of the MILP variables associated with a given
         layer.
 
         Arguments:
                 
-            layer: int of the index of the layer  for which to retrieve the
-            indices of the MILP variables
-
-            var_type: str: either 'out' for the output variables or 'delta' for
-            the binary variables.
+            nodeid:
+                the id of the node for which to retrieve the indices of the
+                MILP variables.
+            var_type:
+                either 'out' for the output variables or 'delta' for the binary
+                variables.
 
         Returns:
         
             pair of ints indicating the start and end positions of the indices
         """
-        layers = [self.spec.input_layer] + self.nn.layers
-        start = 0
-        end = 0
-        for i in range(layer):
-            start += layers[i].out_vars.size + layers[i].delta_vars.size
-        if var_type == 'out':
-            end = start + layers[layer].out_vars.size
-        elif var_type == 'delta':
-            start += layers[layer].out_vars.size
-            end = start + layers[layer].delta_vars.size
+        assert nodeid in self.nn.node or nodeid == self.spec.input_npde.id, \
+            f"Node id {nodeid} not  recognised."
 
-        return start, end
+        if  nodeid == self.spec.input_node.id:
+            return 0, self.spec.input_node.out_vars.size
+
+        start, end = self.spec.input_node.out_vars.size, 0
+
+        for i in range(self.nn.tail.depth + 1):
+            nodes = self.nn.get_node_by_depth(i)
+            for j in nodes:
+                if j.id == nodeid:
+                    if var_type == 'out':
+                        end = start + j.out_vars.size
+
+                    elif var_type == 'delta':
+                        start += j.out_vars.size
+                        end = start + j.delta_vars.size
+
+                    else:
+                        raise ValueError(f'Var type {var_type} is not recognised')
+
+                    return start, end
+
+                else:
+                    start += j.out_vars.size + j.delta_vars.size
 
 
     def to_string(self):
