@@ -37,11 +37,11 @@ class TestAcasXU(unittest.TestCase):
         """
         Verifies and tests the verification result of an ACASXU property.
 
-        Arguments:
-            
-            p: int of the property
-
-            x, y: ints of the network number
+        Arguments:           
+            p:
+                int of the property
+            x, y:
+                ints of the network number
         """
 
         nn =  f'nets/ACASXU_run2a_{x}_{y}_batch_2000.onnx'

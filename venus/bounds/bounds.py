@@ -21,13 +21,11 @@ class Bounds:
         Normalises the bounds
 
         Arguments:
-
-            mean: normalisation mean
-
-            std: normalisation standard deviation
-
+            mean:
+                normalisation mean
+            std:
+                normalisation standard deviation
         Returns
-
             None
         """
         self.lower = ( self.lower - mean ) / std
@@ -38,25 +36,28 @@ class Bounds:
         Clips the  bounds
 
         Arguments:
-
-            min_value: valid lower bound
-
-            max_value: valid upper bound
-
+            min_value:
+                valid lower bound
+            max_value:
+                valid upper bound
         Returns:
-
             None
         """
         self.lower = np.clip(self.lower, min_value, max_value) 
         self.upper = np.clip(self.upper, min_value, max_value) 
 
+    def get_range(self):
+        """
+        Returns the range of the bounds.
+        """
+        return self.upper - self.lower
 
     def copy(self):
         """
         Returns:
-
             a copy of the calling bounds object
         """
         return Bounds(self.lower.copy(), self.upper.copy())
+
 
 

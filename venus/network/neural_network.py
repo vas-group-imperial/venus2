@@ -105,13 +105,16 @@ class NeuralNetwork:
     def clean_vars(self):
         """
         Nulls out all MILP variables associate with the network.
-
-        Returns 
-
-            None
         """
-        for i in self.node:
+        for _, i in self.node.items():
             i.clean_vars()
+
+    def clean_outputs(self):
+        """
+        Nulls out all outputs of the nodes of the network.
+        """
+        for _, i in self.node.items():
+            i.clean_output()
 
     def predict(self, inp: np.array, mean: float=0, std: float=1):
         """
@@ -248,3 +251,25 @@ class NeuralNetwork:
             z = [i for i in range(l.kernels.in_ch)]
 
             return [i for i in itertools.product(*[x,y,z])]
+
+    def forward(self, inp):
+        """
+        Computes the output of the network given an input.
+
+        Arguments:
+            inp:
+                The input.
+        Returns
+            The output given inp.
+        """
+        self.head.from_node[0].output = inp
+
+        for i in range(self.tail.depth + 1):
+            nodes = self.get_node_by_depth(i)
+            for j in nodes:
+                j.forward(save_output=True)
+
+        output = self.tail.output.copy()
+        self.clean_outputs()
+
+        return output

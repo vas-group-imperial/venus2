@@ -54,8 +54,8 @@ class ONNXParser:
                 if i.input[0] == node.output[0]
             ])
 
-        head = venus_nodes[inp_node.output[0]]
-        lst = self.simplify(head)
+        lst = self.simplify(venus_nodes[inp_node.output[0]])
+        [head] = [i for i in lst if len(i.from_node) == 0]
         [tail] = [i for i in lst if len(i.to_node) == 0]
         self.update_depth(head)
 
@@ -76,8 +76,6 @@ class ONNXParser:
         # determine input shape
         if node.input[0] == inp.name:
             input_shape = [i.dim_value for i in inp.type.tensor_type.shape.dim]
-            # if len(input_shape) == 4:
-                # input_shape = (input_shape[2], input_shape[3], input_shape[1])
         else:
             input_shape = venus_nodes[node.input[0]].output_shape
         # process node
@@ -118,7 +116,6 @@ class ONNXParser:
                 vnode.add_from_node(venus_nodes[i])
 
         return vnode
-
 
     def parse_gemm(self, node: NodeProto, input_shape:tuple, init: list) -> Node:
         assert node.input[1] in init, \

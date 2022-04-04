@@ -17,6 +17,17 @@ class VerificationProblem(object):
     prob_count = 0
 
     def __init__(self, nn, spec, depth, config):
+        """
+        Arguments:
+            nn:
+                NeuralNetwork.
+            spec:
+                Specification.
+            depth:
+                Depth of the problem in the branch-and-bound tree.
+            config:
+                Configuration.
+        """
         VerificationProblem.prob_count += 1
         self.id = VerificationProblem.prob_count
         self.nn = nn
@@ -32,6 +43,14 @@ class VerificationProblem(object):
 
 
     def bound_analysis(self, delta_flags=None):
+        """
+        Computes bounds the network.
+
+        Arguments:
+            delta_flags:
+                list of current values of Gurobi binary variables; required
+                when the bounds are computed at runtime
+        """
         sip = self.set_bounds(delta_flags)
         if sip is not None:
             self.stability_ratio = self.nn.get_stability_ratio()
@@ -43,6 +62,14 @@ class VerificationProblem(object):
             return False
 
     def set_bounds(self, delta_flags=None):
+        """
+        Computes bounds the network.
+
+        Arguments:
+            delta_flags:
+                list of current values of Gurobi binary variables; required
+                when the bounds are computed at runtime
+        """
         # check if bounds are already computed
         if delta_flags is None:
             if self.config.SIP.is_osip_enabled():
@@ -167,7 +194,7 @@ class VerificationProblem(object):
                     return start, end
 
                 else:
-                    start += j.out_vars.size + j.delta_vars.size
+                    start += j.get_milp_var_size()
 
 
     def to_string(self):

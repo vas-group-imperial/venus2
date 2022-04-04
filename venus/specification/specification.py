@@ -18,7 +18,6 @@ class Specification:
     def __init__(self, input_node, output_formula, name=None):
         """
         Arguments:
-
             input_node:
                 The input node.
             output_formula:
@@ -33,14 +32,12 @@ class Specification:
         Encodes the output constraints of the spec into MILP
 
         Arguments:
-
-            gmodel: gurobi model
-
-            output_vars: list of gurobi variables of the output of the network
-
+            gmodel:
+                gurobi model.
+            output_vars:
+                list of gurobi variables of the output of the network.
         Returns:
-
-            list of gurobi constraints encoding the output formula
+            list of gurobi constraints encoding the output formula.
         """
         if self.output_formula is None:
             return []
@@ -53,16 +50,14 @@ class Specification:
         Encodes a given formula into MILP
 
         Arguments:
-
-            formula: formula to encode
-
-            gmodel: gurobi model
-
-            output_vars: list of gurobi variables of the output of the network
-        
+            formula:
+                formula to encode.
+            gmodel:
+                gurobi model.
+            output_vars:
+                list of gurobi variables of the output of the network. 
         Returns:
-
-            list of gurobi constraints encoding the given formula
+            list of gurobi constraints encoding the given formula.
         """
         assert isinstance(formula, Formula), f'Got {type(formula)} instead of Formula'
 
@@ -86,14 +81,12 @@ class Specification:
         Encodes an atomic constraint into MILP
 
         Arguments:
-
-            constraint: constraint to encode
-
-            output_vars: list of gurobi variables of the output of the network
-        
+            constraint:
+                constraint to encode.
+            output_vars:
+                list of gurobi variables of the output of the network.
         Returns:
-
-            list of gurobi constraints encoding the given constraint
+            list of gurobi constraints encoding the given constraint.
         """
 
         assert isinstance(constraint, Constraint), f'Got {type(constraint)} instead of Constraint'
@@ -129,14 +122,13 @@ class Specification:
 
         Arguments:
 
-            formula: conjunctive formula to encode
-
-            gmodel: gurobi model
-
-            output_vars: list of gurobi variables of the output of the network
-        
+            formula:
+                conjunctive formula to encode.
+            gmodel:
+                gurobi model
+            output_vars:
+                list of gurobi variables of the output of the network.
         Returns:
-
             list of gurobi constraints encoding the given formula
         """
         assert isinstance(formula, ConjFormula), f'Got {type(formula)} instead of ConjFormula'
@@ -148,15 +140,13 @@ class Specification:
         Encodes an nary conjunctive formula into MILP
 
         Arguments:
-
-            formula: nary conjunctive formula to encode
-
-            gmodel: gurobi model
-
-            output_vars: list of gurobi variables of the output of the network
-        
+            formula:
+                nary conjunctive formula to encode.
+            gmodel:
+                gurobi model.
+            output_vars:
+                list of gurobi variables of the output of the network. 
         Returns:
-
             list of gurobi constraints encoding the given formula
         """
         assert isinstance(formula, NAryConjFormula), f'Got {type(formula)} instead of NAryConjFormula'
@@ -172,15 +162,13 @@ class Specification:
         Encodes a disjunctive formula into MILP
 
         Arguments:
-
-            formula: disjunctive formula to encode
-
-            gmodel: gurobi model
-
-            output_vars: list of gurobi variables of the output of the network
-        
+            formula:
+                disjunctive formula to encode
+            gmodel:
+                gurobi model.
+            output_vars:
+                list of gurobi variables of the output of the network. 
         Returns:
-
             list of gurobi constraints encoding the given formula
         """
         assert isinstance(formula, DisjFormula), f'Got {type(formula)} instead of DisjFormula'
@@ -205,14 +193,13 @@ class Specification:
 
         Arguments:
 
-            formula: nary disjunctive formula to encode
-
-            gmodel: gurobi model
-
-            output_vars: list of gurobi variables of the output of the network
-        
+            formula:
+                nary disjunctive formula to encode.
+            gmodel:
+                gurobi model.
+            output_vars:
+                list of gurobi variables of the output of the network.
         Returns:
-
             list of gurobi constraints encoding the given formula
         """
         assert isinstance(formula, NAryDisjFormula), f'Got {type(formula)} instead of NAryDisjFormula'
@@ -239,12 +226,9 @@ class Specification:
         Returns a copy of the specificaton
 
         Arguments:
-
             input_node:
                 The input node to optionally update in the copy
-
         Returns:
-
             Specification
         """
         innode = input_node if input_node is not None else self.input_node.copy()
@@ -256,13 +240,11 @@ class Specification:
         Normalises the input bounds
 
         Arguments:
-
-            mean: normalisation mean
-
-            std: normalisation standard deviation
-
+            mean:
+                normalisation mean
+            std:
+                normalisation standard deviation
         Returns:
-
             None
         """
         self.input_layer.post_bounds.normalise(mean, std)
@@ -273,24 +255,44 @@ class Specification:
 
         Arguments:
 
-            min_value: valid lower bound
-
-            max_value: valid upper bound
-
-        Returns:
-            
-            None
+            min_value:
+                valid lower bound
+            max_value:
+                valid upper bound
         """
         self.input_layer.post_bounds.clip(min_value, max_value)
 
     def is_satisfied(self, lower_bounds, upper_bounds):
+        """
+        Checks whether the specificaton is satisfied given the network's output
+        lower and upper bounds.
+
+        Arguments:
+            lower_bounds:
+                The lower bounds.
+            upper_bounds:
+                The upper bounds.
+        Returns:
+            Whether or not the specification is satisfied.
+        """
         return self._is_satisfied(
-            self.output_formula,
-            lower_bounds.flatten(),
-            upper_bounds.flatten()
+            self.output_formula, lower_bounds.flatten(), upper_bounds.flatten()
         )
 
     def _is_satisfied(self, formula, lower_bounds, upper_bounds):
+        """
+        Helper function for is_satisfied.
+
+        Arguments:
+            formula:
+                formula whose satisfaction to check.
+            lower_bounds:
+                The lower bounds.
+            upper_bounds:
+                The upper bounds.
+        Returns:
+            Whether or not the given formula is satisfied.
+        """
         if isinstance(formula, TrueFormula):
             return True
         elif isinstance(formula, Constraint):
@@ -305,8 +307,8 @@ class Specification:
                     return lower_bounds[formula.op1.i] > upper_bounds[formula.op2.i]
                 if isinstance(formula, VarConstConstraint):
                     return lower_bounds[formula.op1.i] > formula.op2
-            # else:
-                # raise Exception('Unexpected sense', formula.sense)
+            else:
+                raise Exception('Unexpected sense', formula.sense)
         elif isinstance(formula, ConjFormula):
             return self._is_satisfied(formula.left, lower_bounds, upper_bounds) and \
                    self._is_satisfied(formula.right, lower_bounds, upper_bounds)
@@ -326,10 +328,62 @@ class Specification:
         else:
             raise Exception("Unexpected type of formula", type(formula))
 
+
+
+    def is_adversarial_robustness(self):
+        """
+        Checks whether the output constraints of the specificaton refer to an
+        adversarial robustness property.
+        """
+        return self._is_adversarial_robustness(self.output_formula)
+
+    def _is_adversarial_robustness(self, formula):
+        """
+        Helper function for is_satisfied.
+
+        Arguments:
+            formula:
+                formula whose satisfaction to check.
+            lower_bounds:
+                The lower bounds.
+            upper_bounds:
+                The upper bounds.
+        Returns:
+            Whether or not the given formula is satisfied.
+        """
+        if isinstance(formula, TrueFormula):
+            return -1
+        elif isinstance(formula, Constraint):
+            if formula.sense == Formula.Sense.LT:
+                return formula.op2.i if isinstance(formula, VarVarConstraint) else -1
+            elif formula.sense == Formula.Sense.GT:
+                return formula.op1.i if isinstance(formula, VarVarConstraint) else -1
+            else:
+                raise Exception('Unexpected sense', formula.sense)
+        elif type(formula) in [ConjFormula, DisjFormula]:
+            label1 = self._is_adversarial_robustness(formula.left)
+            if label1 == -1:
+                return -1 
+            label2 = self._is_adversarial_robustness(formula.right)
+            if label2 == -1:
+                return -1 
+            return -1 if label1 != label2 else label1
+        elif type(formula) in [NAryConjFormula, NAryDisjFormula]:
+            label1 = self._is_adversarial_robustness(formula.clauses[0])
+            if label1 == -1:
+                return -1
+            for clause in formula.clauses[1:]:
+                label2 = self._is_adversarial_robustness(clause)
+                if label2 != label1:
+                    return -1
+            return label1
+        else:
+            raise Exception("Unexpected type of formula", type(formula))
+
+
     def to_string(self):
         """
         Returns:
-
-            str describing the specification 
+            str describing the specification.
         """
         return self.name

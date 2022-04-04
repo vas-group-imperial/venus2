@@ -103,7 +103,7 @@ class Splitter():
     STABILITY_RATIO_CUTOFF: float = 0.7
     # the number of parallel splitting processes is 2^d where d is the
     # number of the parameter
-    SPLIT_PROC_NUM: int = 4
+    SPLIT_PROC_NUM: int = 2
     # macimum splitting depth
     MAX_SPLIT_DEPTH: int = 1000
     INTER_DEPS = True

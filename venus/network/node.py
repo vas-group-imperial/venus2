@@ -64,6 +64,7 @@ class Node:
         self.config = config
         self.out_vars =  np.empty(0)
         self.delta_vars = np.empty(0)
+        self.output = None
         self.outputs = None
         self.bounds = bounds
 
@@ -88,13 +89,15 @@ class Node:
     def clean_vars(self):
         """
         Nulls out all MILP variables associate with the network.
-
-        Returns 
-
-            None
         """
         self.out_vars = np.empty(0)
         self.delta_vars = np.empty(0)
+
+    def clean_output(self):
+        """
+        Nulls the output.
+        """
+        self.output = None
 
     def has_relu_activation(self) -> bool:
         """
@@ -258,6 +261,13 @@ class Input(Node):
             id=self.id
         )
 
+    def get_milp_var_size(self):
+        """
+        Returns the number of milp variables required for the milp encoding of
+        the node.
+        """
+        return self.output_size
+
 class Gemm(Node):
     def __init__(
         self,
@@ -326,6 +336,13 @@ class Gemm(Node):
             id=self.id
         )
 
+    def get_milp_var_size(self):
+        """
+        Returns the number of milp variables required for the milp encoding of
+        the node.
+        """
+        return self.output_size
+
     def get_bias(self, index: int) -> float:
         """
         Returns the bias of the given output.
@@ -360,12 +377,11 @@ class Gemm(Node):
         return self.weights[index1, index2]
     
 
-    def forward(self, inp: np.array, clip: str=None, add_bias: bool=True) -> np.array:
+    def forward(self, inp: np.array=None, clip: str=None, add_bias: bool=True, save_output=False) -> np.array:
         """
         Computes the output of the node given an input.
 
         Arguments:
-
             inp:
                 the input.
             clip:
@@ -373,11 +389,13 @@ class Gemm(Node):
                 negatives if set to '-'
             add_bias:
                 whether to add bias
-                
-        Returns:
-            
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
             the output of the node.
         """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0].output if inp is None else inp
 
         if clip is None:
             weights = self.weights
@@ -397,7 +415,12 @@ class Gemm(Node):
         if add_bias is True:
             output += self.bias
 
-        return output.reshape(self.output_shape)
+        output = output.reshape(self.output_shape)
+
+        if save_output:
+            self.output = output
+
+        return output
 
     def transpose(self, inp: np.array) -> np.array:
         """
@@ -478,6 +501,12 @@ class MatMul(Node):
             id=self.id
         )
 
+    def get_milp_var_size(self):
+        """
+        Returns the number of milp variables required for the milp encoding of
+        the node.
+        """
+        return self.output_size
 
     def edge_weight(self, index1: int, index2: int) -> float:
         """
@@ -498,12 +527,11 @@ class MatMul(Node):
         return self.weights[index1, index2]
     
 
-    def forward(self, inp: np.array, clip: str=None) -> np.array:
+    def forward(self, inp: np.array=None, clip: str=None, save_output=False) -> np.array:
         """
         Computes the output of the node given an input.
 
         Arguments:
-
             inp:
                 the input.
             clip:
@@ -511,11 +539,13 @@ class MatMul(Node):
                 negatives if set to '-'
             add_bias:
                 whether to add bias
-                
-        Returns:
-            
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
             the output of the node.
         """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0].output if inp is None else inp
 
         if clip is None:
             weights = self.weights
@@ -530,7 +560,12 @@ class MatMul(Node):
             raise ValueError(f'Kernel clip value {clip} not recognised')
 
 
-        return weights.dot(inp.flatten())
+        output = weights.dot(inp.flatten())
+
+        if save_output:
+            self.output = output
+
+        return output
 
 
     def transpose(self, inp: np.array) -> np.array:
@@ -632,6 +667,12 @@ class Conv(Node):
             id=self.id
         )
          
+    def get_milp_var_size(self):
+        """
+        Returns the number of milp variables required for the milp encoding of
+        the node.
+        """
+        return self.output_size
 
     def get_bias(self, index: tuple):
         """
@@ -672,12 +713,11 @@ class Conv(Node):
         return self.kernels[index1[2]][index2[2]][y][x]
 
 
-    def forward(self, inp: np.array, clip=None, add_bias=True) -> np.array:
+    def forward(self, inp: np.array=None, clip=None, add_bias=True, save_output=False) -> np.array:
         """
         Computes the output of the node given an input.
 
         Arguments:
-
             inp:
                 the input.
             clip:
@@ -685,11 +725,14 @@ class Conv(Node):
                 negatives if set to '-'
             add_bias:
                 whether to add bias
-                
-        Returns:
-            
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
             the output of the node.
         """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0].output if inp is None else inp
+
         if clip is None:
             pass
 
@@ -720,6 +763,9 @@ class Conv(Node):
                 [self.bias for i in range(int(self.output_size / self.out_ch))],
                 dtype=self.config.PRECISION
             ).flatten()
+
+        if save_output:
+            self.output = output
 
         return output
 
@@ -985,21 +1031,34 @@ class Relu(Node):
 
         return relu
 
-    def forward(self, inp: np.array) -> np.array:
+    def get_milp_var_size(self):
+        """
+        Returns the number of milp variables required for the milp encoding of
+        the node.
+        """
+        return 2 * self.output_size
+
+    def forward(self, inp: np.array=None, save_output=None) -> np.array:
         """
         Computes the output of the node given an input.
 
         Arguments:
-
             inp:
                 the input.
-                
+            save_output:
+                Whether to save the output in the node.
         Returns:
-            
             the output of the node.
         """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0].output if inp is None else inp
 
-        return np.clip(inp, 0, math.inf)
+        output = np.clip(inp, 0, math.inf)
+
+        if save_output:
+            self.output = output
+
+        return output
 
 
     def reset_state_flags(self):
@@ -1267,6 +1326,12 @@ class Reshape(Node):
             id=self.id
         )
 
+    def get_milp_var_size(self):
+        """
+        Returns the number of milp variables required for the milp encoding of
+        the node.
+        """
+        return 0
 
 class Flatten(Node):
     def __init__(
@@ -1321,6 +1386,43 @@ class Flatten(Node):
             bounds=self.bounds.copy(),
             id=self.id
         )
+
+    def get_milp_var_size(self):
+        """
+        Returns the number of milp variables required for the milp encoding of
+        the node.
+        """
+        return 0
+
+    def forward(self, inp: np.array=None, save_output=False) -> np.array:
+        """
+        Computes the output of the node given an input.
+
+        Arguments:
+            inp:
+                the input.
+            save_output:
+                Whether to save the output in the node.
+        Returns: 
+            the output of the node.
+        """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0].output if inp is None else inp
+
+        if isinstance(inp, tf.Tensor):
+            output = tf.reshape(inp, [-1])
+
+        elif isinstance(inp, np.ndarray):
+            output = inp.flatten()
+
+        else:
+            raise TypeError(f'Unsupported input type {type(inp)}')
+
+        if save_output:
+            self.output = output
+
+        return output
+
 
 class Sub(Node):
     def __init__(
@@ -1381,27 +1483,42 @@ class Sub(Node):
             id=self.id
         )
 
+    def get_milp_var_size(self):
+        """
+        Returns the number of milp variables required for the milp encoding of
+        the node.
+        """
+        return self.output_size
 
-    def forward(self, inp1: np.array, inp2: np.array=None) -> np.array:
+
+    def forward(self, inp1: np.array=None, inp2: np.array=None, save_output=False) -> np.array:
         """
         Computes the output of the node given an input.
 
         Arguments:
-
             inp1:
                 the first input.
             inp2:
                 the second input. If not set then the const of the node is
                 taken as second input.
-                
+            save_output:
+                Whether to save the output in the node.
         Returns:
-            
             the output of the node.
         """
-        assert inp2 is not None or self.const is not None, "Second input is not specified"
+
+        assert inp1 is not None or self.from_node[0].output is not None
+        assert inp2 is not None or self.const is not None
+
+        inp1 = self.from_node[0].output if inp1 is None else inp1
         inp2 = self.const if inp2 is None else inp2
 
-        return inp1 - inp2
+        output = inp1 - inp2
+
+        if save_output:
+            self.output = output
+
+        return output
 
     def transpose(self, inp: np.array) -> np.array:
         """
@@ -1485,26 +1602,40 @@ class Add(Node):
             id=self.id
         )
 
-    def forward(self, inp1: np.array, inp2: np.array=None) -> np.array:
+    def get_milp_var_size(self):
+        """
+        Returns the number of milp variables required for the milp encoding of
+        the node.
+        """
+        return self.output_size
+
+    def forward(self, inp1: np.array=None, inp2: np.array=None, save_output=False) -> np.array:
         """
         Computes the output of the node given an input.
 
         Arguments:
-
             inp1:
                 the first input.
             inp2:
                 the second input. If not set then the const of the node is
                 taken as second input.
-                
-        Returns:
-            
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
             the output of the node.
         """
-        assert inp2 is not None or self.const is not None, "Second input is not specified"
+        assert inp1 is not None or self.from_node[0].output is not None
+        assert inp2 is not None or self.const is not None
+
+        inp1 = self.from_node[0].output if inp is None else inp1
         inp2 = self.const if inp2 is None else inp2
 
-        return inp1 + inp2
+        output = inp1 + inp2
+
+        if save_output:
+            self.output = output
+
+        return output
 
     def transpose(self, inp: np.array) -> np.array:
         """
@@ -1604,21 +1735,34 @@ class BatchNormalization(Node):
             id=self.id
         )
 
-    def forward(self, inp: np.array) -> np.array:
+    def get_milp_var_size(self):
+        """
+        Returns the number of milp variables required for the milp encoding of
+        the node.
+        """
+        return self.output_size
+
+    def forward(self, inp: np.array=None, save_output=False) -> np.array:
         """
         Computes the output of the node given an input.
 
         Arguments:
-
             inp:
                 the input.
-                
-        Returns:
-            
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
             the output of the node.
         """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0].output if inp is None else inp1
 
-        return (inp - self.input_mean) / math.sqrt(self.input_var + self.epsilon) * self.scale + self.bias
+        output = (inp - self.input_mean) / math.sqrt(self.input_var + self.epsilon) * self.scale + self.bias
+
+        if save_output:
+            self.output = output
+
+        return output
 
     def transpose(self, inp: np.array) -> np.array:
         """
