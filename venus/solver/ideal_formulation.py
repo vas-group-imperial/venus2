@@ -67,15 +67,7 @@ class IdealFormulation(Cuts):
                 continue
             counter = 0
             s, e = self.prob.get_var_indices(i.to_node[0].id, 'delta')
-            print(s, e)
-            print(s, e)
-            print(s, e)
-            print(s, e)
             delta = self.gmodel._vars[s: e]
-            print(len(self.gmodel._vars), len(delta))
-            print(len(self.gmodel._vars), len(delta))
-            print(len(self.gmodel._vars), len(delta))
-            print(len(self.gmodel._vars), len(delta))
             _delta = np.asarray(self.gmodel.cbGetNodeRel(delta)).reshape(i.output_shape)
             delta = np.asarray(delta).reshape(i.output_shape)
             for j in i.get_outputs():
