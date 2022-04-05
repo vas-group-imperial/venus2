@@ -21,6 +21,7 @@ from venus.network.node import Input, Gemm, Relu, MatMul, Add, Constant
 from venus.bounds.sip import SIP
 from venus.common.logger import get_logger
 from venus.common.configuration import Config
+import tensorflow as tf
 
 class NeuralNetwork:
     
@@ -267,9 +268,13 @@ class NeuralNetwork:
         for i in range(self.tail.depth + 1):
             nodes = self.get_node_by_depth(i)
             for j in nodes:
+                print(j, j.id, j.from_node[0].id)
                 j.forward(save_output=True)
 
-        output = self.tail.output.copy()
+        output = tf.identity(self.tail.output)
+        print(output.get_shape)
+        print(output.get_shape)
+        print(output.get_shape)
         self.clean_outputs()
 
         return output

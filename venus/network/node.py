@@ -377,7 +377,13 @@ class Gemm(Node):
         return self.weights[index1, index2]
     
 
-    def forward(self, inp: np.array=None, clip: str=None, add_bias: bool=True, save_output=False) -> np.array:
+    def forward(
+        self,
+        inp: tf.Tensor=None,
+        clip: str=None,
+        add_bias: bool=True,
+        save_output=False
+    ) -> tf.Tensor:
         """
         Computes the output of the node given an input.
 
@@ -401,21 +407,19 @@ class Gemm(Node):
             weights = self.weights
 
         elif clip == '+':
-            weights = np.clip(self.weights, 0, math.inf)
+            weights = tf.clip_by_value(self.weights, 0, math.inf)
 
         elif clip == '-':
-            weights = np.clip(self.weights, -math.inf, 0)
+            weights = tf.clip_by_value(self.weights, -math.inf, 0)
 
         else:
             raise ValueError(f'Kernel clip value {clip} not recognised')
 
 
-        output = weights.dot(inp.flatten())
+        output = tf.matmul(weights, inp)
 
         if add_bias is True:
-            output += self.bias
-
-        output = output.reshape(self.output_shape)
+            output = tf.add(output, self.bias[:, np.newaxis])
 
         if save_output:
             self.output = output
@@ -527,7 +531,7 @@ class MatMul(Node):
         return self.weights[index1, index2]
     
 
-    def forward(self, inp: np.array=None, clip: str=None, save_output=False) -> np.array:
+    def forward(self, inp: tf.Tensor=None, clip: str=None, save_output=False) -> tf.Tensor:
         """
         Computes the output of the node given an input.
 
@@ -537,8 +541,6 @@ class MatMul(Node):
             clip:
                 clips the weights to positive values if set to '+' and to
                 negatives if set to '-'
-            add_bias:
-                whether to add bias
             save_output:
                 Whether to save the output in the node. 
         Returns: 
@@ -551,16 +553,16 @@ class MatMul(Node):
             weights = self.weights
 
         elif clip == '+':
-            weights = np.clip(self.weights, 0, math.inf)
+            weights = tf.clip_by_value(self.weights, 0, math.inf)
 
         elif clip == '-':
-            weights = np.clip(self.weights, -math.inf, 0)
+            weights = tf.clip_by_value(self.weights, -math.inf, 0)
 
         else:
             raise ValueError(f'Kernel clip value {clip} not recognised')
 
 
-        output = weights.dot(inp.flatten())
+        output = tf.matmul(weights, inp)
 
         if save_output:
             self.output = output
@@ -713,7 +715,13 @@ class Conv(Node):
         return self.kernels[index1[2]][index2[2]][y][x]
 
 
-    def forward(self, inp: np.array=None, clip=None, add_bias=True, save_output=False) -> np.array:
+    def forward(
+        self,
+        inp: tf.Tensor=None,
+        clip=None,
+        add_bias=True,
+        save_output=False
+    ) -> tf.Tensor:
         """
         Computes the output of the node given an input.
 
@@ -737,33 +745,27 @@ class Conv(Node):
             pass
 
         elif clip == '+':
-            kernels = np.clip(self.kernels, 0, math.inf)
+            kernels = tf.clip_by_value(self.kernels, 0, math.inf)
 
         elif clip == '-':
-            kernels = np.clip(self.kernels, -math.inf, 0)
+            kernels = tf.clip_by_value(self.kernels, -math.inf, 0)
 
         else:
             raise ValueError(f'Kernel clip value {kernel_clip} not recognised')
 
-        padded_input = Conv.pad(
-            inp.reshape(self.input_shape),
-            self.padding
-        )[np.newaxis, ...]
+        
+        padded_input = tf.pad(inp, self.padding)[tf.newaxis, :]
 
         output = tf.nn.convolution(
             padded_input,
-            kernels.transpose(2, 3, 1, 0),
+            tf.transpose(kernels, perm=[2, 3, 1, 0]),
             strides=self.strides,
             padding='VALID',
-        ).numpy().flatten()
-
+        )
 
         if add_bias is True:
-            output += np.array(
-                [self.bias for i in range(int(self.output_size / self.out_ch))],
-                dtype=self.config.PRECISION
-            ).flatten()
-
+            output = tf.add(output, self.bias)
+                    
         if save_output:
             self.output = output
 
@@ -1038,7 +1040,7 @@ class Relu(Node):
         """
         return 2 * self.output_size
 
-    def forward(self, inp: np.array=None, save_output=None) -> np.array:
+    def forward(self, inp: tf.Tensor=None, save_output=None) -> tf.Tensor:
         """
         Computes the output of the node given an input.
 
@@ -1053,7 +1055,7 @@ class Relu(Node):
         assert inp is not None or self.from_node[0].output is not None
         inp = self.from_node[0].output if inp is None else inp
 
-        output = np.clip(inp, 0, math.inf)
+        output = tf.clip_by_value(inp, 0, math.inf)
 
         if save_output:
             self.output = output
@@ -1394,7 +1396,7 @@ class Flatten(Node):
         """
         return 0
 
-    def forward(self, inp: np.array=None, save_output=False) -> np.array:
+    def forward(self, inp: tf.Tensor=None, save_output=False) -> tf.Tensor:
         """
         Computes the output of the node given an input.
 
@@ -1409,14 +1411,7 @@ class Flatten(Node):
         assert inp is not None or self.from_node[0].output is not None
         inp = self.from_node[0].output if inp is None else inp
 
-        if isinstance(inp, tf.Tensor):
-            output = tf.reshape(inp, [-1])
-
-        elif isinstance(inp, np.ndarray):
-            output = inp.flatten()
-
-        else:
-            raise TypeError(f'Unsupported input type {type(inp)}')
+        output = tf.reshape(inp, [-1])[:, tf.newaxis]
 
         if save_output:
             self.output = output
@@ -1513,7 +1508,7 @@ class Sub(Node):
         inp1 = self.from_node[0].output if inp1 is None else inp1
         inp2 = self.const if inp2 is None else inp2
 
-        output = inp1 - inp2
+        output = tf.subtract(inp1, inp2)
 
         if save_output:
             self.output = output
@@ -1609,7 +1604,7 @@ class Add(Node):
         """
         return self.output_size
 
-    def forward(self, inp1: np.array=None, inp2: np.array=None, save_output=False) -> np.array:
+    def forward(self, inp1: tf.Tensor=None, inp2: tf.Tensor=None, save_output=False) -> tf.Tensor:
         """
         Computes the output of the node given an input.
 
@@ -1630,7 +1625,7 @@ class Add(Node):
         inp1 = self.from_node[0].output if inp is None else inp1
         inp2 = self.const if inp2 is None else inp2
 
-        output = inp1 + inp2
+        output = tf.add(inp1, inp2)
 
         if save_output:
             self.output = output
@@ -1742,7 +1737,7 @@ class BatchNormalization(Node):
         """
         return self.output_size
 
-    def forward(self, inp: np.array=None, save_output=False) -> np.array:
+    def forward(self, inp: tf.Tensor=None, save_output=False) -> tf.Tensor:
         """
         Computes the output of the node given an input.
 
@@ -1757,7 +1752,17 @@ class BatchNormalization(Node):
         assert inp is not None or self.from_node[0].output is not None
         inp = self.from_node[0].output if inp is None else inp1
 
-        output = (inp - self.input_mean) / math.sqrt(self.input_var + self.epsilon) * self.scale + self.bias
+        output = tf.nn.batch_normalization(
+            self.input_mean,
+            self.input_var,
+            self.bias,
+            self.scale,
+            self.epsilon
+        )
+        # output = tf.subtract(inp, self.input_mean)
+        # output = tf.divide(output, math.sqrt(self.input_var + self.epsilon))
+        # output = tf.multiply(output, self.scale)
+        # output = tf.add(output, self.bias)
 
         if save_output:
             self.output = output

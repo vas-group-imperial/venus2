@@ -13,6 +13,7 @@ from timeit import default_timer as timer
 from venus.verification.verification_problem import VerificationProblem
 from venus.verification.verification_process import VerificationProcess
 from venus.verification.verification_report import VerificationReport
+from venus.verification.pgd import ProjectedGradientDescent
 from venus.split.split_process import SplitProcess
 from venus.split.input_splitter import InputSplitter
 from venus.split.split_strategy import SplitStrategy
@@ -78,6 +79,8 @@ class Verifier:
 
             VerificationReport
         """
+        pgd = ProjectedGradientDescent(self.config)
+        x = pgd.start(self.prob, 0.0001, 2)
         ver_report = VerificationReport(self.config.LOGGER.LOGFILE)
         start = timer()
         self.prob.bound_analysis()
