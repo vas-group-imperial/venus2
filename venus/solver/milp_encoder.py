@@ -9,7 +9,10 @@
 # Description: Builds a Gurobi Model encoding a verification problem.
 # ************
 
+import torch
+import numpy as np
 from gurobipy import *
+
 from venus.network.node import Node, Relu, Input, Gemm, Conv, Sub, Add, Flatten, MatMul, BatchNormalization
 from venus.dependency.dependency_graph import DependencyGraph
 from venus.dependency.dependency_type import DependencyType
@@ -18,7 +21,6 @@ from venus.verification.verification_problem import VerificationProblem
 from venus.common.configuration import Config
 from venus.common.logger import get_logger
 from timeit import default_timer as timer
-import numpy as np
 
 class MILPEncoder:
 
@@ -141,8 +143,8 @@ class MILPEncoder:
         node.out_vars = np.empty(shape=node.output_shape, dtype=Var)
         for i in node.get_outputs():
             node.out_vars[i] = gmodel.addVar(
-                lb=node.bounds.lower[i],
-                ub=node.bounds.upper[i]
+                lb=node.bounds.lower[i].item(),
+                ub=node.bounds.upper[i].item()
             )
     
     def add_relu_delta_vars(self, node: Relu, gmodel: Model):
@@ -207,10 +209,12 @@ class MILPEncoder:
         assert type(node) in [Gemm, MatMul, Sub, Add, BatchNormalization], f"Cannot compute sub onstraints for type(j) nodes."
         
         if type(node) in ['Sub', 'Add'] and node.const is not None:
-            output = node.forward(node.from_node[0].out_vars, node.from_node[1].out_vars)
+            output = node.forward_numpy(
+                node.from_node[0].out_vars, node.from_node[1].out_vars
+            )
         
         else:
-            output = node.forward(node.from_node[0].out_vars)
+            output = node.forward_numpy(node.from_node[0].out_vars)
 
 
         for i in node.get_outputs():
@@ -258,15 +262,16 @@ class MILPEncoder:
                 gmodel.addConstr(inp[i] <= 0)
 
             else:
+                l_i, u_i = l[i].item(), u[i].item()
                 # unstable node
                 if linear_approx is True:
                     gmodel.addConstr(out[i] >= inp[i])
                     gmodel.addConstr(out[i] >= 0)
-                    gmodel.addConstr( out[i] <= (u[i] / (u[i] - l[i])) * (inp[i] - l[i]))
+                    gmodel.addConstr(out[i] <= (u_i / (u_i - l_i)) * (inp[i] - l_i))
                 else:
                     gmodel.addConstr(out[i] >= inp[i])
-                    gmodel.addConstr(out[i] <= inp[i] - l[i] * (1 - delta[i]))
-                    gmodel.addConstr(out[i] <= u[i] * delta[i])
+                    gmodel.addConstr(out[i] <= inp[i] - l_i * (1 - delta[i]))
+                    gmodel.addConstr(out[i] <= u_i * delta[i])
      
     def add_output_constrs(self, node: Node, gmodel: Model):
         """
@@ -293,7 +298,7 @@ class MILPEncoder:
                 The gurobi model.
         """
         dg = DependencyGraph(
-            self.prob.nn, 
+            self.prob.nn,
             self.config.SOLVER.INTRA_DEP_CONSTRS,
             self.config.SOLVER.INTER_DEP_CONSTRS,
             self.config

@@ -10,7 +10,7 @@
 # ************
 
 
-import numpy as np
+import torch
 import onnx
 import onnx.numpy_helper
 from onnx import NodeProto, ModelProto, ValueInfoProto
@@ -75,7 +75,7 @@ class ONNXParser:
 
         # determine input shape
         if node.input[0] == inp.name:
-            input_shape = [i.dim_value for i in inp.type.tensor_type.shape.dim]
+            input_shape = tuple([i.dim_value for i in inp.type.tensor_type.shape.dim])
         else:
             input_shape = venus_nodes[node.input[0]].output_shape
         # process node
@@ -124,14 +124,22 @@ class ONNXParser:
             "Third input to gemm nodes should be an initializer."
 
         [weights] = [
-            onnx.numpy_helper.to_array(init[i]).astype(self.config.PRECISION)
+            torch.tensor(
+                onnx.numpy_helper.to_array(init[i]),
+                dtype=self.config.PRECISION,
+                device=self.config.DEVICE
+            )
             for i in init if init[i].name == node.input[1]
         ]
         for att in node.attribute:
             if att.name == 'transB' and att.i == 0:
-                weights = weights.T
+                weights = torch.transpose(weights, 0, 1)
         [bias] = [
-            onnx.numpy_helper.to_array(init[i]).astype(self.config.PRECISION)
+            torch.tensor(
+                onnx.numpy_helper.to_array(init[i]),
+                dtype=self.config.PRECISION,
+                device=self.config.DEVICE
+            )
             for i in init if init[i].name == node.input[2]
         ]
         output_shape = (weights.shape[0],)
@@ -151,10 +159,14 @@ class ONNXParser:
             "Second input to matmul nodes should be an initializer."
 
         [weights] = [
-            onnx.numpy_helper.to_array(init[i]).astype(self.config.PRECISION)
+            torch.tensor(
+                onnx.numpy_helper.to_array(init[i]),
+                dtype=self.config.PRECISION,
+                device=self.config.DEVICE
+            )
             for i in init if init[i].name == node.input[1]
         ]
-        weights = weights.T
+        weights = torch.transpose(weights, 0, 1)
         output_shape = (weights.shape[0],)
 
         return MatMul(
@@ -173,23 +185,31 @@ class ONNXParser:
             "Third input to conv nodes should be an initializer."
 
         [weights] = [
-            onnx.numpy_helper.to_array(init[i]).astype(self.config.PRECISION)
+            torch.tensor(
+                onnx.numpy_helper.to_array(init[i]),
+                dtype=self.config.PRECISION,
+                device=self.config.DEVICE
+            )
             for i in init if init[i].name == node.input[1]
         ]
         [bias] = [
-            onnx.numpy_helper.to_array(init[i]).astype(self.config.PRECISION)
+            torch.tensor(
+                onnx.numpy_helper.to_array(init[i]),
+                dtype=self.config.PRECISION,
+                device=self.config.DEVICE
+            )
             for i in init if init[i].name == node.input[2]
         ]
         pads = (0, 0)
         strides = (1, 1)
         for att in node.attribute:
             if att.name == "pads":
-                pads = tuple(i for i in att.ints[0:2])
+                pads = [i for i in att.ints[0:2]]
             elif att.name == "strides":
-                strides = tuple(i for i in att.ints[0:2])
+                strides = [i for i in att.ints[0:2]]
         output_shape = Conv.compute_output_shape(
             input_shape,
-            weights.shape,
+            weights.shape + (1,),
             pads,
             strides
         )
@@ -208,7 +228,11 @@ class ONNXParser:
     def parse_sub(self, node: NodeProto, input_shape: tuple, init: list) -> Node:
         if node.input[1] in init:
             [const] = [
-                onnx.numpy_helper.to_array(init[i]).astype(self.config.PRECISION)
+                torch.tensor(
+                    onnx.numpy_helper.to_array(init[i]),
+                    dtype=self.config.PRECISION,
+                    device=self.config.DEVICE
+                )
                 for i in init if init[i].name == node.input[1]
             ]
         else:
@@ -219,7 +243,11 @@ class ONNXParser:
     def parse_add(self, node: NodeProto, input_shape: tuple, init: list) -> Node:
         if node.input[1] in init:
             [const] = [
-                onnx.numpy_helper.to_array(init[i]).astype(self.config.PRECISION)
+                torch.tensor(
+                    onnx.numpy_helper.to_array(init[i]),
+                    dtype=self.config.PRECISION,
+                    device=self.config.DEVICE
+                )
                 for i in init if init[i].name == node.input[1]
             ]
         else:
@@ -249,11 +277,25 @@ class ONNXParser:
             if att.name == "epsilon":
                 epsilon = tuple(i for i in att.ints[0:2])
 
-        return BatchNormalizaton([], [], input_shape, self.config)
+        return BatchNormalizaton(
+            [],
+            [],
+            input_shape,
+            scale,
+            bias,
+            input_mean,
+            input_var,
+            epsilon,
+            self.config
+        )
 
     def parse_constant(self, node: NodeProto, init: list) -> Node:
         [const] = [
-            onnx.numpy_helper.to_array(init[i]).astype(self.config.PRECISION)
+            torch.tensor(
+                onnx.numpy_helper.to_array(init[i]),
+                dtype=self.config.PRECISION,
+                device=self.config.DEVICE
+            )
             for i in init if init[i].name == node.input[1]
         ]
 

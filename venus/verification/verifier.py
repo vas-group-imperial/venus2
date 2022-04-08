@@ -9,7 +9,10 @@
 # Description: Main verification process.
 # ************
 
+import torch.multiprocessing as mp
+import queue
 from timeit import default_timer as timer
+
 from venus.verification.verification_problem import VerificationProblem
 from venus.verification.verification_process import VerificationProcess
 from venus.verification.verification_report import VerificationReport
@@ -21,8 +24,6 @@ from venus.split.split_report import SplitReport
 from venus.solver.solve_result import SolveResult
 from venus.solver.solve_report import SolveReport
 from venus.common.logger import get_logger
-import multiprocessing as mp
-import queue
 
 class Verifier:
     
@@ -43,8 +44,8 @@ class Verifier:
         """
         self.prob = VerificationProblem(nn, spec, 0, config)
         self.config = config
-        self.reporting_queue = mp.Queue()
-        self.jobs_queue = mp.Queue()
+        self.reporting_queue = mp.Manager().Queue()
+        self.jobs_queue = mp.Manager().Queue()
         if Verifier.logger is None:
             Verifier.logger = get_logger(__name__, config.LOGGER.LOGFILE)
         self.split_procs = []
@@ -57,7 +58,6 @@ class Verifier:
 
         Returns:
 
-            VerificationReport
         """
         Verifier.logger.info(f'Verifying {self.prob.to_string()}')
         if self.config.VERIFIER.COMPLETE == True:
@@ -79,18 +79,36 @@ class Verifier:
 
             VerificationReport
         """
-        pgd = ProjectedGradientDescent(self.config)
-        x = pgd.start(self.prob, 0.0001, 2)
         ver_report = VerificationReport(self.config.LOGGER.LOGFILE)
         start = timer()
+        # try pgd
+        pgd = ProjectedGradientDescent(self.config)
+        cex= pgd.start(
+            self.prob, self.config.VERIFIER.PGD_EPS, self.config.VERIFIER.PGD_NUM_ITER
+        )
+
+        # self.prob.nn.detach()
+        # self.prob.spec.input_node.bounds.detach()
+        if cex is not None:
+            ver_report.result = SolveResult.UNSAFE
+            ver_report.cex = cex
+            Verifier.logger.info('Verification problem was solved via PGD')
+            ver_report.runtime = timer() - start
+
+            return ver_report
+
+        # try bound analysis
         self.prob.bound_analysis()
         if self.prob.satisfies_spec():
             ver_report.result = SolveResult.SAFE
             Verifier.logger.info('Verification problem was solved via bound analysis')
-        else:
-            ver_report.result = SolveResult.UNDECIDED
-            Verifier.logger.info('Verification problem could not be solved via bound analysis.')
+            ver_report.runtime = timer() - start
 
+            return ver_report
+
+        # undecided
+        ver_report.result = SolveResult.UNDECIDED
+        Verifier.logger.info('Verification problem could not be solved via PGD or bound analysis.')
         ver_report.runtime = timer() - start
 
         return ver_report
@@ -111,7 +129,7 @@ class Verifier:
         start = timer()
         # try to solve the problem using the bounds and lp
         report = self.verify_incomplete()
-        if report.result == SolveResult.SAFE:
+        if report.result != SolveResult.UNDECIDED:
             return report
     
         # start the splitting and worker processes
@@ -216,7 +234,8 @@ class Verifier:
                     self.reporting_queue,
                     self.config
                 )
-                for i in range(len(splits))]
+                for i in range(len(splits))
+            ]
             for proc in self.split_procs:
                 proc.start()
                 Verifier.logger.info(f'Generated {len(self.split_procs)} split processes')
@@ -261,8 +280,8 @@ class Verifier:
 
             None
         """
-        self.reporting_queue.cancel_join_thread()
-        self.jobs_queue.cancel_join_thread()
+        # self.reporting_queue.cancel_join_thread()
+        # self.jobs_queue.cancel_join_thread()
         self.terminate_split_procs()
         self.terminate_ver_procs()
 

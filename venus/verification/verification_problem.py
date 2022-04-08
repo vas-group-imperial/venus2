@@ -79,7 +79,7 @@ class VerificationProblem(object):
                 if self._sip_bounds_computed:
                     return None
         # compute bounds
-        sip = SIP(self.nn, self.config, delta_flags)
+        sip = SIP(self, self.config, delta_flags)
         sip.set_bounds()
         # flag the computation
         if delta_flags is None:

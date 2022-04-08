@@ -9,7 +9,7 @@
 # Description: Process for solving a verification problem.
 # ************
 
-from multiprocessing import Process
+from torch.multiprocessing import Process
 from venus.common.logger import get_logger
 from venus.solver.milp_solver import MILPSolver
 from venus.solver.solve_report import SolveReport
@@ -72,9 +72,10 @@ class VerificationProcess(Process):
                         prob.id, 
                         slv_report.result.value, 
                         slv_report.runtime))
+                del prob
                 self.reporting_queue.put(slv_report)
-            except queue.Empty:
-                VerificationProcess.logger.info(f"Subprocess {self.id} terminated because of empty job queue.")
+            except Exception as error:
+                VerificationProcess.logger.info(f"Subprocess {self.id} terminated because of {str(error)}.")
                 break
 
 

@@ -10,6 +10,7 @@
 # ************
 
 import numpy as np
+import torch
 
 class Bounds:
     def __init__(self, lower=None, upper=None):
@@ -54,10 +55,21 @@ class Bounds:
 
     def copy(self):
         """
-        Returns:
-            a copy of the calling bounds object
+        Copies the bounds.
         """
-        return Bounds(self.lower.copy(), self.upper.copy())
+        self.detach()
+        lower = self.lower.clone() if self.lower is not None else None
+        upper = self.upper.clone() if self.upper is not None else None
 
+        return Bounds(lower, upper)
+
+    def detach(self):
+        """
+        Detaches the bounds. 
+        """
+        if self.lower is not None:
+            self.lower.detach()
+        if self.upper is not None:
+            self.upper.detach()
 
 

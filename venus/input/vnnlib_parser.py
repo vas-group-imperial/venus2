@@ -10,16 +10,17 @@
 # ************
 
 import os
-import numpy as np
 import math
 import collections
+import torch
+import numpy as np
 from sly import Lexer
 from sly import Parser
 from venus.specification.formula import Formula, StateCoordinate, VarConstConstraint, VarVarConstraint, ConjFormula, \
     DisjFormula, NAryConjFormula, NAryDisjFormula, NegationFormula
 from venus.specification.specification import Specification
 from venus.network.node import Input
-
+from venus.bounds.bounds import Bounds
 
 
 class VNNLIBParser:
@@ -38,13 +39,13 @@ class VNNLIBParser:
         i_b, o_f, i_cl = parser.parse(lexer.tokenize(s))
         specs = []
         if len(i_cl) == 0:
+            bounds = Bounds(
+                torch.reshape(i_b[0], self.input_shape),
+                torch.reshape(i_b[1], self.input_shape)
+            )
             specs.append(
                 Specification(
-                    Input(
-                        i_b[0].reshape(self.input_shape),
-                        i_b[1].reshape(self.input_shape),
-                        self.config
-                    ),
+                    Input(bounds, self.config),
                     NegationFormula(o_f).to_NNF(),
                     os.path.basename(self.pf)[1]
                 )
@@ -113,8 +114,18 @@ class VNNParser(Parser):
         self.env = { }
         self.X_SZ = X_SZ
         self.config = config
-        self.i_b = [np.ones(self.X_SZ, dtype=config.PRECISION) * -math.inf, 
-                    np.ones(self.X_SZ, dtype=config.PRECISION) * math.inf]
+        self.i_b = [
+            torch.ones(
+                self.X_SZ,
+                dtype=config.PRECISION,
+                device=config.DEVICE
+            ) * -math.inf, 
+            torch.ones(
+                self.X_SZ,
+                dtype=config.PRECISION,
+                device=config.DEVICE
+            ) * math.inf
+        ]
         self.o_f = None
         self.i_cl = []
 
@@ -163,7 +174,18 @@ class VNNParser(Parser):
 
     @_('LPAR AND iio_terms RPAR')
     def input_and_clause(self, p):
-        i_b = [np.ones(self.X_SZ) * -math.inf,  np.ones(self.X_SZ) * math.inf]
+        i_b = [
+            torch.ones(
+                self.X_SZ,
+                dtype=self.config.PRECISION,
+                device=self.config.DEVICE
+            ) * -math.inf,  
+            torch.ones(
+                self.X_SZ,
+                dtype=self.config.PRECISION,
+                device=self.config.DEVICE
+            ) * math.inf
+        ]
         o_f_terms =  []
         for term in p.iio_terms:
             if term.type == 'input':

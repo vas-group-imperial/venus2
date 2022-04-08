@@ -12,17 +12,20 @@
 from __future__ import annotations
 
 import math
+import torch
 import numpy as np
 
 from venus.network.node import Node, Gemm, Conv, Relu, MatMul, Add, Sub, Constant
+from venus.common.configuration import Config
 
+torch.set_num_threads(1)
 
 class Equation():
     """
     The Equation class.
     """
 
-    def __init__(self, matrix: np.array, const: np.array):
+    def __init__(self, matrix: torch.Tensor, const: torch.Tensor, config: Config):
         """
         Arguments:
 
@@ -35,6 +38,7 @@ class Equation():
         """
         self.matrix = matrix
         self.const = const
+        self.config = config
         self.size = matrix.shape[0]
 
     def copy(self, matrix=None, const=None) -> Equation:
@@ -44,23 +48,23 @@ class Equation():
             self.size
         )
  
-    def _get_plus_matrix(self) -> np.array:
+    def _get_plus_matrix(self) -> torch.Tensor:
         """
         Clips the coeffs to be only positive.
         """
 
-        return np.clip(self.matrix, 0, math.inf)
+        return torch.clamp(self.matrix, 0, math.inf)
 
 
-    def _get_minus_matrix(self, keep_in_memory=True) -> np.array:
+    def _get_minus_matrix(self, keep_in_memory=True) -> torch.Tensor:
         """
         Clips the coeffs to be only negative.
         """
         
-        return np.clip(self.matrix, -math.inf, 0)
+        return torch.clamp(self.matrix, -math.inf, 0)
 
 
-    def concrete_values(self, lower: np.array, upper:np.array, bound: str) -> np.array:
+    def concrete_values(self, lower: torch.Tensor, upper:torch.Tensor, bound: str) -> torch.Tensor:
         if bound == 'lower':
             return self.min_values(lower, upper)
         
@@ -71,7 +75,7 @@ class Equation():
             raise ValueError(f'Bound {bound} is not recognised.')
         
 
-    def max_values(self, lower: np.array, upper: np.array) -> np.array:
+    def max_values(self, lower: torch.Tensor, upper: torch.Tensor) -> torch.Tensor:
         """
         Computes the upper bounds of the equations.
     
@@ -108,15 +112,19 @@ class Equation():
         return self.interval_dot('lower', lower, upper)
 
 
-    def interval_dot(self, bound: str, lower: np.array, upper: np.array) -> np.array:
+    def interval_dot(self, bound: str, lower: torch.Tensor, upper: torch.Tensor) -> torch.Tensor:
         """
         Computes the interval dot product with either a matrix or an Equation.
         """
         if bound == 'upper':
-            return self._get_plus_matrix().dot(upper) + self._get_minus_matrix().dot(lower) + self.const
+            return self._get_plus_matrix() @ upper + \
+                self._get_minus_matrix() @ lower + \
+                self.const
 
         elif bound == 'lower':
-            return  self._get_plus_matrix().dot(lower) +  self._get_minus_matrix().dot(upper) + self.const
+            return  self._get_plus_matrix() @ lower + \
+                self._get_minus_matrix() @ upper + \
+                self.const
 
         else: 
             raise ValueError(f'Bound {bound} is not recognised.')
@@ -147,7 +155,7 @@ class Equation():
         # get Starting block indices
         start_idx = np.arange(p)[:,None]*n*K + np.arange(0,p*K,K)
         # get offsetted indices across the height and width of input 
-        offset_idx = np.arange(M)[:,None]*n*K*p + np.array([i*p*K + np.arange(K) for i in  range(N)]).flatten()
+        offset_idx = np.arange(M)[:,None]*n*K*p + torch.Tensor([i*p*K + np.arange(K) for i in  range(N)]).flatten()
         # get all actual indices 
         idx = start_idx.ravel()[:,None] + offset_idx.ravel()
         return [idx[i,:] for i in idx.shape[0]]
@@ -176,19 +184,22 @@ class Equation():
         return c
 
     def transpose(self, node: Node):
-        return Equation(
-            node.transpose(self.matrix),
-            self.matrix.dot(
-                Equation._get_const(node, np.ones(node.output_size, bool))
-            ) + self.const
+        matrix = node.transpose(self.matrix)
+        const = Equation._get_const(
+            node,
+            torch.ones(node.output_size, dtype=torch.bool, device=self.config.DEVICE)
         )
+        const = (self.matrix @ const) + self.const
+        
+        return Equation(matrix, const, self.config)
 
 
-    def interval_transpose(self, node, bound):
+    def interval_transpose(self, x, node, bound):
         assert node.has_relu_activation() is True, "Interval transpose is not supported for nodes without relu activation."
+
         lower_slope = node.to_node[0].get_lower_relaxation_slope()
         lower_const = Equation._get_const(node, np.ones(node.output_size, bool))
-        upper_const = lower_const.copy()
+        upper_const = lower_const.detach().clone()
         upper_slope = node.to_node[0].get_upper_relaxation_slope()
         lower_const *= lower_slope
         upper_const *= upper_slope
@@ -199,41 +210,43 @@ class Equation():
         if bound == 'lower':
             plus = self._get_plus_matrix() * lower_slope
             minus = self._get_minus_matrix() * upper_slope
-            const = self._get_plus_matrix().dot(lower_const) + self._get_minus_matrix().dot(upper_const)
+            const = self._get_plus_matrix() @ lower_const + \
+                self._get_minus_matrix() @ upper_const
+
 
         elif bound == 'upper':
             plus = self._get_plus_matrix()  * upper_slope
             minus = self._get_minus_matrix() * lower_slope
-            const = self._get_plus_matrix().dot(upper_const) + self._get_minus_matrix().dot(lower_const)
+            const = self._get_plus_matrix() @ upper_const + \
+                self._get_minus_matrix() @ lower_const
 
         else:
             raise ValueError(f'Bound {bound} is not recognised.')
 
         matrix = node.transpose(plus) + node.transpose(minus)
+
         const += self.const
 
-        return Equation(matrix, const)
+        return Equation(matrix, const, self.config)
 
 
     @staticmethod
-    def derive(node: Node, flag: np.array) -> Equation:
+    def derive(node: Node, flag: torch.Tensor, config: Config) -> Equation:
 
         if isinstance(node.from_node[0], Relu) and \
         node.from_node[0].get_unstable_count() == 0  and \
         node.from_node[0].get_active_count() == 0:      
             return Equation(
-                np.zeros((np.sum(flag), 0)),
-                Equation._get_const(node, flag)
+                np.zeros((torch.sum(flag), 0)), Equation._get_const(node, flag), config
             )
 
         return Equation(
-            Equation._get_matrix(node, flag),
-            Equation._get_const(node, flag)
+            Equation._get_matrix(node, flag), Equation._get_const(node, flag), config
         )
         
 
     @staticmethod
-    def _get_matrix(node: Node, flag: np.array) -> np.array:
+    def _get_matrix(node: Node, flag: torch.Tensor) -> torch.Tensor:
         if isinstance(node, Conv):
             # transpose kernel for tf conv operations
             kernels = node.kernels.transpose(2, 3, 1, 0)
@@ -255,7 +268,7 @@ class Equation():
                 axis=1
             )[:, flag]
             matrix = np.zeros((flag_size, node.input_size + 1), dtype=node.config.PRECISION)
-            matrix[range(flag_size), conv_indices] = np.array(
+            matrix[range(flag_size), conv_indices] = torch.Tensor(
                 [
                     kernels[..., i].flatten()
                     for j in range(int(node.output_size / node.out_ch)) for i in range(node.out_ch)
@@ -278,11 +291,11 @@ class Equation():
             raise  TypeError(f'Node {node} is not supported')
 
     @staticmethod
-    def _get_const(node: Node, flag: np.array) -> np.array:
+    def _get_const(node: Node, flag: torch.Tensor) -> torch.Tensor:
         if isinstance(node, Conv):
             out_ch_size = int(node.output_size / node.out_ch)
 
-            return np.array(
+            return torch.Tensor(
                 [node.bias for i in range(out_ch_size)]
             ).flatten()[flag]
 
@@ -293,7 +306,9 @@ class Equation():
             return np.zeros(node.output_size, dtype=node.weights.dtype)
 
         elif type(node) in [Sub, Add]:
-            return np.zeros(node.output_size, dtype=node.const.dtype)
+            return torch.zeros(
+                node.output_size, dtype=node.const.dtype, device=node.const.device
+            )
 
         else:
             raise  TypeError(f'Node {node} is not supported')

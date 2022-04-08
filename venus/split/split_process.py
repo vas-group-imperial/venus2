@@ -9,7 +9,7 @@
 # Description: Split process managing input and node splits.
 # ************
 
-from multiprocessing import Process
+from torch.multiprocessing import Process
 from venus.split.split_report import SplitReport
 from venus.split.node_splitter import NodeSplitter
 from venus.split.input_splitter import InputSplitter
@@ -59,16 +59,14 @@ class SplitProcess(Process):
         if SplitProcess.logger is None:
             SplitProcess.logger = get_logger(__name__, config.LOGGER.LOGFILE)
 
-
     def run(self):        
         SplitProcess.logger.info(f'Running split process {self.id}')
         self.split()
         SplitProcess.logger.info(f'Split process {self.id} finished')
         self.process_count -= 1
-        self.reporting_queue.put(SplitReport(self.id,
-                                             self.jobs_count, 
-                                             self.node_split_count, 
-                                             self.input_split_count))
+        self.reporting_queue.put(SplitReport(
+            self.id, self.jobs_count, self.node_split_count, self.input_split_count
+        ))
  
 
     def split(self):
@@ -207,8 +205,10 @@ class SplitProcess(Process):
         )
 
         subprobs = isplitter.split()
+
         SplitProcess.logger.info(f"Finished input splitting - {len(subprobs)} subproblems")
-        if len(subprobs) > 0: self.input_split_count += 1
+        if len(subprobs) > 0:
+            self.input_split_count += 1
         
         return subprobs
 

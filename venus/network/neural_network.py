@@ -10,6 +10,7 @@
 """
 
 
+import torch
 import numpy as np
 import os
 import itertools
@@ -70,9 +71,7 @@ class NeuralNetwork:
  
     def copy(self):
         """
-        Returns:
-
-            a copy of the calling object 
+        Copies the calling object.
         """
         nn = NeuralNetwork(self.model_path, self.config)
 
@@ -87,6 +86,13 @@ class NeuralNetwork:
             nn.node[i].to_node = [nn.node[j.id] for j in self.node[i].to_node]
 
         return nn
+
+    def detach(self):
+        """
+        Detaches the tensors of the network.
+        """
+        for _, i in self.node.items():
+            i.detach()
 
     def get_node_by_depth(self, depth: int) -> list:
         """
@@ -114,8 +120,10 @@ class NeuralNetwork:
         """
         Nulls out all outputs of the nodes of the network.
         """
+        del self.head.from_node[0].output 
+
         for _, i in self.node.items():
-            i.clean_output()
+            del i.output
 
     def predict(self, inp: np.array, mean: float=0, std: float=1):
         """
@@ -219,7 +227,7 @@ class NeuralNetwork:
         """
 
         diff = self.tail.bounds.upper - self.tail.bounds.lower
-        return np.average(diff)
+        return torch.mean(diff).item()
         
 
     def calc_neighbouring_units(self, p_node, s_node, index):
@@ -268,13 +276,9 @@ class NeuralNetwork:
         for i in range(self.tail.depth + 1):
             nodes = self.get_node_by_depth(i)
             for j in nodes:
-                print(j, j.id, j.from_node[0].id)
                 j.forward(save_output=True)
 
-        output = tf.identity(self.tail.output)
-        print(output.get_shape)
-        print(output.get_shape)
-        print(output.get_shape)
+        output = self.tail.output
         self.clean_outputs()
 
         return output

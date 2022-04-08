@@ -13,12 +13,14 @@
 import itertools 
 import math
 import numpy as np
-import tensorflow as tf
+import torch
 
 from venus.bounds.bounds import Bounds
 from venus.common.configuration import Config
 from venus.common.utils import ReluState
 
+
+torch.set_num_threads(1)
 
 class Node:
     
@@ -90,14 +92,9 @@ class Node:
         """
         Nulls out all MILP variables associate with the network.
         """
-        self.out_vars = np.empty(0)
-        self.delta_vars = np.empty(0)
+        self.out_vars = torch.empty(0)
+        self.delta_vars = torch.empty(0)
 
-    def clean_output(self):
-        """
-        Nulls the output.
-        """
-        self.output = None
 
     def has_relu_activation(self) -> bool:
         """
@@ -190,7 +187,7 @@ class Node:
 
 
 class Constant(Node):
-    def __init__(self, to_node: list, const: np.array, config: Config, id: int=None):
+    def __init__(self, to_node: list, const: torch.tensor, config: Config, id: int=None):
         """
         Argumnets:
             
@@ -214,21 +211,17 @@ class Constant(Node):
 
     def copy(self):
         """
-        Returns: 
-
-            a copy of the calling object 
+        Copies the node.
         """
         return Constant(
-            self.bounds.lower.copy(),
+            self.bounds.lower.detach().clone(),
             self.to_node,
             self.config,
             id=self.id
         )
 
-
-
 class Input(Node):
-    def __init__(self, lower:np.array, upper:np.array, config: Config, id: int=None):
+    def __init__(self, bounds:torch.tensor, config: Config, id: int=None):
         """
         Argumnets:
             
@@ -240,25 +233,20 @@ class Input(Node):
         super().__init__(
             [],
             [],
-            lower.shape,
-            lower.shape,
+            bounds.lower.shape,
+            bounds.lower.shape,
             config,
             depth=0,
-            bounds=Bounds(lower, upper),
+            bounds=bounds,
             id=id
         )
 
     def copy(self):
         """
-        Returns: 
-
-            a copy of the calling object 
+        Copies the node. 
         """
         return Input(
-            self.bounds.lower.copy(),
-            self.bounds.upper.copy(),
-            self.config,
-            id=self.id
+            self.bounds.copy(), self.config, id=self.id
         )
 
     def get_milp_var_size(self):
@@ -275,8 +263,8 @@ class Gemm(Node):
         to_node: list,
         input_shape: tuple,
         output_shape: tuple,
-        weights: np.array,
-        bias: np.array,
+        weights: torch.tensor,
+        bias: torch.tensor,
         config: Config,
         depth=None,
         bounds=Bounds(),
@@ -319,9 +307,7 @@ class Gemm(Node):
 
     def copy(self):
         """
-        Returns:
-
-            a copy of the calling object 
+        Copies the node.
         """
         return Gemm(
             self.from_node,
@@ -356,7 +342,7 @@ class Gemm(Node):
             
             the bias.
         """
-        return self.bias[index]
+        return self.bias[index].item()
 
     def edge_weight(self, index1: int, index2: int) -> float:
         """
@@ -374,16 +360,16 @@ class Gemm(Node):
          
             the weight.
         """
-        return self.weights[index1, index2]
+        return self.weights[index1, index2].item()
     
 
     def forward(
         self,
-        inp: tf.Tensor=None,
+        inp: torch.tensor=None,
         clip: str=None,
         add_bias: bool=True,
         save_output=False
-    ) -> tf.Tensor:
+    ) -> torch.tensor:
         """
         Computes the output of the node given an input.
 
@@ -407,39 +393,48 @@ class Gemm(Node):
             weights = self.weights
 
         elif clip == '+':
-            weights = tf.clip_by_value(self.weights, 0, math.inf)
+            weights = torch.clamp(self.weights, 0, math.inf)
 
         elif clip == '-':
-            weights = tf.clip_by_value(self.weights, -math.inf, 0)
+            weights = torch.clamp(self.weights, -math.inf, 0)
 
         else:
             raise ValueError(f'Kernel clip value {clip} not recognised')
 
-
-        output = tf.matmul(weights, inp)
+        output = weights @ inp
 
         if add_bias is True:
-            output = tf.add(output, self.bias[:, np.newaxis])
+            output += self.bias
 
         if save_output:
             self.output = output
 
         return output
 
-    def transpose(self, inp: np.array) -> np.array:
+    def forward_numpy(self, inp: np.array=None) -> np.array:
+        """
+        Computes the output of the node given a numpy input.
+
+        Arguments:
+            inp:
+                the input.
+        Returns: 
+            the output of the node.
+        """
+        return self.weights.numpy() @ inp + self.bias.numpy()
+
+
+    def transpose(self, inp: torch.tensor) -> torch.tensor:
         """
         Computes the input to the node given an output.
 
         Arguments:
-
             inp:
                 the output.
-                
         Returns:
-            
             the input of the node.
         """
-        return np.dot(inp, self.weights)
+        return inp @ self.weights
 
 
 class MatMul(Node):
@@ -449,7 +444,7 @@ class MatMul(Node):
         to_node: list,
         input_shape: tuple,
         output_shape: tuple,
-        weights: np.array,
+        weights: torch.tensor,
         config: Config,
         depth=None,
         bounds=Bounds(),
@@ -489,9 +484,7 @@ class MatMul(Node):
 
     def copy(self):
         """
-        Returns:
-
-            a copy of the calling object 
+        Copies the node.
         """
         return MatMul(
             self.from_node,
@@ -502,6 +495,24 @@ class MatMul(Node):
             self.config,
             depth=self.depth,
             bounds=self.bounds.copy(),
+            id=self.id
+        )
+
+    def numpy(self):
+        """
+        Returns:
+
+            a copy of the calling object with numpy data.
+        """
+        return MatMul(
+            self.from_node,
+            self.to_node,
+            self.input_shape,
+            self.output_shape,
+            self.weights.numpy(),
+            self.config,
+            depth=self.depth,
+            bounds=self.bounds,
             id=self.id
         )
 
@@ -531,7 +542,7 @@ class MatMul(Node):
         return self.weights[index1, index2]
     
 
-    def forward(self, inp: tf.Tensor=None, clip: str=None, save_output=False) -> tf.Tensor:
+    def forward(self, inp: torch.tensor=None, clip: str=None, save_output=False) -> torch.tensor:
         """
         Computes the output of the node given an input.
 
@@ -562,28 +573,36 @@ class MatMul(Node):
             raise ValueError(f'Kernel clip value {clip} not recognised')
 
 
-        output = tf.matmul(weights, inp)
+        output = weights @ inp
 
         if save_output:
             self.output = output
 
         return output
 
+    def forward_numpy(self, inp: np.array=None) -> np.array:
+        """
+        Computes the output of the node given a numpy input.
 
-    def transpose(self, inp: np.array) -> np.array:
+        Arguments:
+            inp:
+                the input.
+        Returns: 
+            the output of the node.
+        """
+        return self.weights.numpy() @ inp 
+
+    def transpose(self, inp: torch.tensor) -> torch.tensor:
         """
         Computes the input to the node given an output.
 
         Arguments:
-
             inp:
                 the output.
-                
         Returns:
-            
             the input of the node.
         """
-        return np.dot(inp, self.weights)
+        return inp @ self.weights
 
 
 
@@ -594,8 +613,8 @@ class Conv(Node):
         to_node: list,
         input_shape: tuple,
         output_shape: tuple,
-        kernels: np.array,
-        bias: np.array,
+        kernels: torch.tensor,
+        bias: torch.tensor,
         padding: tuple,
         strides: tuple,
         config: Config,
@@ -650,9 +669,7 @@ class Conv(Node):
 
     def copy(self):
         """
-        Returns:
-
-            a copy of the calling object 
+        Copies the node.
         """
         return Conv(
             self.from_node,
@@ -666,6 +683,27 @@ class Conv(Node):
             self.config,
             depth=self.depth,
             bounds=self.bounds.copy(),
+            id=self.id
+        )
+
+    def numpy(self):
+        """
+        Returns:
+
+            a copy of the calling object with numpy data.
+        """
+        return Conv(
+            self.from_node,
+            self.to_node,
+            self.input_shape,
+            self.output_shape,
+            self.kernels.numpy(),
+            self.bias.numpy(),
+            self.padding,
+            self.strides,
+            self.config,
+            depth=self.depth,
+            bounds=self.bounds,
             id=self.id
         )
          
@@ -715,13 +753,13 @@ class Conv(Node):
         return self.kernels[index1[2]][index2[2]][y][x]
 
 
-    def forward(
+    def forward_numpy(
         self,
-        inp: tf.Tensor=None,
+        inp: np.array=None,
         clip=None,
         add_bias=True,
         save_output=False
-    ) -> tf.Tensor:
+    ) -> torch.tensor:
         """
         Computes the output of the node given an input.
 
@@ -772,7 +810,7 @@ class Conv(Node):
         return output
 
 
-    def transpose(self, inp: np.array) -> np.array:
+    def transpose(self, inp: torch.tensor) -> torch.tensor:
         """
         Computes the input to the node given an output.
 
@@ -799,7 +837,7 @@ class Conv(Node):
         ).numpy().reshape(inp.shape[0], -1)
 
 
-    def get_non_pad_idxs(self) -> np.array:
+    def get_non_pad_idxs(self) -> torch.tensor:
         """
         Returns:
 
@@ -884,7 +922,7 @@ class Conv(Node):
         return (out_x, out_y,K)
 
     @staticmethod
-    def pad(inp: np.array, padding: tuple, values: tuple=(0,0)) -> np.array:
+    def pad(inp: torch.tensor, padding: tuple, values: tuple=(0,0)) -> torch.tensor:
         """
         Pads a given matrix with constants.
 
@@ -912,7 +950,7 @@ class Conv(Node):
         )
 
     @staticmethod
-    def im2col(matrix: np.array, kernel_shape: tuple, strides: tuple, indices: bool=False) -> np.array:
+    def im2col(matrix: torch.tensor, kernel_shape: tuple, strides: tuple, indices: bool=False) -> torch.tensor:
         """
         MATLAB's im2col function.
 
@@ -996,7 +1034,7 @@ class Relu(Node):
         )
         self.state = np.array(
             [ReluState.UNSTABLE] * self.output_size,
-            dtype=ReluState
+            dtype=ReluState,
         ).reshape(self.output_shape)
         self.dep_root = np.array(
             [False] * self.output_size,
@@ -1015,9 +1053,7 @@ class Relu(Node):
 
     def copy(self):
         """
-        Returns:
-
-            a copy of the calling object 
+        Copies the node.
         """
         relu = Relu(
             self.from_node,
@@ -1040,7 +1076,7 @@ class Relu(Node):
         """
         return 2 * self.output_size
 
-    def forward(self, inp: tf.Tensor=None, save_output=None) -> tf.Tensor:
+    def forward(self, inp: torch.tensor=None, save_output=None) -> torch.tensor:
         """
         Computes the output of the node given an input.
 
@@ -1055,7 +1091,7 @@ class Relu(Node):
         assert inp is not None or self.from_node[0].output is not None
         inp = self.from_node[0].output if inp is None else inp
 
-        output = tf.clip_by_value(inp, 0, math.inf)
+        output = torch.clamp(inp, 0, math.inf)
 
         if save_output:
             self.output = output
@@ -1140,7 +1176,7 @@ class Relu(Node):
 
         return cond1 or cond2 or cond3
 
-    def get_active_flag(self) -> np.array:
+    def get_active_flag(self) -> torch.tensor:
         """
         Returns an array of activity statuses for each ReLU node.
         """
@@ -1154,11 +1190,11 @@ class Relu(Node):
         Returns the total number of active Relu nodes.
         """
         if self.active_count is None:
-            self.active_count = np.sum(self.get_active_flag())
+            self.active_count = torch.sum(self.get_active_flag())
 
         return self.active_count
 
-    def get_inactive_flag(self) -> np.array:
+    def get_inactive_flag(self) -> torch.tensor:
         """
         Returns an array of inactivity statuses for each ReLU node.
         """
@@ -1172,16 +1208,16 @@ class Relu(Node):
         Returns the total number of inactive ReLU nodes.
         """
         if self.inactive_count is None:
-            self.inactive_count = np.sum(self.get_inactive_flag())
+            self.inactive_count = torch.sum(self.get_inactive_flag())
 
         return self.inactive_count
 
-    def get_unstable_flag(self) -> np.array:
+    def get_unstable_flag(self) -> torch.tensor:
         """
         Returns an array of instability statuses for each ReLU node.
         """
         if self.unstable_flag is None:
-            self.unstable_flag = np.logical_and(
+            self.unstable_flag = torch.logical_and(
                 self.from_node[0].bounds.lower < 0,
                 self.from_node[0].bounds.upper > 0
             ).flatten()
@@ -1193,16 +1229,16 @@ class Relu(Node):
         Returns the total number of unstable nodes.
         """
         if self.unstable_count is None:
-            self.unstable_count = np.sum(self.get_unstable_flag())
+            self.unstable_count = torch.sum(self.get_unstable_flag())
 
         return self.unstable_count
 
-    def get_stable_flag(self) -> np.array:
+    def get_stable_flag(self) -> torch.tensor:
         """
         Returns an array of instability statuses for each ReLU node.
         """
         if self.stable_flag is None:
-            self.stable_flag = np.logical_or(
+            self.stable_flag = torch.logical_or(
                 self.get_active_flag(),
                 self.get_inactive_flag()
             ).flatten()
@@ -1214,16 +1250,16 @@ class Relu(Node):
         Returns the total number of unstable nodes.
         """
         if self.stable_count is None:
-            self.stable_count = np.sum(self.get_stable_flag())
+            self.stable_count = torch.sum(self.get_stable_flag()).item()
 
         return self.stable_count
 
-    def get_propagation_flag(self) -> np.array:
+    def get_propagation_flag(self) -> torch.tensor:
         """
         Returns an array of sip propagation statuses for each node.
         """
         if self.propagation_flag is None:
-            self.propagation_flag = np.logical_or(
+            self.propagation_flag = torch.logical_or(
                 self.get_active_flag(),
                 self.get_unstable_flag()
             ).flatten()
@@ -1235,17 +1271,19 @@ class Relu(Node):
         Returns the total number of sip propagation nodes.
         """
         if self.propagation_count is None:
-            self.propagation_count = np.sum(self.get_propagation_flag())
+            self.propagation_count = torch.sum(self.get_propagation_flag())
 
         return self.propagation_count
  
-    def get_upper_relaxation_slope(self) -> np.array:
+    def get_upper_relaxation_slope(self) -> torch.tensor:
         """
         Returns:
 
         The upper relaxation slope for each of the ReLU nodes.
         """
-        slope = np.zeros(self.output_size, dtype=self.config.PRECISION)
+        slope = torch.zeros(
+            self.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
+        )
         upper = self.from_node[0].bounds.upper.flatten()[self.get_unstable_flag()]
         lower = self.from_node[0].bounds.lower.flatten()[self.get_unstable_flag()]
         slope[self.get_unstable_flag()] = upper /  (upper - lower)
@@ -1259,7 +1297,9 @@ class Relu(Node):
 
         The upper relaxation slope for each of the ReLU nodes.
         """
-        slope = np.ones(self.output_size, dtype=self.config.PRECISION)
+        slope = torch.ones(
+            self.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
+        )
         upper = self.from_node[0].bounds.upper.flatten()
         lower = self.from_node[0].bounds.lower.flatten()
         idxs = abs(lower) >=  upper
@@ -1313,9 +1353,7 @@ class Reshape(Node):
 
     def copy(self):
         """
-        Returns: 
-
-            a copy of the calling object.
+        Copies the node.
         """
         return Reshape(
             self.from_node,
@@ -1366,7 +1404,7 @@ class Flatten(Node):
             from_node,
             to_node,
             input_shape,
-            (np.prod(input_shape), ),
+            (np.prod(input_shape),),
             config,
             depth=depth,
             bounds=bounds,
@@ -1375,9 +1413,7 @@ class Flatten(Node):
 
     def copy(self):
         """
-        Returns:
-
-            a copy of the calling object.
+        Copies the node.
         """
         return Flatten(
             self.from_node,
@@ -1396,7 +1432,7 @@ class Flatten(Node):
         """
         return 0
 
-    def forward(self, inp: tf.Tensor=None, save_output=False) -> tf.Tensor:
+    def forward(self, inp: torch.tensor=None, save_output=False) -> torch.tensor:
         """
         Computes the output of the node given an input.
 
@@ -1411,7 +1447,7 @@ class Flatten(Node):
         assert inp is not None or self.from_node[0].output is not None
         inp = self.from_node[0].output if inp is None else inp
 
-        output = tf.reshape(inp, [-1])[:, tf.newaxis]
+        output = inp.flatten()
 
         if save_output:
             self.output = output
@@ -1463,16 +1499,31 @@ class Sub(Node):
 
     def copy(self):
         """
-        Returns:
-
-            a copy of the calling object.
+        Copies the node.
         """
         return Sub(
             self.from_node,
             self.to_node,
             self.input_shape,
             self.config,
-            const=None if self.const is None else self.const.copy(),
+            const=None if self.const is None else self.const.detach().clone(),
+            depth=self.depth,
+            bounds=self.bounds,
+            id=self.id
+        )
+
+    def numpy(self):
+        """
+        Returns:
+
+            a copy of the calling object with numpy data.
+        """
+        return Sub(
+            self.from_node,
+            self.to_node,
+            self.input_shape,
+            self.config,
+            const=None if self.const is None else self.const.numpy(),
             depth=self.depth,
             bounds=self.bounds,
             id=self.id
@@ -1486,7 +1537,7 @@ class Sub(Node):
         return self.output_size
 
 
-    def forward(self, inp1: np.array=None, inp2: np.array=None, save_output=False) -> np.array:
+    def forward(self, inp1: torch.tensor=None, inp2: torch.tensor=None, save_output=False) -> torch.tensor:
         """
         Computes the output of the node given an input.
 
@@ -1508,14 +1559,38 @@ class Sub(Node):
         inp1 = self.from_node[0].output if inp1 is None else inp1
         inp2 = self.const if inp2 is None else inp2
 
-        output = tf.subtract(inp1, inp2)
+        output = inp1 - inp2
 
         if save_output:
             self.output = output
 
         return output
 
-    def transpose(self, inp: np.array) -> np.array:
+    def forward_numpy(self, inp1: np.array, inp2: np.array=None) -> np.array:
+        """
+        Computes the output of the node given a numpy input.
+
+        Arguments:
+            inp1:
+                the first input.
+            inp2:
+                the second input. If not set then the const of the node is
+                taken as second input.
+            save_output:
+                Whether to save the output in the node.
+        Returns:
+            the output of the node.
+        """
+
+        assert inp2 is not None or self.const is not None
+
+        inp2 = self.const.numpy() if inp2 is None else inp2
+
+        output = inp1 - inp2
+
+        return output
+
+    def transpose(self, inp: torch.tensor) -> torch.tensor:
         """
         Computes the input to the node given an output.
 
@@ -1582,9 +1657,7 @@ class Add(Node):
 
     def copy(self):
         """
-        Returns:
-
-            a copy of the calling object.
+        Copies the node.
         """
         return Add(
             self.from_node,
@@ -1597,6 +1670,23 @@ class Add(Node):
             id=self.id
         )
 
+    def numpy(self):
+        """
+        Returns:
+
+            a copy of the calling object with numpy data.
+        """
+        return Add(
+            self.from_node,
+            self.to_node,
+            self.input_shape,
+            self.config,
+            const = None if self.const is None else self.const.numpy(),
+            depth=self.depth,
+            bounds=self.bounds,
+            id=self.id
+        )
+
     def get_milp_var_size(self):
         """
         Returns the number of milp variables required for the milp encoding of
@@ -1604,7 +1694,7 @@ class Add(Node):
         """
         return self.output_size
 
-    def forward(self, inp1: tf.Tensor=None, inp2: tf.Tensor=None, save_output=False) -> tf.Tensor:
+    def forward(self, inp1: torch.tensor=None, inp2: torch.tensor=None, save_output=False) -> torch.tensor:
         """
         Computes the output of the node given an input.
 
@@ -1632,7 +1722,31 @@ class Add(Node):
 
         return output
 
-    def transpose(self, inp: np.array) -> np.array:
+    def forward_numpy(self, inp1: np.array, inp2: np.array=None) -> np.array:
+        """
+        Computes the output of the node given a numpy input.
+
+        Arguments:
+            inp1:
+                the first input.
+            inp2:
+                the second input. If not set then the const of the node is
+                taken as second input.
+            save_output:
+                Whether to save the output in the node.
+        Returns:
+            the output of the node.
+        """
+
+        assert inp2 is not None or self.const is not None
+
+        inp2 = self.const.numpy() if inp2 is None else inp2
+
+        output = inp1 + inp2
+
+        return output
+
+    def transpose(self, inp: torch.tensor) -> torch.tensor:
         """
         Computes the input to the node given an output.
 
@@ -1657,10 +1771,10 @@ class BatchNormalization(Node):
         from_node: list,
         to_node: list,
         input_shape: tuple,
-        scale: np.array,
-        bias: np.array,
-        input_mean: np.array,
-        input_var: np.array,
+        scale: torch.tensor,
+        bias: torch.tensor,
+        input_mean: torch.tensor,
+        input_var: torch.tensor,
         epsilon: float,
         config: Config,
         depth=None,
@@ -1711,9 +1825,7 @@ class BatchNormalization(Node):
 
     def copy(self):
         """
-        Returns:
-
-            a copy of the calling object.
+        Copies the node.
         """
         return BatchNormalization(
             self.from_node,
@@ -1737,7 +1849,7 @@ class BatchNormalization(Node):
         """
         return self.output_size
 
-    def forward(self, inp: tf.Tensor=None, save_output=False) -> tf.Tensor:
+    def forward(self, inp: torch.tensor=None, save_output=False) -> torch.tensor:
         """
         Computes the output of the node given an input.
 
@@ -1769,7 +1881,7 @@ class BatchNormalization(Node):
 
         return output
 
-    def transpose(self, inp: np.array) -> np.array:
+    def transpose(self, inp: torch.tensor) -> torch.tensor:
         """
         Computes the input to the node given an output.
 

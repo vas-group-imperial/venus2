@@ -14,6 +14,8 @@ import random
 
 from venus.verification.verification_problem import VerificationProblem
 from venus.network.node import Input
+from venus.bounds.bounds import Bounds
+
 
 class InputSplitter:
     """
@@ -43,14 +45,14 @@ class InputSplitter:
         evaluated.
 
         Returns:
-
             list of VerificationProblem
         """
         if self.prob.stability_ratio < self.config.SPLITTER.STABILITY_RATIO_CUTOFF:
             subprobs = self.soft_split()
-            ws = self.prob.worth_split(subprobs, self.init_st_ratio)
-            if ws == True:
+            worth = self.prob.worth_split(subprobs, self.init_st_ratio)
+            if worth is True:
                 return subprobs
+
         return []
 
 
@@ -67,13 +69,14 @@ class InputSplitter:
         """
         if prob is None:
             prob = self.prob
+
         best_ratio = 0
         best_prob1 = None
         best_prob2 = None
 
         if prob.spec.input_node.output_size < self.config.SPLITTER.SMALL_N_INPUT_DIMENSIONS:
-            #If the number of input dimensions is not big, choose the best
-            #dimension to split
+            # If the number of input dimensions is not big, choose the best
+            # dimension to split
             for dim in prob.spec.input_node.get_outputs():
                 prob1, prob2 = self.split_dimension(prob, dim)
                 ratio = (prob1.stability_ratio + prob2.stability_ratio) / 2
@@ -82,7 +85,7 @@ class InputSplitter:
                     best_prob1 = prob1
                     best_prob2 = prob2
         else:
-            #Otherwise split randomly
+            # Otherwise split randomly
             dim = random.choice(prob.spec.input_node.get_outputs())
             best_prob1, best_prob2 =  self.split_dimension(prob, dim)
 
@@ -105,24 +108,23 @@ class InputSplitter:
 
             pair of VerificationProblem
         """
-        l = prob.spec.input_node.bounds.lower
-        u = prob.spec.input_node.bounds.upper
-        split_point = (l[dim] + u[dim]) / 2
-        l1 = l.copy()
-        l1[dim] = split_point
+        l = prob.spec.input_node.bounds.lower.detach().clone()
+        u = prob.spec.input_node.bounds.upper.detach().clone()
+        split_point = (l[dim].item() + u[dim].item()) / 2
+
+        l[dim] = split_point
         prob1 = VerificationProblem(
             prob.nn.copy(),
-            prob.spec.copy(Input(l1, u, self.config)),
+            prob.spec.copy(Input(Bounds(l, u), self.config)),
             prob.depth + 1,
             self.config
         )
         prob1.bound_analysis()
 
-        u2 = u.copy()
-        u2[dim] = split_point
+        u[dim] = split_point
         prob2 = VerificationProblem(
             prob.nn.copy(),
-            prob.spec.copy(Input(l, u2, self.config)),
+            prob.spec.copy(Input(Bounds(l, u), self.config)),
             prob.depth + 1,
             self.config
         )
@@ -150,6 +152,7 @@ class InputSplitter:
         """
         split_depth = 0
         probs = [self.prob]
+
         while split_depth < split_depth_cutoff:
             subprobs = []
             for p in probs:

@@ -12,7 +12,7 @@
 from venus.split.split_strategy import SplitStrategy
 from venus.common.utils import ReluApproximation, OSIPMode
 import multiprocessing
-import numpy as np
+import torch
 
 class Logger():
     LOGFILE: str = "venus_log.txt"
@@ -79,9 +79,14 @@ class Verifier():
     # complete or incomplete verification
     COMPLETE: bool = True
     # number of parallel processes solving subproblems
+    # VER_PROC_NUM: int = multiprocessing.cpu_count()
     VER_PROC_NUM: int = multiprocessing.cpu_count()
     # console output
     CONSOLE_OUTPUT: bool = True
+    # pgd step size
+    PGD_EPS: float = 0.01
+    # pgd number of iterations
+    PGD_NUM_ITER: int = 10
 
 class Splitter():
     # Maximum  depth for node splitting. 
@@ -106,8 +111,6 @@ class Splitter():
     SPLIT_PROC_NUM: int = 2
     # macimum splitting depth
     MAX_SPLIT_DEPTH: int = 1000
-    INTER_DEPS = True
-    INTRA_DEPS = True
 
 class SIP():
 
@@ -166,7 +169,8 @@ class Config:
         self.SPLITTER = Splitter()
         self.VERIFIER = Verifier()
         self.SIP = SIP()
-        self.PRECISION = np.float64
+        self.PRECISION = torch.float32
+        self.DEVICE = torch.device('cpu')
         self._user_set_params = set()
 
     def set_param(self, param, value):

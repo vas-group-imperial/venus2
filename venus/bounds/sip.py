@@ -11,6 +11,7 @@
 
 import math
 import numpy as np
+import torch
 from timeit import default_timer as timer
 import venus
 from venus.network.node import Node, Input, Gemm, Conv, Relu, Flatten, Sub, MatMul, Add
@@ -21,13 +22,12 @@ from venus.common.configuration import Config
 from venus.specification.formula import Formula, TrueFormula, VarVarConstraint, DisjFormula, \
     NAryDisjFormula, ConjFormula, NAryConjFormula
 
-import tensorflow as tf
 
 class SIP:
 
     logger = None
 
-    def __init__(self, nn, config: Config, delta_flags=None):
+    def __init__(self, prob, config: Config, delta_flags=None):
         """
         Arguments:
 
@@ -39,8 +39,8 @@ class SIP:
             logfile:
                 The logfile.
         """
-
-        self.nn = nn
+        self.prob = prob
+        self.nn = prob.nn
         self.config = config
         self.delta_flags = delta_flags
         if SIP.logger is None and config.LOGGER.LOGFILE is not None:
@@ -49,23 +49,13 @@ class SIP:
     def set_bounds(self):
         """
         Sets pre-activation and activation bounds.
-
-        Arguments:
-
-            relu_states:
-                A list of floats, one for each node. 0: inactive, 1:active,
-                anything else: unstable; use this for runtime computation of
-                bounds.
-
-        Returns:
-
-                None
         """
         start = timer()
         saw_non_linear_node = False
         for i in range(self.nn.tail.depth):
             nodes = self.nn.get_node_by_depth(i)
             for j in nodes:
+
                 j.bounds = self.compute_ia_bounds(j)
 
                 if j.has_relu_activation() is not True:
@@ -81,6 +71,7 @@ class SIP:
                     continue
 
                 symb_concr_bounds = self.compute_symb_concr_bounds(j)
+
                 j.bounds.lower[j.to_node[0].get_unstable_flag().reshape(j.output_shape)] = symb_concr_bounds.lower
                 j.bounds.upper[j.to_node[0].get_unstable_flag().reshape(j.output_shape)] = symb_concr_bounds.upper
                 j.to_node[0].reset_state_flags()
@@ -140,13 +131,12 @@ class SIP:
             )
 
         return Bounds(
-            lower.reshape(node.output_shape),
-            upper.reshape(node.output_shape)
+            torch.reshape(lower, node.output_shape),
+            torch.reshape(upper, node.output_shape)
         )
 
     def compute_symb_concr_bounds(self, node: Node) -> Bounds:
         symb_eq = self.compute_symb_eq(node)
-
         return self.back_substitution(symb_eq, node)
 
     def compute_symb_eq(self, node: Node) -> Equation:
@@ -155,7 +145,7 @@ class SIP:
         else:
             flag = node.to_node[0].get_unstable_flag()
         
-        return Equation.derive(node, flag)
+        return Equation.derive(node, flag, self.config)
 
     def osip_eligibility(self, layer):
         if layer.depth == len(self.nodes) - 1:
@@ -192,7 +182,7 @@ class SIP:
             node.to_node[0].get_active_count() == 0:
                 return eq.const
             else:
-                eq = eq.interval_transpose(node, bound)
+                eq = eq.interval_transpose(self.prob.id, node, bound)
 
         else:
             eq = eq.transpose(node)
@@ -359,15 +349,21 @@ class SIP:
 
     def simplify_formula(self, formula):
         if isinstance(formula, VarVarConstraint):
-            coeffs = np.zeros(shape=(1, self.nn.tail.output_size), dtype=self.config.PRECISION)
-            const = np.array([0], dtype=self.config.PRECISION)
+            coeffs = torch.zeros(
+                1, self.nn.tail.output_size, 
+                dtype=self.config.PRECISION,
+                device=self.config.DEVICE
+            )
+            const = torch.tensor(
+                [0], dtype=self.config.PRECISION, device=self.config.DEVICE
+            )
             if formula.sense == Formula.Sense.GT:
                 coeffs[0, formula.op1.i], coeffs[0, formula.op2.i] = 1, -1
             elif formula.sense == Formula.Sense.LT:
                 coeffs[0, formula.op1.i], coeffs[0, formula.op2.i] = -1, 1
             else:
                 raise ValueError('Formula sense {formula.sense} not expeted')
-            equation = Equation(coeffs, const)
+            equation = Equation(coeffs, const, self.config)
             diff = self._back_substitution(
                 equation,
                 self.nn.tail,
