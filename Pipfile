@@ -9,7 +9,7 @@ onnx = "*"
 tqdm = "*"
 sly = "*"
 gurobipy = "*"
-tensorflow = "*"
+torch = "*"
 
 [dev-packages]
 
