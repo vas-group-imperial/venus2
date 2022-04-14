@@ -9,7 +9,9 @@
 # Description: Process for solving a verification problem.
 # ************
 
+import traceback
 from torch.multiprocessing import Process
+
 from venus.common.logger import get_logger
 from venus.solver.milp_solver import MILPSolver
 from venus.solver.solve_report import SolveReport
@@ -75,6 +77,7 @@ class VerificationProcess(Process):
                 del prob
                 self.reporting_queue.put(slv_report)
             except Exception as error:
+                print(traceback.format_exc())
                 VerificationProcess.logger.info(f"Subprocess {self.id} terminated because of {str(error)}.")
                 break
 

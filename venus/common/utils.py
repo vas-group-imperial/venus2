@@ -9,6 +9,8 @@
 # Description: Auxiliary class definitions and methods.
 """
 
+import sys
+import linecache
 from enum import Enum
 
 class DFSState(Enum):

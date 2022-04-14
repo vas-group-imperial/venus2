@@ -207,9 +207,10 @@ class ONNXParser:
                 pads = [i for i in att.ints[0:2]]
             elif att.name == "strides":
                 strides = [i for i in att.ints[0:2]]
+
         output_shape = Conv.compute_output_shape(
             input_shape,
-            weights.shape + (1,),
+            weights.shape, 
             pads,
             strides
         )

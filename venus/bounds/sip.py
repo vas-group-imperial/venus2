@@ -22,6 +22,7 @@ from venus.common.configuration import Config
 from venus.specification.formula import Formula, TrueFormula, VarVarConstraint, DisjFormula, \
     NAryDisjFormula, ConjFormula, NAryConjFormula
 
+torch.set_num_threads(1)
 
 class SIP:
 
@@ -55,7 +56,6 @@ class SIP:
         for i in range(self.nn.tail.depth):
             nodes = self.nn.get_node_by_depth(i)
             for j in nodes:
-
                 j.bounds = self.compute_ia_bounds(j)
 
                 if j.has_relu_activation() is not True:
@@ -76,9 +76,8 @@ class SIP:
                 j.bounds.upper[j.to_node[0].get_unstable_flag().reshape(j.output_shape)] = symb_concr_bounds.upper
                 j.to_node[0].reset_state_flags()
 
-
         self.nn.tail.bounds = self.compute_symb_concr_bounds(self.nn.tail)
-        # print(np.average(self.nn.tail.bounds.lower))
+        # print(self.nn.tail.bounds.lower)
 
         if self.logger is not None:
             SIP.logger.info('Bounds computed, time: {:.3f}, '.format(timer()-start))
@@ -141,10 +140,10 @@ class SIP:
 
     def compute_symb_eq(self, node: Node) -> Equation:
         if len(node.to_node) == 0 or node.has_relu_activation() is not True:
-            flag = np.ones(node.output_size, bool)
+            flag = torch.ones(node.output_size, dtype=torch.bool)
         else:
             flag = node.to_node[0].get_unstable_flag()
-        
+      
         return Equation.derive(node, flag, self.config)
 
     def osip_eligibility(self, layer):
@@ -182,7 +181,7 @@ class SIP:
             node.to_node[0].get_active_count() == 0:
                 return eq.const
             else:
-                eq = eq.interval_transpose(self.prob.id, node, bound)
+                eq = eq.interval_transpose(node, bound)
 
         else:
             eq = eq.transpose(node)

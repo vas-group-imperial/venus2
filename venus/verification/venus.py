@@ -77,6 +77,16 @@ class Venus:
                 self.config
             )
             spec = vnn_parser.parse()
+           
+            # import onnx
+            # import onnxruntime.backend as rt
+            # m = onnx.load('cifar10_8_255_simplified.onnx')
+            # runnable = rt.prepare(m, 'CPU')
+            # pred = runnable.run(spec[0].input_node.bounds.lower.numpy())
+            # print(pred)
+            # import sys
+            # sys.exit()
+
             # verify
             ver_report = self.verify_query(nn, spec)
             if ver_report.result == SolveResult.SAFE:

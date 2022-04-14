@@ -83,8 +83,8 @@ class Verifier():
     VER_PROC_NUM: int = multiprocessing.cpu_count()
     # console output
     CONSOLE_OUTPUT: bool = True
-    # pgd step size
-    PGD_EPS: float = 0.01
+    # pgd step size - The epsilon will be divided by this number.
+    PGD_EPS: float = 10
     # pgd number of iterations
     PGD_NUM_ITER: int = 10
 

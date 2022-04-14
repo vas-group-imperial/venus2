@@ -18,7 +18,7 @@ import itertools
 from venus.input.onnx_parser import ONNXParser
 from venus.specification.specification import Specification
 from venus.specification.formula import TrueFormula
-from venus.network.node import Input, Gemm, Relu, MatMul, Add, Constant
+from venus.network.node import Input, Gemm, Relu, MatMul, Add, Constant, Conv
 from venus.bounds.sip import SIP
 from venus.common.logger import get_logger
 from venus.common.configuration import Config
@@ -232,34 +232,34 @@ class NeuralNetwork:
 
     def calc_neighbouring_units(self, p_node, s_node, index):
         """
-        Determines the neighbouring units of two given nodes. 
+        Given a unit it determines its neighbouring units from the previous
+        node.
 
         Arguments:
-
             p_node:
                 the preceding node.
             n_node:
                 the subsequent node.
             index: 
                 the index of the node.
-
         Returns:
-
             a list of indices of neighbouring units.
         """
         if isinstance(s_node, Gemm):
             return p_node.get_outputs()
 
         elif isinstance(s_node, Conv):
-            x_start = index[0] * s_node.strides[0] - s_node.padding[0]
-            x_rng = range(x_start, x_start + s_node.height)
-            x = [i for i in x_rng if i >= 0 and i < s_node.height]
-            y_start = index[1] * s_node.strides[1] - s_node.padding[1]
-            y_rng = range(y_start, y_start + s_node.width)
-            y = [i for i in y_rng if i >= 0 and i < s_node.width]
-            z = [i for i in range(l.kernels.in_ch)]
+            height_start = index[0] * s_node.strides[0] - s_node.padding[0]
+            height_rng = range(height_start, height_start + s_node.krn_height)
+            height = [i for i in height_rng if i >= 0 and i < s_node.krn_height]
+            width_start = index[1] * s_node.strides[1] - s_node.padding[1]
+            width_rng = range(width_start, width_start + s_node.krn_width)
+            width = [i for i in width_rng if i >= 0 and i < s_node.krn_width]
+            ch = [i for i in range(s_node.in_ch)]
 
-            return [i for i in itertools.product(*[x,y,z])]
+            shape = [ch, height, width] if len(p_node.output_shape) == 3 else [[0], ch, height, width]
+
+            return [i for i in itertools.product(*shape)]
 
     def forward(self, inp):
         """

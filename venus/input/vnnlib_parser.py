@@ -33,15 +33,15 @@ class VNNLIBParser:
 
     def parse(self):
         with open(self.pf, 'r') as f:
-            s = f.read()
+            string = f.read()
         lexer = VNNLexer()
         parser = VNNParser(self.X_SZ, self.config)
-        i_b, o_f, i_cl = parser.parse(lexer.tokenize(s))
+        i_b, o_f, i_cl = parser.parse(lexer.tokenize(string))
         specs = []
         if len(i_cl) == 0:
             bounds = Bounds(
-                torch.reshape(i_b[0], self.input_shape),
-                torch.reshape(i_b[1], self.input_shape)
+                i_b[0].reshape(self.input_shape),
+                i_b[1].reshape(self.input_shape)
             )
             specs.append(
                 Specification(

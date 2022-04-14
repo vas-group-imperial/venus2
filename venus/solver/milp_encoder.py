@@ -186,11 +186,12 @@ class MILPEncoder:
                 elif isinstance(j, Flatten):
                     pass
 
-                elif type(j) in [Gemm, MatMul, Sub, Add, BatchNormalization]:
+                elif type(j) in [Gemm, Conv, MatMul, Sub, Add, BatchNormalization]:
                     self.add_linear_constrs(j, gmodel)
 
                 else:
                     raise TypeError(f'The MILP encoding of node {j} is not supported')
+
     
 
     def add_linear_constrs(self, node: Gemm, gmodel: Model):
@@ -206,13 +207,13 @@ class MILPEncoder:
             gmodel:
                 Gurobi model.
         """
-        assert type(node) in [Gemm, MatMul, Sub, Add, BatchNormalization], f"Cannot compute sub onstraints for type(j) nodes."
+        assert type(node) in [Gemm, Conv, MatMul, Sub, Add, BatchNormalization], f"Cannot compute sub onstraints for {type(j)} nodes."
         
         if type(node) in ['Sub', 'Add'] and node.const is not None:
             output = node.forward_numpy(
                 node.from_node[0].out_vars, node.from_node[1].out_vars
             )
-        
+ 
         else:
             output = node.forward_numpy(node.from_node[0].out_vars)
 

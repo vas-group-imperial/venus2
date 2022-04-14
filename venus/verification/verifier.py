@@ -81,14 +81,10 @@ class Verifier:
         """
         ver_report = VerificationReport(self.config.LOGGER.LOGFILE)
         start = timer()
+
         # try pgd
         pgd = ProjectedGradientDescent(self.config)
-        cex= pgd.start(
-            self.prob, self.config.VERIFIER.PGD_EPS, self.config.VERIFIER.PGD_NUM_ITER
-        )
-
-        # self.prob.nn.detach()
-        # self.prob.spec.input_node.bounds.detach()
+        cex = pgd.start(self.prob)
         if cex is not None:
             ver_report.result = SolveResult.UNSAFE
             ver_report.cex = cex

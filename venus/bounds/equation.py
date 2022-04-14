@@ -43,8 +43,8 @@ class Equation():
 
     def copy(self, matrix=None, const=None) -> Equation:
         return Equation(
-            self.matrix.copy(),
-            self.const.copy(),
+            self.matrix.detach().clone(),
+            self.const.detach().clone(),
             self.size
         )
  
@@ -194,7 +194,7 @@ class Equation():
         return Equation(matrix, const, self.config)
 
 
-    def interval_transpose(self, x, node, bound):
+    def interval_transpose(self, node, bound):
         assert node.has_relu_activation() is True, "Interval transpose is not supported for nodes without relu activation."
 
         lower_slope = node.to_node[0].get_lower_relaxation_slope()
@@ -248,32 +248,27 @@ class Equation():
     @staticmethod
     def _get_matrix(node: Node, flag: torch.Tensor) -> torch.Tensor:
         if isinstance(node, Conv):
-            # transpose kernel for tf conv operations
-            kernels = node.kernels.transpose(2, 3, 1, 0)
-            flag_size = np.sum(flag)
-            prop_flag = np.zeros(node.get_input_padded_size(), bool)
+            flag_size = torch.sum(flag).item()
+            prop_flag = torch.zeros(node.get_input_padded_size(), dtype=torch.bool)
+            
             prop_flag[node.get_non_pad_idxs()] = True
-            pad = np.ones(
+            pad = torch.ones(
                 node.get_input_padded_size(),
-                dtype=np.uint
+                dtype=torch.long
             ) * node.input_size
-            pad[prop_flag] = np.arange(node.input_size)
-            conv_indices = np.repeat(
-                Conv.im2col(
-                    pad.reshape(node.get_input_padded_shape()),
-                    (node.height, node.width),
-                    node.strides
-                ),
-                node.out_ch,
-                axis=1
-            )[:, flag]
-            matrix = np.zeros((flag_size, node.input_size + 1), dtype=node.config.PRECISION)
-            matrix[range(flag_size), conv_indices] = torch.Tensor(
-                [
-                    kernels[..., i].flatten()
-                    for j in range(int(node.output_size / node.out_ch)) for i in range(node.out_ch)
-                ]
-            ).T[:, flag]
+            pad[prop_flag] = torch.arange(node.input_size)
+            im2col = Conv.im2col(
+                pad.reshape(node.get_input_padded_shape()),
+                (node.krn_height, node.krn_width),
+                node.strides
+            )
+            conv_indices = im2col.repeat(1, node.out_ch)[:, flag]
+            conv_weights = node.kernels.permute(1, 2, 3, 0).reshape(-1, node.out_ch)
+            conv_weights = torch.repeat_interleave(conv_weights, node.out_ch_sz, dim=1)[:, flag]
+                                                # )repeat(
+                # 1, node.out_ch_sz)[:, flag]
+            matrix = torch.zeros((flag_size, node.input_size + 1), dtype=node.config.PRECISION)
+            matrix[torch.arange(flag_size), conv_indices] = conv_weights
 
             return matrix[:, :node.input_size]
 
@@ -294,10 +289,8 @@ class Equation():
     def _get_const(node: Node, flag: torch.Tensor) -> torch.Tensor:
         if isinstance(node, Conv):
             out_ch_size = int(node.output_size / node.out_ch)
-
-            return torch.Tensor(
-                [node.bias for i in range(out_ch_size)]
-            ).flatten()[flag]
+            
+            return torch.tile(node.bias, (out_ch_size, 1)).T.flatten()[flag]
 
         elif isinstance(node, Gemm):
             return node.bias[flag]
