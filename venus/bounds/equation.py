@@ -239,7 +239,11 @@ class Equation():
             return Equation(
                 np.zeros((torch.sum(flag), 0)), Equation._get_const(node, flag), config
             )
-
+        x = Equation._get_matrix(node, flag)
+        print('asdsadasdasds')
+        print('asdsadasdasds')
+        print('asdsadasdasds')
+        print('asdsadasdasds')
         return Equation(
             Equation._get_matrix(node, flag), Equation._get_const(node, flag), config
         )
@@ -265,8 +269,6 @@ class Equation():
             conv_indices = im2col.repeat(1, node.out_ch)[:, flag]
             conv_weights = node.kernels.permute(1, 2, 3, 0).reshape(-1, node.out_ch)
             conv_weights = torch.repeat_interleave(conv_weights, node.out_ch_sz, dim=1)[:, flag]
-                                                # )repeat(
-                # 1, node.out_ch_sz)[:, flag]
             matrix = torch.zeros((flag_size, node.input_size + 1), dtype=node.config.PRECISION)
             matrix[torch.arange(flag_size), conv_indices] = conv_weights
 

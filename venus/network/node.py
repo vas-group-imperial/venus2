@@ -18,6 +18,7 @@ import torch
 from venus.bounds.bounds import Bounds
 from venus.common.configuration import Config
 from venus.common.utils import ReluState
+from venus.split.split_strategy import SplitStrategy
 
 torch.set_num_threads(1)
 
@@ -32,7 +33,7 @@ class Node:
         input_shape: tuple,
         output_shape: tuple,
         config: Config,
-        depth=None,
+        depth=0,
         bounds=Bounds(),
         id=None,
     ):
@@ -71,10 +72,9 @@ class Node:
 
     def get_outputs(self):
         """
-        Constructs a list of the indices of the nodes in the layer.
+        Constructs a list of the indices of the units in the node.
 
         Returns: 
-
             list of indices.
         """
         if self.outputs is not None:
@@ -207,6 +207,7 @@ class Constant(Node):
             bounds=Bounds(const, const),
             id=id
         )
+        self.const = const
 
     def copy(self):
         """
@@ -265,7 +266,7 @@ class Gemm(Node):
         weights: torch.tensor,
         bias: torch.tensor,
         config: Config,
-        depth=None,
+        depth=0,
         bounds=Bounds(),
         id=None
     ):
@@ -455,7 +456,7 @@ class MatMul(Node):
         output_shape: tuple,
         weights: torch.tensor,
         config: Config,
-        depth=None,
+        depth=0,
         bounds=Bounds(),
         id=None
     ):
@@ -571,10 +572,10 @@ class MatMul(Node):
             weights = self.weights
 
         elif clip == '+':
-            weights = tf.clip_by_value(self.weights, 0, math.inf)
+            weights = torch.clamp(self.weights, 0, math.inf)
 
         elif clip == '-':
-            weights = tf.clip_by_value(self.weights, -math.inf, 0)
+            weights = torch.clamp(self.weights, -math.inf, 0)
 
         else:
             raise ValueError(f'Kernel clip value {clip} not recognised')
@@ -626,13 +627,12 @@ class Conv(Node):
         from_node: list, 
         to_node: list,
         input_shape: tuple,
-        output_shape: tuple,
         kernels: torch.tensor,
         bias: torch.tensor,
-        padding: tuple,
+        pads: tuple,
         strides: tuple,
         config: Config,
-        depth=None,
+        depth=0,
         bounds=Bounds(),
         id=None
     ):
@@ -645,14 +645,12 @@ class Conv(Node):
                 list of output nodes.
             input_shape:
                 shape of the input tensor to the node. 
-            output_shape:
-                shape of the output tensor to the node.
             kernels:
                 the kernels.
             bias:
                 bias vector.
-            padding:
-                the padding.
+            pads:
+                the pads.
             strides:
                 the strides.
             config:
@@ -662,6 +660,9 @@ class Conv(Node):
             bounds:
                 the concrete bounds of the node.
         """
+        output_shape = Conv.compute_output_shape(
+            input_shape, kernels.shape, pads, strides
+        )
         super().__init__(
             from_node,
             to_node,
@@ -672,11 +673,10 @@ class Conv(Node):
             bounds=bounds,
             id=id
         )
-        assert len(input_shape) in [3, 4]
 
         self.kernels = kernels
         self.bias = bias
-        self.padding = padding
+        self.pads = pads
         self.strides = strides
         if len(input_shape) == 3:
             _, self.in_height, self.in_width = input_shape
@@ -695,10 +695,9 @@ class Conv(Node):
             self.from_node,
             self.to_node,
             self.input_shape,
-            self.output_shape,
             self.kernels,
             self.bias,
-            self.padding,
+            self.pads,
             self.strides,
             self.config,
             depth=self.depth,
@@ -717,7 +716,7 @@ class Conv(Node):
             self.output_shape,
             self.kernels.numpy(),
             self.bias.numpy(),
-            self.padding,
+            self.pads,
             self.strides,
             self.config,
             depth=self.depth,
@@ -763,9 +762,9 @@ class Conv(Node):
          
             the weight.
         """
-        height_start = index1[0] * self.strides[0] - self.padding[0]
+        height_start = index1[0] * self.strides[0] - self.pads[0]
         height = index2[0] - height_start
-        width_start = index1[1] * self.strides[1] - self.padding[1]
+        width_start = index1[1] * self.strides[1] - self.pads[1]
         width = index2[1] - width_start
 
         return self.kernels[index1[0]][index2[0]][height][width]
@@ -813,15 +812,11 @@ class Conv(Node):
         output = torch.nn.functional.conv2d(
             inp,
             kernels,
+            bias = self.bias if add_bias is True else None,
             stride=self.strides,
-            padding=self.padding,
-        ).flatten()
-
-        if add_bias is True:
-            output = output.flatten() + torch.tile(self.bias, (self.out_ch_sz, 1)).T.flatten()
-
-        output = output.reshape(self.output_shape)
-                    
+            padding=self.pads
+        )
+            
         if save_output:
             self.output = output
 
@@ -843,7 +838,7 @@ class Conv(Node):
         assert inp is not None or self.from_node[0].output is not None
         inp = self.from_node[0].output if inp is None else inp
 
-        padded_inp = Conv.pad(inp, self.padding)
+        padded_inp = Conv.pad(inp, self.pads)
 
         inp_strech = Conv.im2col(
             padded_inp, (self.krn_height, self.krn_width), self.strides
@@ -873,30 +868,16 @@ class Conv(Node):
             
             the input of the node.
         """
-        out_pad_height = self.in_height - (self.out_height - 1) * self.strides[0] + 2 * self.padding[0] - self.krn_height
-        out_pad_width = self.in_width - (self.out_width - 1) * self.strides[0] + 2 * self.padding[0] - self.krn_width
+        out_pad_height = self.in_height - (self.out_height - 1) * self.strides[0] + 2 * self.pads[0] - self.krn_height
+        out_pad_width = self.in_width - (self.out_width - 1) * self.strides[0] + 2 * self.pads[0] - self.krn_width
 
         return torch.nn.functional.conv_transpose2d(
             inp.reshape((inp.shape[0], self.out_ch, self.out_height, self.out_width)),
             self.kernels,
             stride=self.strides,
-            padding=self.padding,
+            padding=self.pads,
             output_padding=(out_pad_height, out_pad_width)
         ).reshape(inp.shape[0], - 1)
-
-        # return tf.nn.conv2d_transpose(
-            # inp.reshape((inp.shape[0],) + self.output_shape),
-            # self.kernels.transpose(2, 3, 1, 0),
-            # (inp.shape[0], ) + self.input_shape,
-            # self.strides,
-            # padding = [
-                # [0, 0],
-                # [self.padding[0], self.padding[0]],
-                # [self.padding[1], self.padding[1]],
-                # [0, 0]
-            # ]
-        # ).numpy().reshape(inp.shape[0], -1)
-
 
     def get_non_pad_idxs(self) -> torch.tensor:
         """
@@ -909,7 +890,7 @@ class Conv(Node):
         else:
             _, in_ch, height, width = self.input_shape
 
-        pad_height, pad_width = self.padding
+        pad_height, pad_width = self.pads
         size = self.get_input_padded_size()
         non_pad_idxs = torch.arange(size, dtype=torch.long).reshape(
             self.in_ch,
@@ -925,7 +906,7 @@ class Conv(Node):
 
                 Size of the padded input.
         """
-        return (self.in_height + 2 * self.padding[0]) * (self.in_width + 2 * self.padding[1]) * self.in_ch
+        return (self.in_height + 2 * self.pads[0]) * (self.in_width + 2 * self.pads[1]) * self.in_ch
         
 
     def get_input_padded_shape(self) -> tuple:
@@ -934,23 +915,22 @@ class Conv(Node):
         """  
         return (
             self.in_ch,
-            self.in_height + 2 * self.padding[0],
-            self.in_width + 2 * self.padding[1],
+            self.in_height + 2 * self.pads[0],
+            self.in_width + 2 * self.pads[1],
         )
-        
-
+       
     @staticmethod
-    def compute_output_shape(in_shape: tuple, weights_shape: tuple, padding: tuple, strides: tuple) -> tuple:
+    def compute_output_shape(in_shape: tuple, weights_shape: tuple, pads: tuple, strides: tuple) -> tuple:
         """
-        Computes the output shape of a convolutional layer.
+        Computes the output shape of the node.
 
         Arguments:
             in_shape:
-                shape of the input tensor to the layer.
+                shape of the input tensor to the node.
             weights_shape:
-                shape of the kernels of the layer.
-            padding:
-                pair of int for the width and height of the padding.
+                shape of the kernels of the node.
+            pads:
+                pair of int for the width and height of the pads.
             strides:
                 pair of int for the width and height of the strides.
         Returns:
@@ -966,10 +946,10 @@ class Conv(Node):
         out_ch, _, k_height, k_width = weights_shape
 
         out_height = int(math.floor(
-            (in_height - k_height + 2 * padding[0]) / strides[0] + 1
+            (in_height - k_height + 2 * pads[0]) / strides[0] + 1
         ))
         out_width = int(math.floor(
-            (in_width - k_width + 2 * padding[1]) / strides[1] + 1
+            (in_width - k_width + 2 * pads[1]) / strides[1] + 1
         ))
       
         if len(in_shape) == 3:
@@ -978,7 +958,7 @@ class Conv(Node):
             return batch, out_ch, out_height, out_width
 
     @staticmethod
-    def pad(inp: torch.tensor, padding: tuple, values: tuple=(0,0)) -> torch.tensor:
+    def pad(inp: torch.tensor, pads: tuple, values: tuple=(0,0)) -> torch.tensor:
         """
         Pads a given matrix with constants.
 
@@ -986,8 +966,8 @@ class Conv(Node):
             
             inp:
                 matrix.
-            padding:
-                the padding.
+            pads:
+                the pads.
             values:
                 the constants.
 
@@ -997,15 +977,15 @@ class Conv(Node):
         """
         assert(len(inp.shape)) in [3, 4]
 
-        if padding == (0, 0):
+        if pads == (0, 0):
             return inp
        
         if len(inp.shape) == 3:
-            padding = ((0, 0), padding, padding)
+            pads = ((0, 0), pads, pads)
         else:
-            padding = ((0, 0), (0, 0), padding, padding)
+            pads = ((0, 0), (0, 0), pads, pads)
 
-        return np.pad(inp, padding, 'constant', constant_values=values)
+        return np.pad(inp, pads, 'constant', constant_values=values)
 
 
     @staticmethod
@@ -1053,6 +1033,588 @@ class Conv(Node):
         return opr.take(matrix, start_idx.ravel()[:, None] + offset_idx.ravel())
 
 
+class ConvTranspose(Node):
+    def __init__(
+        self,
+        from_node: list, 
+        to_node: list,
+        input_shape: tuple,
+        kernels: torch.tensor,
+        bias: torch.tensor,
+        pads: tuple,
+        output_pads: tuple,
+        strides: tuple,
+        config: Config,
+        depth=0,
+        bounds=Bounds(),
+        id=None
+    ):
+        """
+        Arguments:
+
+            from_node:
+                list of input nodes.
+            to_node:
+                list of output nodes.
+            input_shape:
+                shape of the input tensor to the node. 
+            kernels:
+                the kernels.
+            bias:
+                bias vector.
+            pads:
+                the pads.
+            output_pads:
+                the output pads.
+            strides:
+                the strides.
+            config:
+                configuration.
+            depth:
+                the depth of the node.
+            bounds:
+                the concrete bounds of the node.
+        """
+        output_shape = ConvTranspose.compute_output_shape(
+            input_shape, kernels.shape, pads, output_pads, strides
+        )
+        super().__init__(
+            from_node,
+            to_node,
+            input_shape,
+            output_shape,
+            config,
+            depth=depth,
+            bounds=bounds,
+            id=id
+        )
+        assert len(input_shape) in [3, 4]
+
+        self.kernels = kernels
+        self.bias = bias
+        self.pads = pads
+        self.output_pads = output_pads
+        self.strides = strides
+        if len(input_shape) == 3:
+            _, self.in_height, self.in_width = input_shape
+            _, self.out_height, self.out_width = output_shape
+        else:
+            _, _, self.in_height, self.in_width = input_shape
+            _, _, self.out_height, self.out_width = output_shape
+        self.out_ch,  self.in_ch, self.krn_height, self.krn_width = kernels.shape
+        self.out_ch_sz = int(self.output_size / self.out_ch)
+
+    def copy(self):
+        """
+        Copies the node.
+        """
+        return Conv(
+            self.from_node,
+            self.to_node,
+            self.input_shape,
+            self.output_shape,
+            self.kernels,
+            self.bias,
+            self.pads,
+            self.output_pads,
+            self.strides,
+            self.config,
+            depth=self.depth,
+            bounds=self.bounds.copy(),
+            id=self.id
+        )
+
+    def numpy(self):
+        """
+        Copies the node with numpy data.
+        """
+        return Conv(
+            self.from_node,
+            self.to_node,
+            self.input_shape,
+            self.output_shape,
+            self.kernels.numpy(),
+            self.bias.numpy(),
+            self.pads,
+            self.output_pads,
+            self.strides,
+            self.config,
+            depth=self.depth,
+            bounds=self.bounds,
+            id=self.id
+        )
+         
+    def get_milp_var_size(self):
+        """
+        Returns the number of milp variables required for the milp encoding of
+        the node.
+        """
+        return self.output_size
+
+    def get_bias(self, index: tuple):
+        """
+        Returns the bias of the given output.
+
+        Arguments:
+
+            index: 
+                the index of the output.
+
+        Returns:
+            
+            the bias.
+        """
+        return self.bias[index[-1]]
+
+    def edge_weight(self, index1: tuple, index2: tuple):
+        """
+        Returns the weight of the edge between output with index1 of the
+        current node and output with index2 of the previous node.
+
+        Arguments:
+
+            index1:
+                index of the output of the current node.
+            index2:
+                index of the output of the previous node.
+
+        Returns:
+         
+            the weight.
+        """
+        height_start = index1[0] * self.strides[0] - self.pads[0]
+        height = index2[0] - height_start
+        width_start = index1[1] * self.strides[1] - self.pads[1]
+        width = index2[1] - width_start
+
+        return self.kernels[index1[0]][index2[0]][height][width]
+        return self.kernels[index1[0]][index2[0]][height][width]
+
+
+    def forward(
+        self,
+        inp: np.array=None,
+        clip=None,
+        add_bias=True,
+        save_output=False
+    ) -> torch.tensor:
+        """
+        Computes the output of the node given an input.
+
+        Arguments:
+            inp:
+                the input.
+            clip:
+                clips the weights to positive values if set to '+' and to
+                negatives if set to '-'
+            add_bias:
+                whether to add bias
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0].output if inp is None else inp
+
+        if clip is None:
+            kernels = self.kernels
+
+        elif clip == '+':
+            kernels = torch.clamp(self.kernels, 0, math.inf)
+
+        elif clip == '-':
+            kernels = torch.clamp(self.kernels, -math.inf, 0)
+
+        else:
+            raise ValueError(f'Kernel clip value {kernel_clip} not recognised')
+
+   
+        output = torch.nn.functional.conv_transpose2d(
+            inp,
+            kernels,
+            bias = self.bias if add_bias is True else None,
+            stride=self.strides,
+            padding=self.pads,
+            output_padding=self.output_pads
+        )
+
+        if save_output:
+            self.output = output
+
+        return output
+
+    def forward_numpy(self, inp: np.array=None, save_output=False) -> np.array:
+        """
+        Computes the output of the node given an input.
+
+        Arguments:
+            inp:
+                the input.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0].output if inp is None else inp
+
+        padded_inp = Conv.pad(inp, self.pads)
+
+        inp_strech = Conv.im2col(
+            padded_inp, (self.krn_height, self.krn_width), self.strides
+        )
+
+        kernel_strech = self.kernels.reshape(self.out_ch, -1).numpy()
+
+        output = kernel_strech @ inp_strech
+        output = output.flatten() + np.tile(self.bias.numpy(), (self.out_ch_sz, 1)).T.flatten()
+        output = output.reshape(self.output_shape)
+
+        if save_output is True:
+            self.output = output
+
+        return output
+
+    def transpose(self, inp: torch.tensor) -> torch.tensor:
+        """
+        Computes the input to the node given an output.
+
+        Arguments:
+
+            inp:
+                the output.
+                
+        Returns:
+            
+            the input of the node.
+        """
+        out_pad_height = self.in_height - (self.out_height - 1) * self.strides[0] + 2 * self.pads[0] - self.krn_height
+        out_pad_width = self.in_width - (self.out_width - 1) * self.strides[0] + 2 * self.pads[0] - self.krn_width
+
+        return torch.nn.functional.conv_transpose2d(
+            inp.reshape((inp.shape[0], self.out_ch, self.out_height, self.out_width)),
+            self.kernels,
+            stride=self.strides,
+            padding=self.pads,
+            output_paddinf=(out_pad_height, out_pad_width)
+        ).reshape(inp.shape[0], - 1)
+
+    def get_non_pad_idxs(self) -> torch.tensor:
+        """
+        Returns:
+
+            Indices of the original input whithin the padded one.
+        """
+        if len(self.input_shape) == 3:
+            in_ch, height, width = self.input_shape
+        else:
+            _, in_ch, height, width = self.input_shape
+
+        pad_height, pad_width = self.pads
+        size = self.get_input_padded_size()
+        non_pad_idxs = torch.arange(size, dtype=torch.long).reshape(
+            self.in_ch,
+            height + 2 * pad_height,
+            width + 2 * pad_width
+        )[:, pad_height:height + pad_height, pad_width :width + pad_width].flatten()
+
+        return non_pad_idxs
+
+    def get_input_padded_size(self) -> int:
+        """
+        Returns:
+
+                Size of the padded input.
+        """
+        return (self.in_height + 2 * self.pads[0]) * (self.in_width + 2 * self.pads[1]) * self.in_ch
+        
+
+    def get_input_padded_shape(self) -> tuple:
+        """
+        Computes the shape of padded input.
+        """  
+        return (
+            self.in_ch,
+            self.in_height + 2 * self.pads[0],
+            self.in_width + 2 * self.pads[1],
+        )
+        
+    def compute_output_shape(
+        in_shape: tuple,
+        weights_shape: tuple,
+        pads: tuple,
+        output_pads: tuple,
+        strides: tuple
+    ) -> tuple:
+        """
+        Computes the output shape of the node.
+
+        Arguments:
+            in_shape:
+                shape of the input tensor to the node.
+            weights_shape:
+                shape of the kernels of the node.
+            pads:
+                pair of int for the width and height of the pads.
+            output_pads:
+                pair of int for the width and height of the output padding.
+            strides:.
+                pair of int for the width and height of the strides.
+        Returns:
+            tuple of the output shape
+        """
+        assert len(in_shape) in [3, 4]
+
+        if len(in_shape) == 3:
+            _, in_height, in_width = in_shape
+        else:
+            batch, _, in_height, in_width = in_shape
+
+        out_ch, in_ch, k_height, k_width = weights_shape
+
+        out_height = (in_height - 1) * strides[0] - 2 * pads[0] + k_height + output_pads[0]
+        out_width = (in_width - 1) * strides[0] - 2 * pads[0] + k_width + output_pads[0]
+      
+        if len(in_shape) == 3:
+            return in_ch, out_height, out_width
+        else:
+            return batch, in_ch, out_height, out_width
+
+    @staticmethod
+    def pad(inp: torch.tensor, pads: tuple, values: tuple=(0,0)) -> torch.tensor:
+        """
+        Pads a given matrix with constants.
+
+        Arguments:
+            
+            inp:
+                matrix.
+            pads:
+                the pads.
+            values:
+                the constants.
+
+        Returns
+
+            padded inp.
+        """
+        assert(len(inp.shape)) in [3, 4]
+
+        if pads == (0, 0):
+            return inp
+       
+        if len(inp.shape) == 3:
+            pads = ((0, 0), pads, pads)
+        else:
+            pads = ((0, 0), (0, 0), pads, pads)
+
+        return np.pad(inp, pads, 'constant', constant_values=values)
+
+
+    @staticmethod
+    def im2col(matrix: torch.tensor, kernel_shape: tuple, strides: tuple, indices: bool=False) -> torch.tensor:
+        """
+        im2col function.
+
+        Arguments:
+            matrix:
+                The matrix.
+            kernel_shape:
+                The kernel shape.
+            strides:
+                The strides of the convolution.
+            indices:
+                Whether to select indices (true) or values (false) of the matrix.
+        Returns:
+            im2col matrix
+        """
+        assert len(matrix.shape) in [3, 4], f"{len(matrix.shape)}-D is not supported."
+        assert type(matrix) in [torch.Tensor, np.ndarray], f"{type(matrix)} matrices are not supported."
+
+        opr = torch if isinstance(matrix, torch.Tensor) else np
+
+        filters, height, width = matrix.shape[-3:]
+        row_extent = height - kernel_shape[0] + 1
+        col_extent = width - kernel_shape[1] + 1
+
+        # starting block indices
+        start_idx = opr.arange(kernel_shape[0])[:, None] * height + np.arange(kernel_shape[1])
+        start_idx = start_idx.flatten()[None, :]
+        offset_filter = np.arange(
+            0, filters * height * width, height * width
+        ).reshape(-1, 1)
+        start_idx = start_idx + offset_filter
+
+
+        # offsetted indices across the height and width of A
+        offset_idx = opr.arange(row_extent)[:, None][::strides[0]] * height +  opr.arange(0, col_extent, strides[1])
+
+        # actual indices
+        if indices is True:
+            return start_idx.ravel()[:, None] + offset_idx.ravel()
+
+        return opr.take(matrix, start_idx.ravel()[:, None] + offset_idx.ravel())
+
+
+
+class MaxPool(Node):
+    def __init__(
+        self,
+        from_node: list,
+        to_node: list,
+        input_shape: tuple,
+        kernel_shape: tuple,
+        pads: tuple,
+        strides: tuple,
+        config: Config,
+        depth=0,
+        bounds=Bounds(),
+        id=None
+    ):
+        """
+        Arguments:
+            from_node:
+                list of input nodes.
+            to_node:
+                list of output nodes.
+            input_shape:
+                shape of the input tensor to the node. 
+            output_shape:
+                shape of the output tensor to the node.
+            kernel_shape:
+                the kernel shape.
+            pads:
+                the pads.
+            strides:
+                the strides.
+            config:
+                configuration.
+            depth:
+                the depth of the node.
+            bounds:
+                the concrete bounds of the node.
+        """
+        output_shape = MaxPool.compute_output_shape(
+            input_shape, kernel_shape, pads, strides
+        )
+        super().__init__(
+            from_node,
+            to_node,
+            input_shape,
+            output_shape,
+            config,
+            depth=depth,
+            bounds=bounds,
+            id=id
+        )
+        self.kernel_shape = kernel_shape
+        self.pads = pads
+        self.strides = strides
+
+    def copy(self):
+        """
+        Copies the node.
+        """
+        return MaxPool(
+            self.from_node,
+            self.to_node,
+            self.input_shape,
+            self.output_shape,
+            self.kernel_shape,
+            self.pads,
+            self.strides,
+            self.config,
+            depth=self.depth,
+            bounds=self.bounds.copy(),
+            id=self.id
+        )
+
+    def get_milp_var_size(self):
+        """
+        Returns the number of milp variables required for the milp encoding of
+        the node.
+        """
+        return self.output_size
+
+    def forward(self, inp: np.array=None, save_output=False) -> np.array:
+        """
+        Computes the output of the node given an input.
+
+        Arguments:
+            inp:
+                the input.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0].output if inp is None else inp
+
+        output = torch.nn.functional.max_pool2d(
+            inp,
+            self.kernel_shape,
+            stride=self.strides,
+            padding=self.pads
+        )
+
+        if save_output:
+            self.output = output
+
+        return output
+
+    def transpose(self, inp: np.array) -> np.array:
+        """
+        Computes the input to the node given an output.
+
+        Arguments:
+            inp:
+                the output.
+        Returns:
+            the input of the node.
+        """
+        #TODO
+        pass
+
+    @staticmethod
+    def compute_output_shape(in_shape: tuple, kernel_shape: tuple, pads: tuple, strides: tuple) -> tuple:
+        """
+        Computes the output shape of the node.
+
+        Arguments:
+            in_shape:
+                shape of the input tensor to the node.
+            weights_shape:
+                shape of the kernel of the node.
+            pads:
+                pair of int for the width and height of the pads.
+            strides:
+                pair of int for the width and height of the strides.
+        Returns:
+            tuple of the output shape
+        """
+        assert len(in_shape) in [3, 4]
+
+        if len(in_shape) == 3:
+            in_ch, in_height, in_width = in_shape
+        else:
+            batch, in_ch, in_height, in_width = in_shape
+
+        k_height, k_width = kernel_shape
+
+        out_height = int(math.floor(
+            (in_height - k_height + 2 * pads[0]) / strides[0] + 1
+        ))
+        out_width = int(math.floor(
+            (in_width - k_width + 2 * pads[1]) / strides[1] + 1
+        ))
+
+        if len(in_shape) == 3:
+            return in_ch, out_height, out_width
+        else:
+            return batch, in_ch, out_height, out_width
+
 class Relu(Node):
     def __init__(
         self,
@@ -1060,7 +1622,7 @@ class Relu(Node):
         to_node: list,
         input_shape: tuple,
         config: Config,
-        depth=None,
+        depth=0,
         bounds=Bounds(),
         id=None
     ):
@@ -1090,14 +1652,18 @@ class Relu(Node):
             bounds=bounds,
             id=id
         )
-        self.state = np.array(
-            [ReluState.UNSTABLE] * self.output_size,
-            dtype=ReluState,
-        ).reshape(self.output_shape)
-        self.dep_root = np.array(
-            [False] * self.output_size,
-            dtype=bool
-        ).reshape(self.output_shape)
+        if SplitStrategy.does_node_split(self.config.SPLITTER.SPLIT_STRATEGY):
+            self.state = np.array(
+                [ReluState.UNSTABLE] * self.output_size,
+                dtype=ReluState,
+            ).reshape(self.output_shape)
+            self.dep_root = np.array(
+                [False] * self.output_size,
+                dtype=bool
+            ).reshape(self.output_shape)
+        else:
+            self.state, self.dep_root = np.empty(0), np.empty(0)
+
         self.active_flag = None
         self.inactive_flag = None
         self.stable_flag = None
@@ -1398,7 +1964,7 @@ class Reshape(Node):
         input_shape: tuple,
         output_shape: tuple,
         config: Config,
-        depth=None,
+        depth=0,
         bounds=Bounds(),
         id=None
     ):
@@ -1460,7 +2026,7 @@ class Flatten(Node):
         to_node: list,
         input_shape: tuple,
         config: Config,
-        depth=None,
+        depth=0,
         bounds=Bounds(),
         id=None
     ):
@@ -1565,7 +2131,7 @@ class Sub(Node):
         input_shape: tuple,
         config: Config,
         const=None,
-        depth=None,
+        depth=0,
         bounds=Bounds(),
         id=None
     ):
@@ -1706,12 +2272,7 @@ class Sub(Node):
         if self.const is not None:
             return inp - self.const.flatten()
 
-        sub = np.zeros(
-            self.output_size, 2 * self.output_size,
-            dtype=self.config.PRECISION
-        )
-
-        return np.hstack([inp, - inp])
+        return torch.hstack(([inp, - inp]))
 
 class Add(Node):
     def __init__(
@@ -1721,7 +2282,7 @@ class Add(Node):
         input_shape: tuple,
         config: Config,
         const=None,
-        depth=None,
+        depth=0,
         bounds=Bounds(),
         id=None
     ):
@@ -1813,7 +2374,7 @@ class Add(Node):
         inp1 = self.from_node[0].output if inp is None else inp1
         inp2 = self.const if inp2 is None else inp2
 
-        output = tf.add(inp1, inp2)
+        output = inp1 + inp2
 
         if save_output:
             self.output = output
@@ -1860,7 +2421,7 @@ class Add(Node):
         if self.const is not None:
             return inp + self.const.flatten()
 
-        return np.hstack([inp, inp])
+        return torch.hstack(([inp, inp]))
 
 
 class BatchNormalization(Node):
@@ -1875,7 +2436,7 @@ class BatchNormalization(Node):
         input_var: torch.tensor,
         epsilon: float,
         config: Config,
-        depth=None,
+        depth=0,
         bounds=Bounds(),
         id=None
     ):
@@ -1960,14 +2521,15 @@ class BatchNormalization(Node):
             the output of the node.
         """
         assert inp is not None or self.from_node[0].output is not None
-        inp = self.from_node[0].output if inp is None else inp1
+        inp = self.from_node[0].output if inp is None else inp
 
-        output = tf.nn.batch_normalization(
+        output = torch.nn.functional.batch_norm(
+            inp,
             self.input_mean,
             self.input_var,
-            self.bias,
-            self.scale,
-            self.epsilon
+            bias=self.bias,
+            weight=self.scale,
+            eps=self.epsilon
         )
         # output = tf.subtract(inp, self.input_mean)
         # output = tf.divide(output, math.sqrt(self.input_var + self.epsilon))
@@ -1994,3 +2556,197 @@ class BatchNormalization(Node):
         """
         return
 
+class Slice(Node):
+    def __init__(
+        self,
+        from_node: list,
+        to_node: list,
+        input_shape: tuple,
+        slices: list,
+        config: Config,
+        depth=0,
+        bounds=Bounds(),
+        id=None
+    ):
+        """
+        Arguments:
+
+            from_node:
+                list of input nodes.
+            to_node:
+                list of output nodes.
+            input_shape:
+                shape of the input tensor to the node.
+            slices:
+                a list of slice objets for each dimension.
+            config:
+                configuration.
+            depth:
+                the depth of the node.
+            bounds:
+                concrete bounds for the node.
+        """
+        output_shape = Slice.compute_output_shape(input_shape, slices)
+        super().__init__(
+            from_node,
+            to_node,
+            input_shape,
+            output_shape,
+            config,
+            depth=depth,
+            bounds=bounds,
+            id=id
+        )
+        self.slices = slices
+
+    def copy(self):
+        """
+        Copies the node.
+        """
+        return BatchNormalization(
+            self.from_node,
+            self.to_node,
+            self.input_shape,
+            self.slices,
+            self.config,
+            depth=self.depth,
+            bounds=self.bounds.copy(),
+            id=self.id
+        )
+
+    def get_milp_var_size(self):
+        """
+        Returns the number of milp variables required for the milp encoding of
+        the node.
+        """
+        return 0
+
+    def forward(self, inp: torch.tensor=None, save_output=False) -> torch.tensor:
+        """
+        Computes the output of the node given an input.
+
+        Arguments:
+            inp:
+                the input.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0].output if inp is None else inp
+
+        output = inp[self.slices]
+
+        if save_output:
+            self.output = output
+
+        return output
+
+    @staticmethod
+    def compute_output_shape(input_shape: tuple, slices: list):
+        """
+        Computes the output shape of the node.
+
+        Arguments:
+            in_shape:
+                shape of the input tensor to the node.
+            slices:
+                a list of slice objets for each dimension.
+        Returns:
+            tuple of the output shape
+        """
+
+        return tuple(
+            len(range(*slices[i].indices(input_shape[i]))) for i in range(len(input_shape))
+        )
+
+class Concat(Node):
+    def __init__(
+        self,
+        from_node: list,
+        to_node: list,
+        input_shape: tuple,
+        output_shape: tuple,
+        axis: int,
+        config: Config,
+        depth=0,
+        bounds=Bounds(),
+        id=None
+    ):
+        """
+        Arguments:
+
+            from_node:
+                list of input nodes.
+            to_node:
+                list of output nodes.
+            input_shape:
+                list of shapes of the input tensors to the node.
+            output_shape:
+                shape of the output tensor of the node.
+            axis:
+                axis where concatenation is performed.
+            config:
+                configuration.
+            depth:
+                the depth of the node.
+            bounds:
+                concrete bounds for the node.
+        """
+        super().__init__(
+            from_node,
+            to_node,
+            input_shape,
+            output_shape,
+            config,
+            depth=depth,
+            bounds=bounds,
+            id=id
+        )
+        self.axis = axis
+
+    def copy(self):
+        """
+        Copies the node.
+        """
+        return BatchNormalization(
+            self.from_node,
+            self.to_node,
+            self.input_shape,
+            self.output_shape,
+            self.axis,
+            self.config,
+            depth=self.depth,
+            bounds=self.bounds.copy(),
+            id=self.id
+        )
+
+    def get_milp_var_size(self):
+        """
+        Returns the number of milp variables required for the milp encoding of
+        the node.
+        """
+        return 0
+
+    def forward(self, inps: list=None, save_output=False) -> torch.tensor:
+        """
+        Computes the output of the node given an input.
+
+        Arguments:
+            inp:
+                list of inputs to the node.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        assert inps is not None or self.from_node[0].output is not None
+        inps = [i.output for i in self.from_node] if inps is None else inps
+
+        output = torch.cat(inps, self.axis)
+
+        if save_output:
+            self.output = output
+
+        return output

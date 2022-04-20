@@ -10,8 +10,9 @@
 # ************
 
 from gurobipy import *
-from venus.specification.formula import *
+import torch
 
+from venus.specification.formula import *
 
 class Specification:
 
@@ -329,7 +330,6 @@ class Specification:
             raise Exception("Unexpected type of formula", type(formula))
 
 
-
     def is_adversarial_robustness(self):
         """
         Checks whether the output constraints of the specificaton refer to an
@@ -380,6 +380,40 @@ class Specification:
         else:
             raise Exception("Unexpected type of formula", type(formula))
 
+    def get_output_flag(self, output_shape: tuple):
+        """
+        Creates a boolean flag of the outputs units that the specification refers to.
+
+        Arguments:
+            output_shape:
+                the output shape of the network.
+        Returns:
+            Boolean flag of whether each output concerns the specification.
+        """
+        a = (1, 20, 4096, 2992)
+        return self._get_output_flag(self.output_formula, torch.zeros(a))
+        # return self._get_output_flag(self.output_formula, torch.zeros(output_shape))
+
+    def _get_output_flag(self, formula: Formula, flag: torch.tensor):
+        """
+        Helper function for get_output_flag.
+        """
+        if isinstance(formula, TrueFormula):
+            return flag
+        elif isinstance(formula, Constraint):
+            flag[formula.op1.i] = True
+            flag[formula.op2.i] = True
+            return flag
+        elif type(formula) in [ConjFormula, DisjFormula]:
+            flag = self._get_output_flag(formula.left, flag)
+            flag = self._get_output_flag(formula.right, flag)
+            return flag
+        elif type(formula) in [NAryConjFormula, NAryDisjFormula]:
+            for clause in formula.clauses:
+                flag = self._get_output_flag(clause, flag)
+            return flag
+        else:
+            raise Exception("Unexpected type of formula", type(formula))
 
     def to_string(self):
         """

@@ -14,7 +14,7 @@ import numpy as np
 import torch
 from timeit import default_timer as timer
 import venus
-from venus.network.node import Node, Input, Gemm, Conv, Relu, Flatten, Sub, MatMul, Add
+from venus.network.node import *
 from venus.bounds.bounds import Bounds
 from venus.bounds.equation import Equation
 from venus.common.logger import get_logger
@@ -56,6 +56,7 @@ class SIP:
         for i in range(self.nn.tail.depth):
             nodes = self.nn.get_node_by_depth(i)
             for j in nodes:
+                print(j)
                 j.bounds = self.compute_ia_bounds(j)
 
                 if j.has_relu_activation() is not True:
@@ -86,11 +87,16 @@ class SIP:
     def compute_ia_bounds(self, node: Node) -> list:
         inp = node.from_node[0].bounds
 
-        if isinstance(node, Relu):
+        if type(node) in [Relu, BatchNormalization, MaxPool, Slice]:
             lower, upper = node.forward(inp.lower), node.forward(inp.upper)
 
         elif isinstance(node, Flatten):
             lower, upper = inp.lower, inp.upper
+
+        elif isinstance(node, Concat):
+            inp_lower = [i.bounds.lower for i in node.from_node]
+            inp_upper = [i.bounds.upper for i in node.from_node]
+            lower, upper = node.forward(inp_lower), node.forward(inp_upper)
 
         elif isinstance(node, Sub):
             const_lower = node.const if node.const is not None else node.from_node[1].bounds.lower
@@ -102,12 +108,12 @@ class SIP:
             const_upper = node.const if node.const is not None else node.from_node[1].bounds.upper
             lower, upper = inp.lower + const_lower, inp.upper + const_upper
 
-        elif type(node) in [Gemm, Conv]:
+        elif type(node) in [Gemm, Conv, ConvTranspose]:
             lower = node.forward(inp.lower, clip='+', add_bias=False) + \
                 node.forward(inp.upper, clip='-', add_bias=True)
             upper = node.forward(inp.lower, clip='-', add_bias=False) + \
                 node.forward(inp.upper, clip='+', add_bias=True)
-
+ 
         elif isinstance(node, MatMul):
             lower = node.forward(inp.lower, clip='+') + node.forward(inp.upper, clip='-')
             upper = node.forward(inp.lower, clip='-') + node.forward(inp.upper, clip='+')
@@ -132,15 +138,17 @@ class SIP:
         return Bounds(
             torch.reshape(lower, node.output_shape),
             torch.reshape(upper, node.output_shape)
-        )
+        ) 
+
 
     def compute_symb_concr_bounds(self, node: Node) -> Bounds:
         symb_eq = self.compute_symb_eq(node)
+
         return self.back_substitution(symb_eq, node)
 
     def compute_symb_eq(self, node: Node) -> Equation:
         if len(node.to_node) == 0 or node.has_relu_activation() is not True:
-            flag = torch.ones(node.output_size, dtype=torch.bool)
+            flag = self.prob.spec.get_output_flag(node.output_shape).flatten()
         else:
             flag = node.to_node[0].get_unstable_flag()
       

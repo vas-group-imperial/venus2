@@ -66,8 +66,6 @@ class NeuralNetwork:
         
         onnx_parser = ONNXParser(self.config)
         self.head, self.tail, self.node = onnx_parser.load(self.model_path)
-        self.mean = onnx_parser.mean
-        self.std = onnx_parser.std
  
     def copy(self):
         """
@@ -249,10 +247,10 @@ class NeuralNetwork:
             return p_node.get_outputs()
 
         elif isinstance(s_node, Conv):
-            height_start = index[0] * s_node.strides[0] - s_node.padding[0]
+            height_start = index[0] * s_node.strides[0] - s_node.pads[0]
             height_rng = range(height_start, height_start + s_node.krn_height)
             height = [i for i in height_rng if i >= 0 and i < s_node.krn_height]
-            width_start = index[1] * s_node.strides[1] - s_node.padding[1]
+            width_start = index[1] * s_node.strides[1] - s_node.pads[1]
             width_rng = range(width_start, width_start + s_node.krn_width)
             width = [i for i in width_rng if i >= 0 and i < s_node.krn_width]
             ch = [i for i in range(s_node.in_ch)]

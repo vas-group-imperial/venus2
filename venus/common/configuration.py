@@ -100,7 +100,7 @@ class Splitter():
     # so that the best split can be chosen exhaustively
     SMALL_N_INPUT_DIMENSIONS: int = 6
     # splitting strategy
-    SPLIT_STRATEGY: SplitStrategy = SplitStrategy.NODE
+    SPLIT_STRATEGY: SplitStrategy = SplitStrategy.NONE
     # the stability ratio weight for computing the difficulty of a problem
     STABILITY_RATIO_WEIGHT: float = 1
     # the value of fixed ratio above which the splitting can stop in any
