@@ -93,12 +93,9 @@ class ONNXParser:
             input_shape = None
         elif node.input[0] == inp.name:
             input_shape = tuple(
-                i.dim_value for i in inp.type.tensor_type.shape.dim
+                i.dim_value if i.dim_value != 0 else 1
+                for i in inp.type.tensor_type.shape.dim
             )
-            # input_shape = tuple(
-                # i.dim_value if i.dim_value != 0 else 1
-                # for i in inp.type.tensor_type.shape.dim
-            # )
         else:
             input_shape = venus_nodes[node.input[0]].output_shape
         # process node

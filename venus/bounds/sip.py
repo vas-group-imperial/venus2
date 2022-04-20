@@ -78,7 +78,7 @@ class SIP:
                 j.to_node[0].reset_state_flags()
 
         self.nn.tail.bounds = self.compute_symb_concr_bounds(self.nn.tail)
-        # print(self.nn.tail.bounds.lower)
+        print(self.nn.tail.bounds.lower)
 
         if self.logger is not None:
             SIP.logger.info('Bounds computed, time: {:.3f}, '.format(timer()-start))

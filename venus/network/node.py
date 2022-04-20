@@ -1015,7 +1015,7 @@ class Conv(Node):
         col_extent = width - kernel_shape[1] + 1
 
         # starting block indices
-        start_idx = opr.arange(kernel_shape[0])[:, None] * height + np.arange(kernel_shape[1])
+        start_idx = opr.arange(kernel_shape[0])[:, None] * width + np.arange(kernel_shape[1])
         start_idx = start_idx.flatten()[None, :]
         offset_filter = np.arange(
             0, filters * height * width, height * width
@@ -1024,7 +1024,7 @@ class Conv(Node):
 
 
         # offsetted indices across the height and width of A
-        offset_idx = opr.arange(row_extent)[:, None][::strides[0]] * height +  opr.arange(0, col_extent, strides[1])
+        offset_idx = opr.arange(row_extent)[:, None][::strides[0]] * width +  opr.arange(0, col_extent, strides[1])
 
         # actual indices
         if indices is True:
@@ -1429,6 +1429,7 @@ class ConvTranspose(Node):
         Returns:
             im2col matrix
         """
+
         assert len(matrix.shape) in [3, 4], f"{len(matrix.shape)}-D is not supported."
         assert type(matrix) in [torch.Tensor, np.ndarray], f"{type(matrix)} matrices are not supported."
 
