@@ -199,6 +199,17 @@ class Node:
         """
         return len(self.to_node) == 0
 
+    def update_bounds(self, bounds: Bounds, flag: torch.tensor=None) -> None:
+        if flag is None:
+            self.bounds = bounds
+        else:
+            self.bounds.lower[flag] = bounds.lower
+            self.bounds.upper[flag] = bounds.upper
+
+        if self.has_relu_activation():
+            self.to_node[0].reset_state_flags()
+
+
 
 class Constant(Node):
     def __init__(self, to_node: list, const: torch.tensor, config: Config, id: int=None):

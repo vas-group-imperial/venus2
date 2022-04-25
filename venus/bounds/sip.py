@@ -57,27 +57,26 @@ class SIP:
             nodes = self.nn.get_node_by_depth(i)
             for j in nodes:
                 print(j)
-                j.bounds = self.compute_ia_bounds(j)
+                j.update_bounds(self.compute_ia_bounds(j))
 
                 if j.has_non_linear_op() is not True:
                     continue
-
-                j.to_node[0].reset_state_flags()
 
                 if saw_non_linear_node is not True:
                     saw_non_linear_node = True
                     continue
 
-                if j.to_node[0].get_unstable_count() == 0:
-                    continue
+                if j.has_relu_activation():
+                    if j.to_node[0].get_unstable_count() == 0:
+                        continue
+                    flag =  j.to_node[0].get_unstable_flag().reshape(j.output_shape)
+                else:
+                    flag = None
 
-                symb_concr_bounds = self.compute_symb_concr_bounds(j)
+                j.update_bounds(self.compute_symb_concr_bounds(j), flag)
 
-                j.bounds.lower[j.to_node[0].get_unstable_flag().reshape(j.output_shape)] = symb_concr_bounds.lower
-                j.bounds.upper[j.to_node[0].get_unstable_flag().reshape(j.output_shape)] = symb_concr_bounds.upper
-                j.to_node[0].reset_state_flags()
+        self.nn.tail.update_bounds(self.compute_symb_concr_bounds(self.nn.tail))
 
-        self.nn.tail.bounds = self.compute_symb_concr_bounds(self.nn.tail)
         print(self.nn.tail.bounds.lower)
 
         if self.logger is not None:
