@@ -95,14 +95,29 @@ class Node:
         self.delta_vars = torch.empty(0)
 
 
+    def has_non_linear_op(self) -> bool:
+        """
+        Determines whether the output of the node is fed to a non-linear operation.
+        """
+        return self.has_relu_activation() or self.has_max_pool()
+
+
     def has_relu_activation(self) -> bool:
         """
-        Returns:
-
-            Whether the output of the node is fed to a relu node.
+        Determines whether the output of the node is fed to a relu node.
         """
         for i in self.to_node:
             if isinstance(i, Relu):
+                return True
+
+        return False
+
+    def has_max_pool(self) -> bool:
+        """
+        Determines whether the output of the node is fed to a maxpool node.
+        """
+        for i in self.to_node:
+            if isinstance(i, MaxPool):
                 return True
 
         return False

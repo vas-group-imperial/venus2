@@ -59,7 +59,7 @@ class SIP:
                 print(j)
                 j.bounds = self.compute_ia_bounds(j)
 
-                if j.has_relu_activation() is not True:
+                if j.has_non_linear_op() is not True:
                     continue
 
                 j.to_node[0].reset_state_flags()
@@ -147,7 +147,7 @@ class SIP:
         return self.back_substitution(symb_eq, node)
 
     def compute_symb_eq(self, node: Node) -> Equation:
-        if len(node.to_node) == 0 or node.has_relu_activation() is not True:
+        if len(node.to_node) == 0 or node.has_non_linear_op() is not True:
             flag = self.prob.spec.get_output_flag(node.output_shape).flatten()
         else:
             flag = node.to_node[0].get_unstable_flag()
@@ -184,8 +184,9 @@ class SIP:
         elif type(node) in [Relu, Flatten]:
             pass
 
-        elif node.has_relu_activation() is True:
-            if node.to_node[0].get_unstable_count() == 0  and  \
+        elif node.has_non_linear_op() is True:
+            if node.has_relu_activation() is True and \
+            node.to_node[0].get_unstable_count() == 0  and  \
             node.to_node[0].get_active_count() == 0:
                 return eq.const
             else:

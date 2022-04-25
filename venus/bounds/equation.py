@@ -195,7 +195,7 @@ class Equation():
 
 
     def interval_transpose(self, node, bound):
-        assert node.has_relu_activation() is True or node.has_max_pool() is True, "Interval transpose is not supported for nodes without relu activation or max pooling."
+        assert node.has_non_linear_op() is True, "Interval transpose is only supported for nodes connected to a non-linear operation."
 
         (lower_slope, upper_slope), (lower_const, upper_const) = self.get_relaxation_slope(node)
 
@@ -384,7 +384,7 @@ class Equation():
 
     @staticmethod 
     def _derive_conv_const(node: Node, flag: torch.Tensor):
-        return torch.tile(node.bias, (node.out_ch_size, 1)).T.flatten()[flag]
+        return torch.tile(node.bias, (node.out_ch_sz, 1)).T.flatten()[flag]
 
 
     @staticmethod 
