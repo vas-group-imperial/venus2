@@ -1538,7 +1538,7 @@ class MaxPool(Node):
         """
         return self.output_size
 
-    def forward(self, inp: np.array=None, save_output=False) -> np.array:
+    def forward(self, inp: torch.tensor=None, save_output=False) -> np.array:
         """
         Computes the output of the node given an input.
 
@@ -1564,19 +1564,6 @@ class MaxPool(Node):
             self.output = output
 
         return output
-
-    def transpose(self, inp: np.array) -> np.array:
-        """
-        Computes the input to the node given an output.
-
-        Arguments:
-            inp:
-                the output.
-        Returns:
-            the input of the node.
-        """
-        #TODO
-        pass
 
     @staticmethod
     def compute_output_shape(in_shape: tuple, kernel_shape: tuple, pads: tuple, strides: tuple) -> tuple:
@@ -1921,41 +1908,6 @@ class Relu(Node):
             self.propagation_count = torch.sum(self.get_propagation_flag())
 
         return self.propagation_count
- 
-    def get_upper_relaxation_slope(self) -> torch.tensor:
-        """
-        Returns:
-
-        The upper relaxation slope for each of the ReLU nodes.
-        """
-        slope = torch.zeros(
-            self.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
-        )
-        upper = self.from_node[0].bounds.upper.flatten()[self.get_unstable_flag()]
-        lower = self.from_node[0].bounds.lower.flatten()[self.get_unstable_flag()]
-        slope[self.get_unstable_flag()] = upper /  (upper - lower)
-        slope[self.get_active_flag()] = 1.0
-        
-        return slope
-
-    def get_lower_relaxation_slope(self):
-        """
-        Returns:
-
-        The upper relaxation slope for each of the ReLU nodes.
-        """
-        slope = torch.ones(
-            self.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
-        )
-        upper = self.from_node[0].bounds.upper.flatten()
-        lower = self.from_node[0].bounds.lower.flatten()
-        idxs = abs(lower) >=  upper
-        slope[idxs] = 0.0
-        slope[self.get_inactive_flag()] = 0.0
-        slope[self.get_active_flag()] = 1.0
-
-        return slope
-
 
 class Reshape(Node):
     def __init__(

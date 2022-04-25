@@ -197,61 +197,6 @@ class SIP:
         return self._back_substitution(eq, node.from_node[0], bound)
 
 
-    def max_pooling(self, layer, eqs, layer_bounds, input_bounds):
-        if layer.pool_size == (2,2):
-            return self._max_pooling_2x2(
-                layer,
-                eqs,
-                layer_bounds,
-                input_bounds
-            )
-        else:
-            return self._max_pooling_general(
-                eqs,
-                layer_bounds,
-                input_bounds
-            )
-
-    def _max_pooling_general(self, layer, eqs, layer_bounds, input_bounds):
-        so, sho = layer.output_size, layer.output_shape
-        si, shi = layer.input_size, layer.input_shape
-        #get maxpool indices
-        coeffs = np.identity(si,dtype='float64')
-        const = np.zeros(si, dtype='float64')
-        indices = Equations(coeffs,const).maxpool(shi,sho,layer.pool_size)
-        # set low equation to the input equation with the highest lower bound
-        coeffs_low = np.zeros(shape=(so,si),dtype='float64')
-        coeffs_up = coeffs_low.copy()
-        const_low = np.zeros(so, dtype='float64')
-        const_up = const_low.copy()
-        m_coeffs_low = []
-        m_coeffs_up = []
-        m_const_low = np.zeros(so,dtype='float32')
-        m_const_up = np.zeros(so,dtype='float32')
-        lb = np.zeros(so, dtype='float64')
-        ub = np.zeros(so, dtype='float64')
-        for i in range(so):
-            lbounds = [np.take(layer_bounds[0],x[i]) for x in indices]
-            lb[i] =  max(lbounds)
-            index = lbounds.index(lb[i])
-            coeffs_low[i,:] = coeffs[indices[index][i],:]
-            m_coeffs_low.append({indices[index][i] : 1})
-            ubounds = [np.take(layer_bounds[1],x[i]) for x in indices]
-            ub[i] = max(ubounds)
-            del ubounds[index]
-            if (lb[i] > np.array(ubounds)).all():
-                coeffs_up[i,:] = coeffs[indices[index][i],:]
-                m_coeffs_up.append({indices[index][i] : 1})
-            else:
-                const_up[i] = ub[i]
-                m_const_up[i] = ub[i]
-                m_coeffs_up.append({indices[index][i] : 0})
-        q_low = Equations(coeffs_low, const_low)
-        q_up = Equations(coeffs_up, const_up)
-        m_q_low = Equations(m_coeffs_low, m_const_low)
-        m_q_up = Equations(m_coeffs_up, m_const_up)
-
-        return [q_low, q_up], [m_q_low, m_q_up], [lb, ub]
 
 
     def global_average_pool(self, layer, eqs, input_bounds):
