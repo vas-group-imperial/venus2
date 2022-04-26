@@ -94,7 +94,23 @@ class Node:
         self.out_vars = torch.empty(0)
         self.delta_vars = torch.empty(0)
 
+    def is_symb_eq_eligible(self) -> bool:
+        """
+        Determines whether the node implements function requiring a symbolic
+        equation for bound calculation.
+        """
 
+        if type(self) in [BatchNormalization, Input, Relu, MaxPool, Reshape, Flatten, Slice, Concat]:
+            return False
+
+        if self.has_relu_activation() and self.to_node[0].get_unstable_count() > 0:
+            return True
+
+        if self.has_max_pool():
+            return True
+
+        return False
+        
     def has_non_linear_op(self) -> bool:
         """
         Determines whether the output of the node is fed to a non-linear operation.
@@ -200,6 +216,16 @@ class Node:
         return len(self.to_node) == 0
 
     def update_bounds(self, bounds: Bounds, flag: torch.tensor=None) -> None:
+        """
+        Updates the bounds.
+
+        Arguments:
+            bounds:
+                the new bounds.
+            flag:
+                the units of the new bounds; if None then the new bounds should
+                be for all units.
+        """
         if flag is None:
             self.bounds = bounds
         else:
@@ -208,6 +234,16 @@ class Node:
 
         if self.has_relu_activation():
             self.to_node[0].reset_state_flags()
+
+
+    def out_ch_sz(self) -> int:
+        """
+        Computes the size of an output channel.
+        """
+        if len(self.input_shape) in [1, 3]:
+            return toch.prod(self.input_shape)
+
+        return torch.prod(self.input_shape[1:])
 
 
 
@@ -1254,7 +1290,6 @@ class ConvTranspose(Node):
 
         else:
             raise ValueError(f'Kernel clip value {kernel_clip} not recognised')
-
    
         output = torch.nn.functional.conv_transpose2d(
             inp,
@@ -1307,24 +1342,18 @@ class ConvTranspose(Node):
         Computes the input to the node given an output.
 
         Arguments:
-
             inp:
                 the output.
-                
         Returns:
-            
             the input of the node.
         """
-        out_pad_height = self.in_height - (self.out_height - 1) * self.strides[0] + 2 * self.pads[0] - self.krn_height
-        out_pad_width = self.in_width - (self.out_width - 1) * self.strides[0] + 2 * self.pads[0] - self.krn_width
 
-        return torch.nn.functional.conv_transpose2d(
-            inp.reshape((inp.shape[0], self.out_ch, self.out_height, self.out_width)),
+        return torch.nn.functional.conv2d(
+            inp,
             self.kernels,
             stride=self.strides,
-            padding=self.pads,
-            output_paddinf=(out_pad_height, out_pad_width)
-        ).reshape(inp.shape[0], - 1)
+            padding=self.pads
+        )
 
     def get_non_pad_idxs(self) -> torch.tensor:
         """
@@ -2525,12 +2554,9 @@ class BatchNormalization(Node):
         Computes the input to the node given an output.
 
         Arguments:
-
             inp:
                 the output.
-                
         Returns:
-            
             the input of the node.
         """
         return

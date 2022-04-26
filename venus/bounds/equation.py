@@ -130,36 +130,6 @@ class Equation():
             raise ValueError(f'Bound {bound} is not recognised.')
 
 
-    def pool(self, in_shape, out_shape, pooling):
-        """
-        Derives the pooling indices of the equations.
-
-        Arguments:
-            
-            in_shape: tuple of the shape of the equations.
-
-            out_shape: tuple the shape of the equations after pooling.
-
-            pooling: tuple of the pooling size.
-        
-        Returns:
-
-            List where each item i in the list is a list of indices of the i-th
-            pooling neighbourhood.
-        """
-            
-        m,n,_ = in_shape
-        M,N,K =  out_shape
-        p = pooling[0]
-        m_row_extent = M*N*K
-        # get Starting block indices
-        start_idx = np.arange(p)[:,None]*n*K + np.arange(0,p*K,K)
-        # get offsetted indices across the height and width of input 
-        offset_idx = np.arange(M)[:,None]*n*K*p + torch.Tensor([i*p*K + np.arange(K) for i in  range(N)]).flatten()
-        # get all actual indices 
-        idx = start_idx.ravel()[:,None] + offset_idx.ravel()
-        return [idx[i,:] for i in idx.shape[0]]
-
     def split_dot(self, a, b):
         size = a.shape[0] 
         c = np.empty(shape=(size, b.shape[1]))
@@ -184,8 +154,19 @@ class Equation():
         return c
 
     def transpose(self, node: Node):
+        if type(node) in [Gemm, Matmul, Conv]:
+            return self._tranpose_affine(node)
+
+        elif isinstance(node, BatchNormalization):
+            return self._transpose_batch_normalization(node)
+
+        elif isinstance(node, Slice):
+            return self._transpose_slice(node)
+
+
+    def _transpose_affine(self, node: Node):
         matrix = node.transpose(self.matrix)
-        const = Equation._get_const(
+        const = Equation._derive_const(
             node,
             torch.ones(node.output_size, dtype=torch.bool, device=self.config.DEVICE)
         )
@@ -193,6 +174,38 @@ class Equation():
         
         return Equation(matrix, const, self.config)
 
+    def _transpose_batch_normalization(self, node: Node):
+        out_ch_sz = node.out_ch_sz()
+
+        scale = torch.tile(node.scale, (out_ch_sz, 1)).T.flatten()
+        bias = torch.tile(node.bias, (out_ch_sz, 1)).T.flatten()
+        input_mean = torch.tile(node.input_mean, (out_ch_sz, 1)).T.flatten()
+        mean_var = torch.sqrt(node.input_mean + node.epsilon)
+        mean_var = torch.tile(mean_var, (out_ch_sz, 1)).T.flatten()
+
+        matrix = (self.matrix * scale) / mean_var
+
+        batch_const = - input_mean / mean_var * scale + bias 
+        const = self.matrix @ batch_const + self.const
+
+        return Equation(matrix, const, self.config)
+
+    def _transpose_slice(self, node: Node):
+        matrix = torch.zeros(
+            (self.matrix.size, node.input_size), dtype=node.config.PRECISION, device=node.config.DEVICE
+        )
+        matrix[node.slices]
+
+    def _transpose_concat(self, node:None):
+        eqs, idx = [], 0
+        for i in node.from_node:
+            eqs.append(Equation(
+                self.matrix[:, torch.arange(idx, idx + i.output_size)],
+                self.const,
+                self.config
+            ))
+
+        return eqs
 
     def interval_transpose(self, node, bound):
         assert node.has_non_linear_op() is True, "Interval transpose is only supported for nodes connected to a non-linear operation."
@@ -253,7 +266,7 @@ class Equation():
         upper_slope[node.to_node[0].get_active_flag()] = 1.0
 
 
-        lower_const = Equation._get_const(node, np.ones(node.output_size, bool))
+        lower_const = Equation._derive_const(node, np.ones(node.output_size, bool))
         upper_const = lower_const.detach().clone()
         lower_const *= lower_slope
         upper_const *= upper_slope
@@ -279,7 +292,7 @@ class Equation():
         lower_const = torch.zeros(
             node.input_size, dtype=self.config.PRECISION, device=self.config.DEVICE
         )
-        lower_const[lower_indices] = Equation._get_const(node, lower_indices)
+        lower_const[lower_indices] = Equation._derive_const(node, lower_indices)
 
     
         upper_slope = torch.zeros(
@@ -289,7 +302,7 @@ class Equation():
         upper_const = torch.zeros(
             node.input_size, dtype=self.config.PRECISION, device=self.config.DEVICE
         )
-        upper_const[lower_max] = Equation._get_const(node, lower_max)
+        upper_const[lower_max] = Equation._derive_const(node, lower_max)
         upper_const[not_lower_max] = node.bounds.upper.flatten()[not_lower_max]
 
         return (lower_slope, upper_slope), (lower_const, upper_const)
@@ -322,8 +335,11 @@ class Equation():
         elif isinstance(node, Add):
             return Equation._derive_add_matrix(node, flag)
 
+        elif isinstance(node, BatchNormalization):
+            return Equation._derive_batchnormalization_matrix(node, flag)
+
         else:
-            raise NotImplementedError(f'type(node) equations')
+            raise NotImplementedError(f'{type(node)} equations')
 
     def _derive_const(node: Node, flag: torch.Tensor):
         if isinstance(node, Conv):
@@ -334,12 +350,15 @@ class Equation():
 
         elif isinstance(node, MatMul):
             return Equation._derive_matmul_const(node, flag)
+
+        elif isinstance(node, BatchNormalization):
+            return Equation._derive_batchnormalization_const(node, flag)
         
         elif isinstance(node, Add):
             return Equation._derive_add_const(node, flag)
 
         else:
-            raise NotImplementedError(f'type(node) equations')
+            raise NotImplementedError(f'{type(node)} equations')
 
     @staticmethod 
     def _zero_eq(node: None, flag: torch.Tensor) -> Equation:
@@ -347,7 +366,7 @@ class Equation():
         node.from_node[0].get_unstable_count() == 0  and \
         node.from_node[0].get_active_count() == 0:      
             return Equation(
-                np.zeros((torch.sum(flag), 0)), Equation._get_const(node, flag), node.config
+                np.zeros((torch.sum(flag), 0)), Equation._derive_const(node, flag), node.config
             )
 
         return None
@@ -414,11 +433,15 @@ class Equation():
 
         return matrix
 
-    @staticmethod 
+    @staticmethod
     def _derive_add_const(node: Node, flag: torch.Tensor):
         return torch.zeros(
             node.output_size, dtype=node.const.dtype, device=node.const.device
         )
+
+    @staticmethod
+    def _derive_batchnormalization_matrix(node: None, flag: torch.Tensor):
+        return Equation._derive_batchnormalization_matrix(node, flag)
 
 
     # def set_lower_slope(self, lbound, ubound):

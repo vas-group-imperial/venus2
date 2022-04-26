@@ -321,6 +321,9 @@ class ONNXParser:
         input_mean = self._to_tensor(node.input[3], venus_nodes, init)
         input_var = self._to_tensor(node.input[4], venus_nodes, init)
 
+        print(input_shape, scale.shape, bias.shape, input_mean.shape, input_var.shape)
+        import sys
+        sys.exit()
         attr = self._get_attribute(node, "epsilon")
         epsilon = attr.f
 

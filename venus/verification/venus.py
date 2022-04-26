@@ -72,28 +72,28 @@ class Venus:
             self.config.set_nn_defaults(nn)
 
 
-            # import numpy as np
-            # from venus.bounds.bounds import Bounds
-            # import torch
-            # from venus.specification.specification import Specification
-            # from venus.specification.formula import VarVarConstraint, Formula, StateCoordinate
-            # from venus.network.node import Input
-            # lb = np.random.uniform(0, 1, nn.head.input_shape)
-            # ub = lb
-            # bounds = Bounds(torch.tensor(lb,dtype=self.config.PRECISION), torch.tensor(ub,dtype=self.config.PRECISION))
-            # spec = [Specification(
-                # Input(bounds, self.config),
-                # VarVarConstraint(StateCoordinate((0,0,0,0)), Formula.Sense.LT, StateCoordinate((0,0,0,1))),
-                # "adsa"
-            # )]
+            import numpy as np
+            from venus.bounds.bounds import Bounds
+            import torch
+            from venus.specification.specification import Specification
+            from venus.specification.formula import VarVarConstraint, Formula, StateCoordinate
+            from venus.network.node import Input
+            lb = np.random.uniform(0, 1, nn.head.input_shape)
+            ub = lb
+            bounds = Bounds(torch.tensor(lb,dtype=self.config.PRECISION), torch.tensor(ub,dtype=self.config.PRECISION))
+            spec = [Specification(
+                Input(bounds, self.config),
+                VarVarConstraint(StateCoordinate((0,0,0,0)), Formula.Sense.LT, StateCoordinate((0,0,0,1))),
+                "adsa"
+            )]
 
             # load spec
-            vnn_parser = VNNLIBParser(
-                query[1],
-                nn.head.input_shape,
-                self.config
-            )  
-            spec = vnn_parser.parse()
+            # vnn_parser = VNNLIBParser(
+                # query[1],
+                # nn.head.input_shape,
+                # self.config
+            # )  
+            # spec = vnn_parser.parse()
            
             # import onnx
             # import onnxruntime.backend as rt

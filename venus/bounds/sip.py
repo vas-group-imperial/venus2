@@ -52,26 +52,22 @@ class SIP:
         Sets pre-activation and activation bounds.
         """
         start = timer()
-        saw_non_linear_node = False
+        saw_symb_eq_node = False
         for i in range(self.nn.tail.depth):
             nodes = self.nn.get_node_by_depth(i)
             for j in nodes:
                 print(j)
                 j.update_bounds(self.compute_ia_bounds(j))
 
-                if j.has_non_linear_op() is not True:
+                if j.is_symb_eq_eligible() is not True:
                     continue
 
-                if saw_non_linear_node is not True:
-                    saw_non_linear_node = True
+                if saw_symb_eq_node is not True:
+                    symb_eq_node = True
                     continue
 
                 if j.has_relu_activation():
-                    if j.to_node[0].get_unstable_count() == 0:
-                        continue
                     flag =  j.to_node[0].get_unstable_flag().reshape(j.output_shape)
-                else:
-                    flag = None
 
                 j.update_bounds(self.compute_symb_concr_bounds(j), flag)
 
@@ -146,10 +142,12 @@ class SIP:
         return self.back_substitution(symb_eq, node)
 
     def compute_symb_eq(self, node: Node) -> Equation:
-        if len(node.to_node) == 0 or node.has_non_linear_op() is not True:
+        if node.has_relu_activation():
+            flag = node.to_node[0].get_unstable_flag()
+        elif  len(node.to_node) == 0:
             flag = self.prob.spec.get_output_flag(node.output_shape).flatten()
         else:
-            flag = node.to_node[0].get_unstable_flag()
+            flag = torch.ones(node.output_size, dtype=torch.bool)
       
         return Equation.derive(node, flag, self.config)
 
@@ -167,21 +165,38 @@ class SIP:
         
         return True
 
+
     def back_substitution(self, eq, node):
-        return Bounds(
-            self._back_substitution(eq, node.from_node[0], 'lower'),
-            self._back_substitution(eq, node.from_node[0], 'upper'),
+        eqs = self._back_substitution(eq, node.from_node[0], 'lower')
+        eq = eqs[0]
+        for i in eqs[1:]
+            eq = eq.add(i)
+        lower = eq.concrete_values(
+            self.prob.spec.input_node.bounds.lower, 
+            self.prob.spec.input_node.bounds.upper,
+            'lower'
         )
+
+        eqs = self._back_substitution(eq, node.from_node[0], 'upper')
+        eq = eqs[0]
+        for i in eqs[1:]
+            eq = eq.add(i)
+        upper = eq.concrete_values(
+            self.prob.spec.input_node.bounds.lower, 
+            self.prob.spec.input_node.bounds.upper,
+            'upper'
+        )
+
+        return Bounds(lower, upper)
 
     def _back_substitution(self, eq, node, bound):
         if bound not in ['lower', 'upper']:
             raise ValueError("Bound type {bound} not recognised.")
 
         if isinstance(node, Input):
-            return eq.concrete_values(node.bounds.lower.flatten(), node.bounds.upper.flatten(), bound)
-
-        elif type(node) in [Relu, Flatten]:
-            pass
+            return eq.concrete_values(
+                node.bounds.lower.flatten(), node.bounds.upper.flatten(), bound
+            )
 
         elif node.has_non_linear_op() is True:
             if node.has_relu_activation() is True and \
@@ -191,6 +206,9 @@ class SIP:
             else:
                 eq = eq.interval_transpose(node, bound)
 
+        elif type(node) in [Relu, MaxPool, Flatten]:
+            pass
+
         else:
             eq = eq.transpose(node)
 
@@ -198,35 +216,36 @@ class SIP:
 
 
 
+    # def back_substitution(self, eq, node):
+        # return Bounds(
+            # self._back_substitution(eq, node.from_node[0], 'lower'),
+            # self._back_substitution(eq, node.from_node[0], 'upper'),
+        # )
 
-    def global_average_pool(self, layer, eqs, input_bounds):
-        """
-        set pre-activation and activation bounds of a GlobalAveragePooling layer.
-        [it is assumed that the previous layer is a convolutional layer]
+    # def _back_substitution(self, eq, node, bound):
+        # if bound not in ['lower', 'upper']:
+            # raise ValueError("Bound type {bound} not recognised.")
 
-        layer: a GlobalAveragePooling layer
-        eqs: list of linear equations of the outputs of the preceding nodes in terms of their input variables
-        input_bounds: the lower and upper bounds of the input layer 
+        # if isinstance(node, Input):
+            # return eq.concrete_values(
+                # node.bounds.lower.flatten(), node.bounds.upper.flatten(), bound
+            # )
 
-        returns: linear equations of the outputs of the layer in terms of its input variables
-        """ 
-        kernels = layer.input_shape[-1]
-        size = reduce(lambda i,j : i*j, layer.input_shape[:-1])
-        weight = np.float64(1)/size
-        const = np.zeros(kernels,dtype='float64')
-        coeffs = np.zeros(shape=(kernels,layer.input_size),dtype='float64')
-        for k in range(kernels):
-            indices = list(range(k,k+size*kernels,kernels))
-            coeffs[k,:][indices] = weight
-        eq = Equations(coeffs, const)
-        l,u = np.empty(kernels,dtype='float64'), np.empty(kernels,dtype='float64')
-        ib_l, ib_u = (input_bounds[i].reshape(layer.input_shape) for i in [0,1])
-        for k in range(kernels):
-            l[k] = np.average(ib_l[:,:,k])
-            u[k] = np.average(ib_u[:,:,k]) 
+        # elif node.has_non_linear_op() is True:
+            # if node.has_relu_activation() is True and \
+            # node.to_node[0].get_unstable_count() == 0  and  \
+            # node.to_node[0].get_active_count() == 0:
+                # return eq.const
+            # else:
+                # eq = eq.interval_transpose(node, bound)
 
-        return eq, l, u
+        # elif type(node) in [Relu, MaxPool, Flatten]:
+            # pass
 
+        # else:
+            # eq = eq.transpose(node)
+
+        # return self._back_substitution(eq, node.from_node[0], bound)
 
     def runtime_bounds(self, eqlow_r, equp_r, eq, lb_r, ub_r, lb, ub, relu_states):
         """
