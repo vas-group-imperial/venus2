@@ -321,9 +321,6 @@ class ONNXParser:
         input_mean = self._to_tensor(node.input[3], venus_nodes, init)
         input_var = self._to_tensor(node.input[4], venus_nodes, init)
 
-        print(input_shape, scale.shape, bias.shape, input_mean.shape, input_var.shape)
-        import sys
-        sys.exit()
         attr = self._get_attribute(node, "epsilon")
         epsilon = attr.f
 
@@ -453,24 +450,27 @@ class ONNXParser:
         return Concat([], [], input_shapes, output_shape, axis, self.config)
 
     def simplify(self, node: Node):
-        return self._simplify(node, {})
+        return self._simplify(node, {}, [])
 
-    def _simplify(self, node: Node, dic: dict):
-
-        if node in dic:
-            return {}
+    def _simplify(self, node: None, dic: dict, visited: list):
+        if node in dic or node in visited:
+            return dic
 
         elif isinstance(node, Constant):
             for i in node.from_node:
                 i.remove_to_node(node)
                 for j in node.to_node:
                     i.add_to_node(j)
-            for i in node.to_node:
+
+            visited.append(node)
+
+            iter_nodes = node.to_node.copy()
+            for i in iter_nodes:
                 i.remove_from_node(node)
                 for j in node.from_node:
                     i.add_from_node(j)
-                dic = dic | self._simplify(i, dic)
-
+                dic = dic | self._simplify(i, dic, visited)
+                
             return dic
 
         elif isinstance(node, MatMul) and isinstance(node.to_node[0], Add) and \
@@ -487,18 +487,22 @@ class ONNXParser:
             for i in node.from_node:
                 i.remove_to_node(node)
                 i.add_to_node(newnode)
+
             dic[newnode.id] = newnode 
-            for i in node.to_node[0].to_node:
+
+            iter_nodes = node.to_node[0].to_node.copy()
+            for i in iter_nodes:
                 i.remove_from_node(node.to_node[0])
                 i.add_from_node(newnode)
-                dic = dic | self._simplify(i, dic)
-
+                dic = dic | self._simplify(i, dic, visited)
+                
             return dic
 
         else:
             dic[node.id] = node
-            for i in node.to_node:
-                dic = dic | self._simplify(i, dic)
+            iter_nodes = node.to_node.copy()
+            for i in iter_nodes:
+                dic = dic | self._simplify(i, dic, visited)
 
             return dic
 
