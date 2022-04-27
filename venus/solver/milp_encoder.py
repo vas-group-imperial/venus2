@@ -13,7 +13,7 @@ import torch
 import numpy as np
 from gurobipy import *
 
-from venus.network.node import Node, Relu, Input, Gemm, Conv, Sub, Add, Flatten, MatMul, BatchNormalization
+from venus.network.node import *
 from venus.dependency.dependency_graph import DependencyGraph
 from venus.dependency.dependency_type import DependencyType
 from venus.common.utils import ReluState
@@ -119,10 +119,13 @@ class MILPEncoder:
                     self.add_output_vars(j, gmodel)
                     self.add_relu_delta_vars(j, gmodel)
 
-                elif isinstance(j, Flatten):
-                    j.out_vars = j.from_node[0].out_vars.flatten()
+                elif type(j) in [Flatten, Slice]:
+                    j.out_vars = j.forward(j.from_node[0].out_vars)
 
-                elif type(j) in [Gemm, Conv, Sub, BatchNormalization]:
+                elif isinstance(j, Concat):
+                    j.out_vars = j.forward([k.out_vars for k in j.from_node])
+
+                elif type(j) in [Gemm, MatMul, Conv, ConvTranspose, Sub, BatchNormalization, MaxPool]:
                     self.add_output_vars(j, gmodel)
 
                 else:
@@ -183,7 +186,7 @@ class MILPEncoder:
                 if isinstance(j, Relu):
                     self.add_relu_constrs(j, gmodel)
 
-                elif isinstance(j, Flatten):
+                elif type(j) in [Flatten, Concat, Slice]:
                     pass
 
                 elif type(j) in [Gemm, Conv, MatMul, Sub, Add, BatchNormalization]:
@@ -193,7 +196,6 @@ class MILPEncoder:
                     raise TypeError(f'The MILP encoding of node {j} is not supported')
 
     
-
     def add_linear_constrs(self, node: Gemm, gmodel: Model):
         """
         Computes the output constraints of a linar node given the MILP
@@ -201,7 +203,6 @@ class MILPEncoder:
         added.
     
         Arguments:
-            
             node: 
                 The node. 
             gmodel:
@@ -230,7 +231,6 @@ class MILPEncoder:
         of its inputs.
 
         Arguments:  
-
             node: 
                 Relu node. 
             gmodel:
@@ -273,7 +273,34 @@ class MILPEncoder:
                     gmodel.addConstr(out[i] >= inp[i])
                     gmodel.addConstr(out[i] <= inp[i] - l_i * (1 - delta[i]))
                     gmodel.addConstr(out[i] <= u_i * delta[i])
-     
+
+
+    def add_maxpool_constrs(self, node: MaxPool, gmodel: Model):
+        """
+        Computes the output constraints of a maxpool node given the MILP variables
+        of its inputs.
+
+        Arguments:  
+            node: 
+                MaxPool node. 
+            gmodel:
+                Gurobi model.
+        """
+        assert(isinstance(node, MaxPool)), "Cannot compute maxpool constraints for non-maxpool nodes."
+  
+        inp = node.from_node[0].out_vars
+
+        for i in node.get_outputs():
+            kernel, height, width = i[-3:]
+            win = []
+            for kh, kw in itertools.product(node.kernel_shape[0], node.kernel_shape[1]):
+                index_h = height * node.kernel_shape[0] + kh
+                index_w = width * node.kernel_shape[1] + kw
+                index = (kernel, index_h, index_w) if len(inp.shape) == 3 else (inp.shape[0], kernel, index_h, index_w)
+                win.append(inp[index])
+            gmodel.addConstr(node.out_vars[i] == max_(win))
+
+
     def add_output_constrs(self, node: Node, gmodel: Model):
         """
         Creates MILP constraints for the output of the output layer.

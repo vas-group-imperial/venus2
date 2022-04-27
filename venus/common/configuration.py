@@ -171,6 +171,7 @@ class Config:
         self.SIP = SIP()
         self.PRECISION = torch.float32
         self.DEVICE = torch.device('cpu')
+        self.MEMORY_OPTIMISATION = True
         self._user_set_params = set()
 
     def set_param(self, param, value):

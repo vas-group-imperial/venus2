@@ -17,6 +17,12 @@ class Bounds:
         self.lower = lower
         self.upper = upper
 
+    def size(self):
+        """
+        Calculates the size of the bounds.
+        """
+        return 0 if self.lower is None else self.lower.nelement()
+
     def normalise(self, mean, std):
         """
         Normalises the bounds

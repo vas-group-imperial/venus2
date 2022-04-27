@@ -16,6 +16,7 @@ import numpy as np
 import torch
 
 from venus.bounds.bounds import Bounds
+from venus.bounds.equation import Equation
 from venus.common.configuration import Config
 from venus.common.utils import ReluState
 from venus.split.split_strategy import SplitStrategy
@@ -236,14 +237,31 @@ class Node:
             self.to_node[0].reset_state_flags()
 
 
+    def clean_bounds(self) -> None:
+        """
+        Nulls out the bounds of the node.
+        """
+        if self.bounds.size() == 0:
+            return
+
+        elif self.has_relu_activation():
+            self.bounds = Bounds(
+                {i: self.bounds.lower[i] for i in self.get_outputs()},
+                {i: self.bounds.upper[i] for i in self.get_outputs()}
+            )
+
+        else:
+            self.bounds = Bounds()
+
+
     def out_ch_sz(self) -> int:
         """
         Computes the size of an output channel.
         """
         if len(self.input_shape) in [1, 3]:
-            return toch.prod(self.input_shape)
+            return np.prod(self.input_shape)
 
-        return torch.prod(self.input_shape[1:])
+        return np.prod(self.input_shape[1:])
 
 
 
@@ -1305,37 +1323,40 @@ class ConvTranspose(Node):
 
         return output
 
-    def forward_numpy(self, inp: np.array=None, save_output=False) -> np.array:
+    def forward_numpy(self, inp: np.ndarray) -> np.ndarray:
         """
         Computes the output of the node given an input.
 
         Arguments:
             inp:
                 the input.
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
-        assert inp is not None or self.from_node[0].output is not None
-        inp = self.from_node[0].output if inp is None else inp
+        pad_flag = np.zeros(self.get_input_padded_size(), dtype=np.bool)
+        pad_flag[self.get_non_pad_idxs()] = True
 
-        padded_inp = Conv.pad(inp, self.pads)
+        pad = np.ones(self.get_input_padded_size()) * self.input_size
+        pad[pad_flag] = np.arange(self.input_size)
 
-        inp_strech = Conv.im2col(
-            padded_inp, (self.krn_height, self.krn_width), self.strides
+        im2col = Conv.im2col(
+            pad.reshape(self.get_input_padded_shape()),
+            (self.krn_height, self.krn_width),
+            self.strides
         )
+        indices = np.repeat(np.arange(self.out_ch_sz), self.out_ch)
+        conv_indices = im2col[:, indices]
 
-        kernel_strech = self.kernels.reshape(self.out_ch, -1).numpy()
+        indices = np.repeat(np.arange(self.out_ch), slef.out_ch_sz, axis=0)
+        conv_weights = self.kernels.transpose(1, 2, 3, 0).reshape(-1, self.out_ch)[:, indices]
+            
+        conv_matrix = np.zeros((self.output_size, self.input_size + 1), dtype=self.config.PRECISION)
+        conv_matrix[np.arange(self.output_size), conv_indices] = conv_weights
+        conv_matrix = conv_matrix[:, :self.input_size].T
 
-        output = kernel_strech @ inp_strech
-        output = output.flatten() + np.tile(self.bias.numpy(), (self.out_ch_sz, 1)).T.flatten()
-        output = output.reshape(self.output_shape)
+        output = (conv_matrix @ inp.flatten()).T
 
-        if save_output is True:
-            self.output = output
-
-        return output
+        return output.reshape(self.output_shape)
 
     def transpose(self, inp: torch.tensor) -> torch.tensor:
         """
@@ -2108,27 +2129,17 @@ class Flatten(Node):
 
         return output
 
-    def forward_numpy(self, inp: np.ndarray=None, save_output=False) -> np.ndarray:
+    def forward_numpy(self, inp: np.ndarray) -> np.ndarray:
         """
         Computes the output of the node given a numpy input.
 
         Arguments:
             inp:
                 the input.
-            save_output:
-                Whether to save the output in the node.
         Returns: 
             the output of the node.
         """
-        assert inp is not None or self.from_node[0].output is not None
-        inp = self.from_node[0].output if inp is None else inp
-
-        output = inp.flatten()
-
-        if save_output:
-            self.output = output
-
-        return output
+        return inp.flatten()
 
 
 class Sub(Node):
@@ -2539,13 +2550,31 @@ class BatchNormalization(Node):
             weight=self.scale,
             eps=self.epsilon
         )
-        # output = tf.subtract(inp, self.input_mean)
-        # output = tf.divide(output, math.sqrt(self.input_var + self.epsilon))
-        # output = tf.multiply(output, self.scale)
-        # output = tf.add(output, self.bias)
 
         if save_output:
             self.output = output
+
+        return output
+
+    def forward_numpy(self, inp: np.ndarrya) -> np.ndarray:
+        """
+        Computes the output of the node given a numpy input.
+
+        Arguments:
+            inp:
+                the input.
+        Returns: 
+            the output of the node.
+        """
+        out_ch_sz = self.out_ch_sz()
+
+        scale = np.tile(self.scale, (out_ch_sz, 1)).T.flatten()
+        bias = np.tile(self.bias, (out_ch_sz, 1)).T.flatten()
+        input_mean = np.tile(self.input_mean, (out_ch_sz, 1)).T.flatten()
+        mean_var = np.sqrt(self.input_mean + self.epsilon)
+        mean_var = np.tile(mean_var, (out_ch_sz, 1)).T.flatten()
+
+        output = (inp - input_mean) / mean_var * scale + bias
 
         return output
 
@@ -2647,6 +2676,18 @@ class Slice(Node):
             self.output = output
 
         return output
+
+    def forward_numpy(self, inp: np.ndarray) -> np.ndarray:
+        """
+        Computes the output of the node given a numpy input.
+
+        Arguments:
+            inp:
+                the input.
+        Returns: 
+            the output of the node.
+        """
+        return inp[self.slices]
 
     @staticmethod
     def compute_output_shape(input_shape: tuple, slices: list):
@@ -2755,3 +2796,15 @@ class Concat(Node):
             self.output = output
 
         return output
+
+    def forward_numpy(self, inps: list) -> np.ndarray:
+        """
+        Computes the output of the node given a numpy input.
+
+        Arguments:
+            inp:
+                list of inputs to the node.
+        Returns: 
+            the output of the node.
+        """
+        return np.concatenate(inps, self.axis)

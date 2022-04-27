@@ -59,6 +59,10 @@ class SIP:
                 print(j)
                 j.update_bounds(self.compute_ia_bounds(j))
 
+                if self.config.MEMORY_OPTIMISATION is True:
+                    for k in j.from_node:
+                        k.clear_bounds()
+
                 if j.is_symb_eq_eligible() is not True:
                     continue
 
@@ -165,11 +169,10 @@ class SIP:
         
         return True
 
-
     def back_substitution(self, eq, node):
         eqs = self._back_substitution(eq, node.from_node[0], 'lower')
         eq = eqs[0]
-        for i in eqs[1:]
+        for i in eqs[1:]:
             eq = eq.add(i)
         lower = eq.concrete_values(
             self.prob.spec.input_node.bounds.lower, 
@@ -179,7 +182,7 @@ class SIP:
 
         eqs = self._back_substitution(eq, node.from_node[0], 'upper')
         eq = eqs[0]
-        for i in eqs[1:]
+        for i in eqs[1:]:
             eq = eq.add(i)
         upper = eq.concrete_values(
             self.prob.spec.input_node.bounds.lower, 
@@ -194,27 +197,22 @@ class SIP:
             raise ValueError("Bound type {bound} not recognised.")
 
         if isinstance(node, Input):
-            return eq.concrete_values(
-                node.bounds.lower.flatten(), node.bounds.upper.flatten(), bound
-            )
+            return  [eq]
 
         elif node.has_non_linear_op() is True:
-            if node.has_relu_activation() is True and \
-            node.to_node[0].get_unstable_count() == 0  and  \
-            node.to_node[0].get_active_count() == 0:
-                return eq.const
-            else:
-                eq = eq.interval_transpose(node, bound)
+            eq = eq.interval_transpose(node, bound)
 
         elif type(node) in [Relu, MaxPool, Flatten]:
-            pass
+            eq = [eq]
 
         else:
             eq = eq.transpose(node)
 
-        return self._back_substitution(eq, node.from_node[0], bound)
+        eqs = []
+        for i in eq:
+            eqs.extend(self._back_substitution(i, node.from_node[0], bound))
 
-
+        return eqs
 
     # def back_substitution(self, eq, node):
         # return Bounds(

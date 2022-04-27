@@ -15,7 +15,7 @@ import math
 import torch
 import numpy as np
 
-from venus.network.node import Node, Gemm, Conv, Relu, MatMul, Add, Sub, Constant
+from venus.network.node import *
 from venus.common.configuration import Config
 
 torch.set_num_threads(1)
@@ -46,6 +46,23 @@ class Equation():
             self.matrix.detach().clone(),
             self.const.detach().clone(),
             self.size
+        )
+
+
+    def add(self, eq: Equation): -> Equation:
+        """
+        Adds the equation to another.
+
+        Arguments:
+            eq:
+                The equation to add.
+        Returns.
+            An equation representing the sum.
+        """
+        return Equation(
+            self.matrix + eq.matrix,
+            self.const + eq.const,
+            self.config
         )
  
     def _get_plus_matrix(self) -> torch.Tensor:
@@ -154,7 +171,7 @@ class Equation():
         return c
 
     def transpose(self, node: Node):
-        if type(node) in [Gemm, Matmul, Conv]:
+        if type(node) in [Gemm, MatMul, Conv]:
             return self._tranpose_affine(node)
 
         elif isinstance(node, BatchNormalization):
@@ -163,6 +180,11 @@ class Equation():
         elif isinstance(node, Slice):
             return self._transpose_slice(node)
 
+        elif isinstance(node, Concat):
+            return self._transpose_concat(node)
+
+        else:
+            raise NotImplementedError(f'Equation transpose for {type{node}')
 
     def _transpose_affine(self, node: Node):
         matrix = node.transpose(self.matrix)
