@@ -52,16 +52,20 @@ class SIP:
         Sets pre-activation and activation bounds.
         """
         start = timer()
+        processed_nodes = {i : False for i in self.nn.node}
         saw_symb_eq_node = False
         for i in range(self.nn.tail.depth):
             nodes = self.nn.get_node_by_depth(i)
             for j in nodes:
                 print(j)
+                processed_nodes[j.id] = True
                 j.update_bounds(self.compute_ia_bounds(j))
 
                 if self.config.MEMORY_OPTIMISATION is True:
                     for k in j.from_node:
-                        k.clear_bounds()
+                        cond = np.array([processed_nodes[l.id] for l in k.to_node])
+                        if cond.all() is True:
+                            k.clear_bounds()
 
                 if j.is_symb_eq_eligible() is not True:
                     continue

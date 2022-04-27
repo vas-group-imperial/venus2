@@ -144,7 +144,6 @@ class Node:
         Adds an input node.
 
         Arguments:
-            
             node:
                 The input node.
         """
@@ -156,25 +155,42 @@ class Node:
         Adds an output node.
 
         Arguments:
-            
             node:
                 The output node.
         """
         if self.has_to_node(node.id) is not True:
             self.to_node.append(node)
 
+    def remove_from_node(self, node):
+        """
+        Removes an input node.
+
+        Arguments:
+            node:
+                The input node.
+        """
+        if self.has_from_node(node.id) is True:
+            self.from_node.remove(node)
+
+    def remove_to_node(self, node):
+        """
+        Removes an output node.
+
+        Arguments:
+            node:
+                The input node.
+        """
+        if self.has_to_node(node.id) is True:
+            self.to_node.remove(node)
 
     def has_to_node(self, id: int) -> bool:
         """
         Checks whether the node points to another.
 
         Arguments:
-            
             id:
                 The id of the node with which connection to check.
-
         Returns:
-            
             Whether the current node points to node with id "id".
         """
         for i in self.to_node:
@@ -188,12 +204,9 @@ class Node:
         Checks whether the node is pointed to by another.
 
         Arguments:
-            
             id:
                 The id of the node with which connection to check.
-
         Returns:
-            
             Whether the node with id "id" points to the current node.
         """
         for i in self.from_node:

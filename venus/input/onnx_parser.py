@@ -455,20 +455,23 @@ class ONNXParser:
     def simplify(self, node: Node):
         return self._simplify(node, {})
 
-    def _simplify(self, node: Node, dic: list):
+    def _simplify(self, node: Node, dic: dict):
 
         if node in dic:
             return {}
 
         elif isinstance(node, Constant):
             for i in node.from_node:
-                i.to_node.remove(node)
-                i.to_node.extend(node.to_node)
+                i.remove_to_node(node)
+                for j in node.to_node:
+                    i.add_to_node(j)
             for i in node.to_node:
-                i.from_node.remove(node)
-                i.from_node.extend(node.from_node)
+                i.remove_from_node(node)
+                for j in node.from_node:
+                    i.add_from_node(j)
+                dic = dic | self._simplify(i, dic)
 
-            return self._simplify(node.to_node[0], dic)
+            return dic
 
         elif isinstance(node, MatMul) and isinstance(node.to_node[0], Add) and \
         len(node.to_node) == 1 and node.to_node[0].const is not None:
@@ -482,12 +485,12 @@ class ONNXParser:
                 self.config
             )
             for i in node.from_node:
-                i.to_node.remove(node)
-                i.to_node.insert(0, newnode)
+                i.remove_to_node(node)
+                i.add_to_node(newnode)
             dic[newnode.id] = newnode 
             for i in node.to_node[0].to_node:
-                i.from_node.remove(node.to_node[0])
-                i.from_node.insert(0, newnode)
+                i.remove_from_node(node.to_node[0])
+                i.add_from_node(newnode)
                 dic = dic | self._simplify(i, dic)
 
             return dic
