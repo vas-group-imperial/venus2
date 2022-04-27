@@ -127,10 +127,8 @@ class DependencyGraph:
 
             None
         """ 
-        for j in n_n.get_outputs():
+        for j in n_n.to_node[0].get_unstable_indices():
             d = None if n_v is None else n_v[j]
-            if n_n.to_node[0].is_stable(j, d): 
-                continue
             for i in self.nn.calc_neighbouring_units(n, n_n, j):
                 d = None if v is None else v[i]
                 if n.to_node[0].is_stable(i, d):
@@ -216,11 +214,9 @@ class DependencyGraph:
 
             None
         """ 
-        for (i,j) in list(itertools.combinations(n.get_outputs(), 2)):
+        for (i,j) in list(itertools.combinations(n.to_node[0].get_unstable_indices(), 2)):
             d_i = None if v is None else v[i]
             d_j = None if v is None else v[j]
-            if n.to_node[0].is_stable(i, d_i) or n.to_node[0].is_stable(j, d_j):
-                continue
             dep = self._node_intra_dep(n, i, j)
             if dep is None:
                 continue 

@@ -49,7 +49,7 @@ class Equation():
         )
 
 
-    def add(self, eq: Equation): -> Equation:
+    def add(self, eq: Equation) -> Equation:
         """
         Adds the equation to another.
 
@@ -184,7 +184,7 @@ class Equation():
             return self._transpose_concat(node)
 
         else:
-            raise NotImplementedError(f'Equation transpose for {type{node}')
+            raise NotImplementedError(f'Equation transpose for {type(node)}')
 
     def _transpose_affine(self, node: Node):
         matrix = node.transpose(self.matrix)

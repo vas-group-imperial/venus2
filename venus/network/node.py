@@ -237,18 +237,12 @@ class Node:
             self.to_node[0].reset_state_flags()
 
 
-    def clean_bounds(self) -> None:
+    def clear_bounds(self) -> None:
         """
         Nulls out the bounds of the node.
         """
-        if self.bounds.size() == 0:
+        if isinstance(self, Input) or self.has_relu_activation():
             return
-
-        elif self.has_relu_activation():
-            self.bounds = Bounds(
-                {i: self.bounds.lower[i] for i in self.get_outputs()},
-                {i: self.bounds.upper[i] for i in self.get_outputs()}
-            )
 
         else:
             self.bounds = Bounds()
@@ -1934,6 +1928,20 @@ class Relu(Node):
 
         return self.unstable_flag
 
+    def get_unstable_indices(self) -> torch.tensor:
+        """
+        Returns an array of indices of unstable ReLU units.
+        """
+        return [tuple(i) for i in self.get_unstable_flag().nonzero()]
+
+        if self.unstable_flag is None:
+            self.unstable_flag = torch.logical_and(
+                self.from_node[0].bounds.lower < 0,
+                self.from_node[0].bounds.upper > 0
+            ).flatten()
+
+        return self.unstable_flag
+
     def get_unstable_count(self) -> int:
         """
         Returns the total number of unstable nodes.
@@ -2556,7 +2564,7 @@ class BatchNormalization(Node):
 
         return output
 
-    def forward_numpy(self, inp: np.ndarrya) -> np.ndarray:
+    def forward_numpy(self, inp: np.ndarray) -> np.ndarray:
         """
         Computes the output of the node given a numpy input.
 

@@ -144,12 +144,24 @@ class MILPEncoder:
                 The gurobi model
         """ 
         node.out_vars = np.empty(shape=node.output_shape, dtype=Var)
-        for i in node.get_outputs():
-            node.out_vars[i] = gmodel.addVar(
-                lb=node.bounds.lower[i].item(),
-                ub=node.bounds.upper[i].item()
-            )
-    
+
+        if node.bounds.size() > 0:
+            for i in node.get_outputs():
+                node.out_vars[i] = gmodel.addVar(
+                    lb=node.bounds.lower[i].item(), ub=node.bounds.upper[i].item()
+                )
+        else:
+            if isinstance(node, Relu):
+                for i in node.get_outputs():
+                    node.out_vars[i] = gmodel.addVar(
+                        lb=0, ub=GRB.INFINITY
+                    )
+            else:
+                for i in node.get_outputs():
+                    node.out_vars[i] = gmodel.addVar(
+                        lb=-GRB.INFINITY, ub=GRB.INFINITY
+                    )
+ 
     def add_relu_delta_vars(self, node: Relu, gmodel: Model):
         """
         Creates a binary MILP variable for encoding each of the units in a given
@@ -166,7 +178,7 @@ class MILPEncoder:
         assert(isinstance(node, Relu)), "Cannot add delta variables to non-relu nodes."
     
         node.delta_vars = np.empty(shape=node.output_shape, dtype=Var)
-        for i in node.get_outputs():
+        for i in node.get_unstable_indices():
             node.delta_vars[i] = gmodel.addVar(vtype=GRB.BINARY)
             node.delta_vars[i].setAttr(GRB.Attr.BranchPriority, node.depth)
 

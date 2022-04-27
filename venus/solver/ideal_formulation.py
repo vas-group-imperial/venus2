@@ -70,13 +70,12 @@ class IdealFormulation(Cuts):
             delta = self.gmodel._vars[s: e]
             _delta = np.asarray(self.gmodel.cbGetNodeRel(delta)).reshape(i.output_shape)
             delta = np.asarray(delta).reshape(i.output_shape)
-            for j in i.get_outputs():
-                if not i.to_node[0].is_stable(j):
-                    if _delta[j] > 0 and _delta[j] < 1:
-                        ineqs = self.get_inequalities(i, j, _delta)
-                        if self.cut_condition(ineqs, i, j, _delta):
-                            lhs, rhs = self.build_constraint(ineqs, i, j, delta)
-                            cuts.append((lhs,rhs))
+            for j in i.to_node[0].get_unstable_indices():
+                if _delta[j] > 0 and _delta[j] < 1:
+                    ineqs = self.get_inequalities(i, j, _delta)
+                    if self.cut_condition(ineqs, i, j, _delta):
+                        lhs, rhs = self.build_constraint(ineqs, i, j, delta)
+                        cuts.append((lhs,rhs))
         te = timer()
         if len(cuts) > 0:
             self.logger.info(f'Constructed ideal cuts, #cuts: {len(cuts)}, time: {te - ts}')
