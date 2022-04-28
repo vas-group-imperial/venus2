@@ -92,8 +92,12 @@ class ONNXParser:
         if len(node.input) == 0:
             input_shape = None
         elif node.input[0] == inp.name:
+            # input_shape = tuple(
+                # i.dim_value if i.dim_value != 0 else 1
+                # for i in inp.type.tensor_type.shape.dim
+            # )
             input_shape = tuple(
-                i.dim_value if i.dim_value != 0 else 1
+                i.dim_value 
                 for i in inp.type.tensor_type.shape.dim
             )
         else:
@@ -454,8 +458,8 @@ class ONNXParser:
 
     def _simplify(self, node: None, dic: dict, visited: list):
         if node in dic or node in visited:
-            return dic
-
+            return {}
+        
         elif isinstance(node, Constant):
             for i in node.from_node:
                 i.remove_to_node(node)
@@ -464,11 +468,12 @@ class ONNXParser:
 
             visited.append(node)
 
-            iter_nodes = node.to_node.copy()
-            for i in iter_nodes:
+            for i in  node.to_node:
                 i.remove_from_node(node)
                 for j in node.from_node:
                     i.add_from_node(j)
+
+            for i in node.to_node:
                 dic = dic | self._simplify(i, dic, visited)
                 
             return dic
@@ -489,11 +494,12 @@ class ONNXParser:
                 i.add_to_node(newnode)
 
             dic[newnode.id] = newnode 
-
-            iter_nodes = node.to_node[0].to_node.copy()
-            for i in iter_nodes:
+            
+            for i in node.to_node[0].to_node:
                 i.remove_from_node(node.to_node[0])
                 i.add_from_node(newnode)
+                
+            for i in node.to_node[0].to_node:
                 dic = dic | self._simplify(i, dic, visited)
                 
             return dic
