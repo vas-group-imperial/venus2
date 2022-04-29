@@ -22,7 +22,6 @@ from venus.network.node import Input, Gemm, Relu, MatMul, Add, Constant, Conv
 from venus.bounds.sip import SIP
 from venus.common.logger import get_logger
 from venus.common.configuration import Config
-import tensorflow as tf
 
 class NeuralNetwork:
     

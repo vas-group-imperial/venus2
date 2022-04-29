@@ -67,15 +67,17 @@ class SIP:
                         if cond.all() is True:
                             k.clear_bounds()
 
-                if j.is_symb_eq_eligible() is not True:
+                if self.is_symb_eq_eligible(j) is not True:
                     continue
 
                 if saw_symb_eq_node is not True:
-                    symb_eq_node = True
+                    saw_symb_eq_node = True
                     continue
 
                 if j.has_relu_activation():
                     flag =  j.to_node[0].get_unstable_flag().reshape(j.output_shape)
+                else:
+                    flag = None
 
                 j.update_bounds(self.compute_symb_concr_bounds(j), flag)
 
@@ -85,6 +87,24 @@ class SIP:
 
         if self.logger is not None:
             SIP.logger.info('Bounds computed, time: {:.3f}, '.format(timer()-start))
+
+
+    def is_symb_eq_eligible(self, node: None) -> bool:
+        """
+        Determines whether the node implements function requiring a symbolic
+        equation for bound calculation.
+        """
+
+        if type(node) in [BatchNormalization, Input, Relu, MaxPool, Reshape, Flatten, Slice, Concat]:
+            return False
+
+        if node.has_relu_activation() and node.to_node[0].get_unstable_count() > 0:
+            return True
+
+        if node.has_max_pool():
+            return True
+
+        return False
 
 
     def compute_ia_bounds(self, node: Node) -> list:

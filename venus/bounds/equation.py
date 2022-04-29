@@ -299,24 +299,29 @@ class Equation():
         return (lower_slope, upper_slope), (lower_const, upper_const)
 
     def get_max_pool_relaxation(self, node: Node) -> tuple:
-        indices = torch.arange(node.input_size).reshape(node.input_shape)
-        lower_indices = node.to_node[0].forward(node.bounds.lower).flatten()
-        upper_indices = node.to_node[0].forward(node.bounds.upper).flatten()
+        lower, indices = node.to_node[0].forward(node.bounds.lower, return_indices=True)
+        
+        idx_correction = torch.tensor(
+            [i * node.out_ch_sz() for i in range(node.out_ch())]
+        ).reshape((node.out_ch(), 1, 1))
+        if node.has_batch_dimension()
+            idx_correction = idx_correction[None, :]
+        indices = indices + idx_correction
 
-        lower_max  = lower_indices > upper_indices
+        lower, indices = lower.flatten(), indices.flatten()
+        upper = node.to_node[0].forward(node.bounds.upper).flatten()
+        lower_max  = lower > upper
         not_lower_max = torch.logical_not(lower_max)
-
 
         lower_slope = torch.zeros(
             node.input_size, dtype=self.config.PRECISION, device=self.config.DEVICE
         )
-        lower_slope[lower_indices] = 1.0
+        lower_slope[indices] = 1.0
         lower_const = torch.zeros(
             node.input_size, dtype=self.config.PRECISION, device=self.config.DEVICE
         )
-        lower_const[lower_indices] = Equation._derive_const(node, lower_indices)
+        lower_const[indices] = Equation._derive_const(node, indices)
 
-    
         upper_slope = torch.zeros(
             node.input_size, dtype=self.config.PRECISION, device=self.config.DEVICE
         )
@@ -383,7 +388,7 @@ class Equation():
             raise NotImplementedError(f'{type(node)} equations')
 
     @staticmethod 
-    def _zero_eq(node: None, flag: torch.Tensor) -> Equation:
+    def _zero_eq(node: Node, flag: torch.Tensor) -> Equation:
         if isinstance(node.from_node[0], Relu) and \
         node.from_node[0].get_unstable_count() == 0  and \
         node.from_node[0].get_active_count() == 0:      

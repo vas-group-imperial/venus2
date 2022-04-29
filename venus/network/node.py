@@ -16,7 +16,6 @@ import numpy as np
 import torch
 
 from venus.bounds.bounds import Bounds
-from venus.bounds.equation import Equation
 from venus.common.configuration import Config
 from venus.common.utils import ReluState
 from venus.split.split_strategy import SplitStrategy
@@ -95,22 +94,6 @@ class Node:
         self.out_vars = torch.empty(0)
         self.delta_vars = torch.empty(0)
 
-    def is_symb_eq_eligible(self) -> bool:
-        """
-        Determines whether the node implements function requiring a symbolic
-        equation for bound calculation.
-        """
-
-        if type(self) in [BatchNormalization, Input, Relu, MaxPool, Reshape, Flatten, Slice, Concat]:
-            return False
-
-        if self.has_relu_activation() and self.to_node[0].get_unstable_count() > 0:
-            return True
-
-        if self.has_max_pool():
-            return True
-
-        return False
         
     def has_non_linear_op(self) -> bool:
         """
@@ -260,16 +243,33 @@ class Node:
         else:
             self.bounds = Bounds()
 
+    def has_batch_dimension(self) -> int:
+        """
+        Determines whether the node has batch dimension.
+        """
+        if len(self.input_shape) in [1, 3]:
+            return False
+
+        return True
 
     def out_ch_sz(self) -> int:
         """
         Computes the size of an output channel.
         """
-        if len(self.input_shape) in [1, 3]:
-            return np.prod(self.input_shape)
+        if self.has_batch_dimension() is True:
+            return np.prod(self.input_shape[1:])
 
-        return np.prod(self.input_shape[1:])
+        return np.prod(self.input_shape)
 
+    
+    def out_ch(self) -> int:
+        """
+        Computes the number of output channels.
+        """
+        if self.has_batch_dimension() is True:
+            return self.input_shape[1]
+
+        return self.input_shape[0]
 
 
 class Constant(Node):
@@ -1621,13 +1621,15 @@ class MaxPool(Node):
         """
         return self.output_size
 
-    def forward(self, inp: torch.tensor=None, save_output=False) -> np.array:
+    def forward(self, inp: torch.tensor=None, return_indices=False, save_output=False) -> np.array:
         """
         Computes the output of the node given an input.
 
         Arguments:
             inp:
-                the input.
+                The input.
+            return_indices:
+                Whether to return the indices of the max units.
             save_output:
                 Whether to save the output in the node. 
         Returns: 
@@ -1640,11 +1642,12 @@ class MaxPool(Node):
             inp,
             self.kernel_shape,
             stride=self.strides,
-            padding=self.pads
+            padding=self.pads,
+            return_indices=return_indices
         )
 
         if save_output:
-            self.output = output
+            self.output = output if return_indices is not True else output[0]
 
         return output
 
