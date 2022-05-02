@@ -408,7 +408,7 @@ class Equation():
                 config
             )
 
-    def _derive_matrix(node: Node, flag: torch.Tensor = None):
+    def _derive_matrix(node: Node, flag: torch.Tensor=None):
         flag = torch.ones(node.output_size, dtype=torch.bool) if flag is None else flag
 
         if isinstance(node, Conv):
@@ -526,13 +526,13 @@ class Equation():
     @staticmethod
     def _derive_add_const(node: Node, flag: torch.Tensor):
         return torch.zeros(
-            torch.sum(flag).item(), dtype=node.config.PRECISION, node.config.DEVICE
+            torch.sum(flag).item(), dtype=node.config.PRECISION, device=node.config.DEVICE
         )
 
     @staticmethod
     def _derive_batchnormalization_const(node: Node, flag: torch.Tensor):
         return torch.zeros(
-            torch.sum(flag).item(), dtype=node.config,PRECISION, node.config.DEVICE
+            torch.sum(flag).item(), dtype=node.config.PRECISION, device=node.config.DEVICE
         )
 
 
