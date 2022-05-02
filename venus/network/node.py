@@ -257,9 +257,9 @@ class Node:
         Computes the size of an output channel.
         """
         if self.has_batch_dimension() is True:
-            return np.prod(self.input_shape[1:])
+            return np.prod(self.input_shape[2:])
 
-        return np.prod(self.input_shape)
+        return np.prod(self.input_shape[1:])
 
     
     def out_ch(self) -> int:
@@ -1604,7 +1604,6 @@ class MaxPool(Node):
             self.from_node,
             self.to_node,
             self.input_shape,
-            self.output_shape,
             self.kernel_shape,
             self.pads,
             self.strides,

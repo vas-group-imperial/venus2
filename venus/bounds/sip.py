@@ -75,6 +75,7 @@ class SIP:
                     continue
 
                 if j.has_relu_activation():
+                    print(j.output_size, j.to_node[0].get_unstable_count())
                     flag =  j.to_node[0].get_unstable_flag().reshape(j.output_shape)
                 else:
                     flag = None
@@ -199,7 +200,7 @@ class SIP:
         for i in eqs[1:]:
             eq = eq.add(i)
         lower = eq.concrete_values(
-            self.prob.spec.input_node.bounds.lower, 
+            self.prob.spec.input_node.bounds.lower,
             self.prob.spec.input_node.bounds.upper,
             'lower'
         )
@@ -209,7 +210,7 @@ class SIP:
         for i in eqs[1:]:
             eq = eq.add(i)
         upper = eq.concrete_values(
-            self.prob.spec.input_node.bounds.lower, 
+            self.prob.spec.input_node.bounds.lower,
             self.prob.spec.input_node.bounds.upper,
             'upper'
         )
@@ -224,7 +225,7 @@ class SIP:
             return  [eq]
 
         elif node.has_non_linear_op() is True:
-            eq = eq.interval_transpose(node, bound)
+            eq = [eq.interval_transpose(node, bound)]
 
         elif type(node) in [Relu, MaxPool, Flatten]:
             eq = [eq]
@@ -233,6 +234,7 @@ class SIP:
             eq = eq.transpose(node)
 
         eqs = []
+
         for i in eq:
             eqs.extend(self._back_substitution(i, node.from_node[0], bound))
 
