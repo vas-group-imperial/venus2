@@ -65,7 +65,20 @@ class NeuralNetwork:
         
         onnx_parser = ONNXParser(self.config)
         self.head, self.tail, self.node = onnx_parser.load(self.model_path)
- 
+
+        # print(self.head.input_shape)
+        # s = 0
+        # for i in range(self.tail.depth):
+            # nodes = self.get_node_by_depth(i)
+            # for j in nodes:
+                # if j.has_relu_activation() or j.has_max_pool():
+                    # s += j.output_size
+                # print(i, j, j.output_size)
+        # print(s)
+        
+        # import sys
+        # sys.exit()
+
     def copy(self):
         """
         Copies the calling object.

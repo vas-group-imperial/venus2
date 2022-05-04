@@ -79,7 +79,7 @@ class Venus:
             from venus.specification.formula import VarVarConstraint, Formula, StateCoordinate
             from venus.network.node import Input
             lb = np.random.uniform(0, 1, nn.head.input_shape)
-            ub = lb + 0.00000001
+            ub = lb + 0.001
             bounds = Bounds(torch.tensor(lb,dtype=self.config.PRECISION), torch.tensor(ub,dtype=self.config.PRECISION))
             spec = [Specification(
                 Input(bounds, self.config),

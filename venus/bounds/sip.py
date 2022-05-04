@@ -168,7 +168,10 @@ class SIP:
     def compute_symb_concr_bounds(self, node: Node) -> Bounds:
         symb_eq = self.compute_symb_eq(node)
 
-        return self.back_substitution(symb_eq, node)
+        return Bounds(
+            self.back_substitution(symb_eq, node.from_node[0], 'lower'),
+            self.back_substitution(symb_eq, node.from_node[0], 'upper')
+        )
 
     def compute_symb_eq(self, node: Node) -> Equation:
         if node.has_relu_activation():
@@ -194,28 +197,17 @@ class SIP:
         
         return True
 
-    def back_substitution(self, eq, node):
-        eqs = self._back_substitution(eq, node.from_node[0], 'lower')
-        eq = eqs[0]
+    def back_substitution(self, eq, node, bound):
+        eqs = self._back_substitution(eq, node, bound)
+        sum_eq = eqs[0]
         for i in eqs[1:]:
-            eq = eq.add(i)
-        lower = eq.concrete_values(
-            self.prob.spec.input_node.bounds.lower,
-            self.prob.spec.input_node.bounds.upper,
-            'lower'
-        )
+            sum_eq = sum_eq.add(i)
 
-        eqs = self._back_substitution(eq, node.from_node[0], 'upper')
-        eq = eqs[0]
-        for i in eqs[1:]:
-            eq = eq.add(i)
-        upper = eq.concrete_values(
-            self.prob.spec.input_node.bounds.lower,
-            self.prob.spec.input_node.bounds.upper,
-            'upper'
+        return sum_eq.concrete_values(
+            self.prob.spec.input_node.bounds.lower.flatten(),
+            self.prob.spec.input_node.bounds.upper.flatten(),
+            bound
         )
-
-        return Bounds(lower, upper)
 
     def _back_substitution(self, eq, node, bound):
         if bound not in ['lower', 'upper']:
@@ -345,7 +337,7 @@ class SIP:
     def simplify_formula(self, formula):
         if isinstance(formula, VarVarConstraint):
             coeffs = torch.zeros(
-                1, self.nn.tail.output_size, 
+                (1, self.nn.tail.output_size),
                 dtype=self.config.PRECISION,
                 device=self.config.DEVICE
             )
@@ -359,10 +351,9 @@ class SIP:
             else:
                 raise ValueError('Formula sense {formula.sense} not expeted')
             equation = Equation(coeffs, const, self.config)
-            diff = self._back_substitution(
-                equation,
-                self.nn.tail,
-                'lower'
+            print('sadasa', self.nn.tail.output_size)
+            diff = self.back_substitution(
+                equation, self.nn.tail, 'lower'
             )
 
             return formula if diff <= 0 else TrueFormula()

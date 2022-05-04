@@ -1189,7 +1189,7 @@ class ConvTranspose(Node):
             _, _, self.in_height, self.in_width = input_shape
             _, _, self.out_height, self.out_width = output_shape
         self.out_ch,  self.in_ch, self.krn_height, self.krn_width = kernels.shape
-        self.out_ch_sz = int(self.output_size / self.out_ch)
+        self.out_ch_sz = int(self.output_size / self.in_ch)
 
     def copy(self):
         """

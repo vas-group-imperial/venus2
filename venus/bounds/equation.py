@@ -171,8 +171,8 @@ class Equation():
         return c
 
     def transpose(self, node: Node):
-        if type(node) in [Gemm, MatMul, Conv]:
-            return [self._tranpose_affine(node)]
+        if type(node) in [Gemm, MatMul, Conv, ConvTranspose]:
+            return [self._transpose_affine(node)]
 
         elif isinstance(node, BatchNormalization):
             return [self._transpose_batch_normalization(node)]
@@ -187,7 +187,13 @@ class Equation():
             raise NotImplementedError(f'Equation transpose for {type(node)}')
 
     def _transpose_affine(self, node: Node):
-        matrix = node.transpose(self.matrix)
+        if node.has_batch_dimension():
+            shape = (self.size,) + node.output_shape[1:]
+        else:
+            shape = (self.size,) + node.output_shape
+
+        matrix = node.transpose(self.matrix.reshape(shape))
+        matrix = matrix.reshape(matrix.shape[0], -1)
         const = Equation._derive_const(
             node,
             torch.ones(node.output_size, dtype=torch.bool, device=self.config.DEVICE)
@@ -228,9 +234,7 @@ class Equation():
             ))
 
         return eqs
-
-
-    
+ 
     def get_relaxation_slope(self, node: Node) -> tuple:
         if node.has_relu_activation():
             return self.get_relu_relaxation(node)
@@ -246,7 +250,7 @@ class Equation():
             return self.interval_relu_transpose(node, bound)
 
         elif node.has_max_pool():
-            return self.max_pool_transpose(node, bound)
+            return self.interval_maxpool_transpose(node, bound)
 
         else:
             raise TypeError("Expected either relu or maxpool subsequent layer")
@@ -303,25 +307,7 @@ class Equation():
 
         return (lower_slope, upper_slope), (lower_const, upper_const)
 
-
-    def interval_maxpool_transpose(self, node, bound):
-        lower_eq, upper_eq = self.get_maxpool_relaxation(node)
-        _plus, _minus = self._get_plus_matrix(), self._get_minus_matrix()
-
-        if bound == 'lower':
-            matrix = _plus @ lower_eq.matrix + _minus @ upper_eq.matrix
-            const = _plus @ lower_eq.const + _minus @ upper_eq.const + self.const
-
-        elif bound == 'upper':
-            matrix = _plus @ upper_eq.matrix + _minus @ lower_eq.matrix
-            const = _plus @ upper_eq.const + _minus @ lower_eq.const + self.const
-
-        else:
-            raise ValueError(f'Bound {bound} is not recognised.')
-
-        return Equation(matrix, const, self.config)
-
-    def get_maxpool_relaxation(self, node: Node):
+    def interval_maxpool_transpose(self, node: Node, bound:str):
         lower, indices = node.to_node[0].forward(node.bounds.lower, return_indices=True)
         
         idx_correction = torch.tensor(
@@ -336,26 +322,66 @@ class Equation():
         lower_max  = lower > upper
         not_lower_max = torch.logical_not(lower_max)
 
-        matrix = torch.zeros(
-            (node.output_size, node.input_size), dtype=self.config.PRECISION, device=self.config.DEVICE
-        )
-        matrix[indices] = 1.0
-        const = torch.zeros(
-            node.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
-        )
-        lower = Equation(matrix, const, self.config)
-            
-        matrix = torch.zeros(
-            (self.output_size, node.input_size), dtype=self.config.PRECISION, device=self.config.DEVICE
-        )
-        matrix[indices][lower_max] = 1.0
-        const = torch.zeros(
-            node.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
-        ) 
-        const[indices][not_lower_max] = node.bounds.upper.flatten()[indices][not_lower_max]
-        upper = Equation(matrix, const, self.config)
+        _plus = self._get_plus_matrix()
+        _minus = self._get_minus_matrix()
 
-        return lower, upper
+        upper_const = torch.zeros(
+            node.to_node[0].output_size, dtype=self.config.PRECISION
+        ) 
+        upper_const[not_lower_max] = node.bounds.upper.flatten()[indices][not_lower_max]
+
+        if bound == 'lower':
+            plus_lower = torch.zeros(
+                (self.size, node.input_size), dtype=self.config.PRECISION
+            )
+            plus_lower[:, indices] = _plus
+            minus_upper = torch.zeros(
+                (self.size, node.input_size), dtype=self.config.PRECISION
+            )
+            minus_upper[:, indices][:, lower_max] = _minus[:, lower_max]
+            matrix = plus_lower + minus_upper
+
+            const = _minus @ upper_const + self.const
+
+        elif bound == 'upper':
+            minus_lower = torch.zeros(
+                (self.size, node.input_size), dtype=self.config.PRECISION
+            )
+            minus_lower[:, indices] = _minus
+            plus_upper = torch.zeros(
+                (self.size, node.input_size), dtype=self.config.PRECISION
+            )
+            plus_upper[:, indices][:, lower_max] = _plus[:, lower_max]
+            matrix = minus_lower + plus_upper
+
+            const = _plus @ upper_const + self.const
+
+        else:
+            raise ValueError(f'Bound {bound} is not recognised.')
+
+        return Equation(matrix, const, self.config)
+
+
+        # matrix = torch.zeros(
+            # (node.output_size, node.input_size), dtype=self.config.PRECISION, device=self.config.DEVICE
+        # )
+        # matrix[indices] = 1.0
+        # const = torch.zeros(
+            # node.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
+        # )
+        # lower = Equation(matrix, const, self.config)
+            
+        # matrix = torch.zeros(
+            # (self.output_size, node.input_size), dtype=self.config.PRECISION, device=self.config.DEVICE
+        # )
+        # matrix[indices][lower_max] = 1.0
+        # const = torch.zeros(
+            # node.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
+        # ) 
+        # const[indices][not_lower_max] = node.bounds.upper.flatten()[indices][not_lower_max]
+        # upper = Equation(matrix, const, self.config)
+
+        # return lower, upper
 
     def get_max_pool_relaxation(self, node: Node) -> tuple:
         lower, indices = node.to_node[0].forward(node.bounds.lower, return_indices=True)
@@ -410,7 +436,7 @@ class Equation():
 
     def _derive_matrix(node: Node, flag: torch.Tensor=None):
         flag = torch.ones(node.output_size, dtype=torch.bool) if flag is None else flag
-
+        
         if isinstance(node, Conv):
             return Equation._derive_conv_matrix(node, flag)
 
@@ -432,7 +458,7 @@ class Equation():
     def _derive_const(node: Node, flag: torch.Tensor):
         flag = torch.ones(node.output_size, dtype=torch.bool) if flag is None else flag
 
-        if isinstance(node, Conv):
+        if type(node) in [Conv, ConvTranspose]:
             return Equation._derive_conv_const(node, flag)
 
         elif isinstance(node, Gemm):
