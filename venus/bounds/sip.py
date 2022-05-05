@@ -57,7 +57,6 @@ class SIP:
         for i in range(self.nn.tail.depth):
             nodes = self.nn.get_node_by_depth(i)
             for j in nodes:
-                print(j)
                 processed_nodes[j.id] = True
                 j.update_bounds(self.compute_ia_bounds(j))
 
@@ -76,15 +75,24 @@ class SIP:
 
                 if j.has_relu_activation():
                     print(j.output_size, j.to_node[0].get_unstable_count())
-                    flag =  j.to_node[0].get_unstable_flag().reshape(j.output_shape)
+                    flag =  j.to_node[0].get_unstable_flag()
                 else:
-                    flag = None
+                    flag = torch.ones(node.output_size, dtype=torch.bool)
 
-                j.update_bounds(self.compute_symb_concr_bounds(j), flag)
+                symb_concr_bounds = self.compute_symb_concr_bounds(j, flag)
+                j.update_bounds(symb_concr_bounds, flag.reshape(j.output_shape))
 
-        self.nn.tail.update_bounds(self.compute_symb_concr_bounds(self.nn.tail))
+        self.nn.tail.bounds = Bounds(
+            torch.ones(self.nn.tail.output_shape) * - math.inf,
+            torch.ones(self.nn.tail.output_shape) * math.inf,
+        )
+        flag =  self.prob.spec.get_output_flag(self.nn.tail.output_shape)
+        symb_concr_bounds = self.compute_symb_concr_bounds(
+            self.nn.tail, flag.flatten() 
+        )
+        self.nn.tail.update_bounds(symb_concr_bounds, flag)
 
-        print(self.nn.tail.bounds.lower)
+        # print(self.nn.tail.bounds.lower)
 
         if self.logger is not None:
             SIP.logger.info('Bounds computed, time: {:.3f}, '.format(timer()-start))
@@ -160,28 +168,17 @@ class SIP:
             )
 
         return Bounds(
-            torch.reshape(lower, node.output_shape),
-            torch.reshape(upper, node.output_shape)
+            lower.reshape(node.output_shape), upper.reshape(node.output_shape)
         ) 
 
 
-    def compute_symb_concr_bounds(self, node: Node) -> Bounds:
-        symb_eq = self.compute_symb_eq(node)
+    def compute_symb_concr_bounds(self, node: Node, flag: torch.tensor) -> Bounds:
+        symb_eq = Equation.derive(node, flag, self.config)
 
         return Bounds(
             self.back_substitution(symb_eq, node.from_node[0], 'lower'),
             self.back_substitution(symb_eq, node.from_node[0], 'upper')
         )
-
-    def compute_symb_eq(self, node: Node) -> Equation:
-        if node.has_relu_activation():
-            flag = node.to_node[0].get_unstable_flag()
-        elif  len(node.to_node) == 0:
-            flag = self.prob.spec.get_output_flag(node.output_shape).flatten()
-        else:
-            flag = torch.ones(node.output_size, dtype=torch.bool)
-      
-        return Equation.derive(node, flag, self.config)
 
     def osip_eligibility(self, layer):
         if layer.depth == len(self.nodes) - 1:
@@ -351,7 +348,6 @@ class SIP:
             else:
                 raise ValueError('Formula sense {formula.sense} not expeted')
             equation = Equation(coeffs, const, self.config)
-            print('sadasa', self.nn.tail.output_size)
             diff = self.back_substitution(
                 equation, self.nn.tail, 'lower'
             )

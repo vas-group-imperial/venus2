@@ -972,18 +972,13 @@ class Conv(Node):
 
             Indices of the original input whithin the padded one.
         """
-        if len(self.input_shape) == 3:
-            in_ch, height, width = self.input_shape
-        else:
-            _, in_ch, height, width = self.input_shape
-
         pad_height, pad_width = self.pads
         size = self.get_input_padded_size()
         non_pad_idxs = torch.arange(size, dtype=torch.long).reshape(
             self.in_ch,
-            height + 2 * pad_height,
-            width + 2 * pad_width
-        )[:, pad_height:height + pad_height, pad_width :width + pad_width].flatten()
+            self.in_height + 2 * pad_height,
+            self.in_width + 2 * pad_width
+        )[:, pad_height:self.in_height + pad_height, pad_width :self.in_width + pad_width].flatten()
 
         return non_pad_idxs
 
@@ -1188,14 +1183,14 @@ class ConvTranspose(Node):
         else:
             _, _, self.in_height, self.in_width = input_shape
             _, _, self.out_height, self.out_width = output_shape
-        self.out_ch,  self.in_ch, self.krn_height, self.krn_width = kernels.shape
-        self.out_ch_sz = int(self.output_size / self.in_ch)
+        self.in_ch,  self.out_ch, self.krn_height, self.krn_width = kernels.shape
+        self.out_ch_sz = int(self.output_size / self.out_ch)
 
     def copy(self):
         """
         Copies the node.
         """
-        return Conv(
+        return ConvTranspose(
             self.from_node,
             self.to_node,
             self.input_shape,
@@ -1215,7 +1210,7 @@ class ConvTranspose(Node):
         """
         Copies the node with numpy data.
         """
-        return Conv(
+        return ConvTranspose(
             self.from_node,
             self.to_node,
             self.input_shape,
@@ -1252,31 +1247,6 @@ class ConvTranspose(Node):
             the bias.
         """
         return self.bias[index[-1]]
-
-    def edge_weight(self, index1: tuple, index2: tuple):
-        """
-        Returns the weight of the edge between output with index1 of the
-        current node and output with index2 of the previous node.
-
-        Arguments:
-
-            index1:
-                index of the output of the current node.
-            index2:
-                index of the output of the previous node.
-
-        Returns:
-         
-            the weight.
-        """
-        height_start = index1[0] * self.strides[0] - self.pads[0]
-        height = index2[0] - height_start
-        width_start = index1[1] * self.strides[1] - self.pads[1]
-        width = index2[1] - width_start
-
-        return self.kernels[index1[0]][index2[0]][height][width]
-        return self.kernels[index1[0]][index2[0]][height][width]
-
 
     def forward(
         self,
@@ -1354,7 +1324,7 @@ class ConvTranspose(Node):
         indices = np.repeat(np.arange(self.out_ch_sz), self.out_ch)
         conv_indices = im2col[:, indices]
 
-        indices = np.repeat(np.arange(self.out_ch), slef.out_ch_sz, axis=0)
+        indices = np.repeat(np.arange(self.out_ch), self.out_ch_sz, axis=0)
         conv_weights = self.kernels.transpose(1, 2, 3, 0).reshape(-1, self.out_ch)[:, indices]
             
         conv_matrix = np.zeros((self.output_size, self.input_size + 1), dtype=self.config.PRECISION)
@@ -1389,26 +1359,19 @@ class ConvTranspose(Node):
 
             Indices of the original input whithin the padded one.
         """
-        if len(self.input_shape) == 3:
-            in_ch, height, width = self.input_shape
-        else:
-            _, in_ch, height, width = self.input_shape
-
         pad_height, pad_width = self.pads
         size = self.get_input_padded_size()
         non_pad_idxs = torch.arange(size, dtype=torch.long).reshape(
             self.in_ch,
-            height + 2 * pad_height,
-            width + 2 * pad_width
-        )[:, pad_height:height + pad_height, pad_width :width + pad_width].flatten()
+            self.in_height + 2 * pad_height,
+            self.in_width + 2 * pad_width
+        )[:, pad_height:self.in_height + pad_height, pad_width :self.in_width + pad_width].flatten()
 
         return non_pad_idxs
 
     def get_input_padded_size(self) -> int:
         """
-        Returns:
-
-                Size of the padded input.
+        Returnst the size of the padded input.
         """
         return (self.in_height + 2 * self.pads[0]) * (self.in_width + 2 * self.pads[1]) * self.in_ch
         
@@ -1493,53 +1456,6 @@ class ConvTranspose(Node):
             pads = ((0, 0), (0, 0), pads, pads)
 
         return np.pad(inp, pads, 'constant', constant_values=values)
-
-
-    @staticmethod
-    def im2col(matrix: torch.tensor, kernel_shape: tuple, strides: tuple, indices: bool=False) -> torch.tensor:
-        """
-        im2col function.
-
-        Arguments:
-            matrix:
-                The matrix.
-            kernel_shape:
-                The kernel shape.
-            strides:
-                The strides of the convolution.
-            indices:
-                Whether to select indices (true) or values (false) of the matrix.
-        Returns:
-            im2col matrix
-        """
-
-        assert len(matrix.shape) in [3, 4], f"{len(matrix.shape)}-D is not supported."
-        assert type(matrix) in [torch.Tensor, np.ndarray], f"{type(matrix)} matrices are not supported."
-
-        opr = torch if isinstance(matrix, torch.Tensor) else np
-
-        filters, height, width = matrix.shape[-3:]
-        row_extent = height - kernel_shape[0] + 1
-        col_extent = width - kernel_shape[1] + 1
-
-        # starting block indices
-        start_idx = opr.arange(kernel_shape[0])[:, None] * height + np.arange(kernel_shape[1])
-        start_idx = start_idx.flatten()[None, :]
-        offset_filter = np.arange(
-            0, filters * height * width, height * width
-        ).reshape(-1, 1)
-        start_idx = start_idx + offset_filter
-
-
-        # offsetted indices across the height and width of A
-        offset_idx = opr.arange(row_extent)[:, None][::strides[0]] * height +  opr.arange(0, col_extent, strides[1])
-
-        # actual indices
-        if indices is True:
-            return start_idx.ravel()[:, None] + offset_idx.ravel()
-
-        return opr.take(matrix, start_idx.ravel()[:, None] + offset_idx.ravel())
-
 
 
 class MaxPool(Node):
@@ -1725,17 +1641,14 @@ class Relu(Node):
             bounds=bounds,
             id=id
         )
-        if SplitStrategy.does_node_split(self.config.SPLITTER.SPLIT_STRATEGY):
-            self.state = np.array(
-                [ReluState.UNSTABLE] * self.output_size,
-                dtype=ReluState,
-            ).reshape(self.output_shape)
-            self.dep_root = np.array(
-                [False] * self.output_size,
-                dtype=bool
-            ).reshape(self.output_shape)
-        else:
-            self.state, self.dep_root = np.empty(0), np.empty(0)
+        self.state = np.array(
+            [ReluState.UNSTABLE] * self.output_size,
+            dtype=ReluState,
+        ).reshape(self.output_shape)
+        self.dep_root = np.array(
+            [False] * self.output_size,
+            dtype=bool
+        ).reshape(self.output_shape)
 
         self.active_flag = None
         self.inactive_flag = None
@@ -1947,7 +1860,10 @@ class Relu(Node):
         """
         Returns an array of indices of unstable ReLU units.
         """
-        return [tuple(i) for i in self.get_unstable_flag().nonzero()]
+        return [
+            tuple(i) 
+            for i in self.get_unstable_flag().reshape(self.output_shape).nonzero()
+        ]
 
         if self.unstable_flag is None:
             self.unstable_flag = torch.logical_and(
@@ -2159,7 +2075,7 @@ class Flatten(Node):
         Arguments:
             inp:
                 the input.
-        Returns: 
+        Returns:
             the output of the node.
         """
         return inp.flatten()
@@ -2597,9 +2513,9 @@ class BatchNormalization(Node):
         mean_var = np.sqrt(self.input_mean + self.epsilon)
         mean_var = np.tile(mean_var, (out_ch_sz, 1)).T.flatten()
 
-        output = (inp - input_mean) / mean_var * scale + bias
+        output = (inp.flatten() - input_mean) / mean_var * scale + bias
 
-        return output
+        return output.reshape(self.output_shape)
 
     def transpose(self, inp: torch.tensor) -> torch.tensor:
         """
@@ -2710,7 +2626,7 @@ class Slice(Node):
         Returns: 
             the output of the node.
         """
-        return inp[self.slices]
+        return inp[tuple(self.slices)]
 
     @staticmethod
     def compute_output_shape(input_shape: tuple, slices: list):

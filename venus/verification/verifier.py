@@ -125,8 +125,8 @@ class Verifier:
         start = timer()
         # try to solve the problem using the bounds and lp
         report = self.verify_incomplete()
-        if report.result != SolveResult.UNDECIDED:
-            return report
+        # if report.result != SolveResult.UNDECIDED:
+            # return report
     
         # start the splitting and worker processes
         self.generate_procs()

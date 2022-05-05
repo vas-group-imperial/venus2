@@ -120,10 +120,10 @@ class MILPEncoder:
                     self.add_relu_delta_vars(j, gmodel)
 
                 elif type(j) in [Flatten, Slice]:
-                    j.out_vars = j.forward(j.from_node[0].out_vars)
+                    j.out_vars = j.forward_numpy(j.from_node[0].out_vars)
 
                 elif isinstance(j, Concat):
-                    j.out_vars = j.forward([k.out_vars for k in j.from_node])
+                    j.out_vars = j.forward_numpy([k.out_vars for k in j.from_node])
 
                 elif type(j) in [Gemm, MatMul, Conv, ConvTranspose, Sub, BatchNormalization, MaxPool]:
                     self.add_output_vars(j, gmodel)
@@ -195,14 +195,18 @@ class MILPEncoder:
         for i in range(self.prob.nn.tail.depth + 1):
             nodes = self.prob.nn.get_node_by_depth(i)
             for j in nodes:
+                print(j)
                 if isinstance(j, Relu):
                     self.add_relu_constrs(j, gmodel)
 
                 elif type(j) in [Flatten, Concat, Slice]:
                     pass
 
-                elif type(j) in [Gemm, Conv, MatMul, Sub, Add, BatchNormalization]:
+                elif type(j) in [Gemm, Conv, ConvTranspose, MatMul, Sub, Add, BatchNormalization]:
                     self.add_linear_constrs(j, gmodel)
+
+                elif isinstance(j, MaxPool):
+                    self.add_maxpool_constrs(j, gmodel)
 
                 else:
                     raise TypeError(f'The MILP encoding of node {j} is not supported')
@@ -220,7 +224,7 @@ class MILPEncoder:
             gmodel:
                 Gurobi model.
         """
-        assert type(node) in [Gemm, Conv, MatMul, Sub, Add, BatchNormalization], f"Cannot compute sub onstraints for {type(j)} nodes."
+        assert type(node) in [Gemm, Conv, ConvTranspose, MatMul, Sub, Add, BatchNormalization], f"Cannot compute sub onstraints for {type(node)} nodes."
         
         if type(node) in ['Sub', 'Add'] and node.const is not None:
             output = node.forward_numpy(
@@ -305,11 +309,17 @@ class MILPEncoder:
         for i in node.get_outputs():
             kernel, height, width = i[-3:]
             win = []
-            for kh, kw in itertools.product(node.kernel_shape[0], node.kernel_shape[1]):
+            for kh, kw in itertools.product(
+                    range(node.kernel_shape[0]), range(node.kernel_shape[1])
+            ):
                 index_h = height * node.kernel_shape[0] + kh
                 index_w = width * node.kernel_shape[1] + kw
-                index = (kernel, index_h, index_w) if len(inp.shape) == 3 else (inp.shape[0], kernel, index_h, index_w)
+                if node.from_node[0].has_batch_dimension():
+                    index = (0, kernel, index_h, index_w)
+                else:
+                    index = (kernel, index_h, index_w)
                 win.append(inp[index])
+
             gmodel.addConstr(node.out_vars[i] == max_(win))
 
 
