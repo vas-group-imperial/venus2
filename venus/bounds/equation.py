@@ -458,23 +458,25 @@ class Equation():
     def _derive_const(node: Node, flag: torch.Tensor):
         flag = torch.ones(node.output_size, dtype=torch.bool) if flag is None else flag
 
-        if type(node) in [Conv, ConvTranspose]:
+        if isinstance(node, Conv):
             return Equation._derive_conv_const(node, flag)
 
-        elif isinstance(node, Gemm):
+        if isinstance(node, ConvTranspose):
+            return Equation._derive_convtranspose_const(node, flag)
+
+        if isinstance(node, Gemm):
             return Equation._derive_gemm_const(node, flag)
 
-        elif isinstance(node, MatMul):
+        if isinstance(node, MatMul):
             return Equation._derive_matmul_const(node, flag)
 
-        elif isinstance(node, BatchNormalization):
+        if isinstance(node, BatchNormalization):
             return Equation._derive_batchnormalization_const(node, flag)
         
-        elif isinstance(node, Add):
+        if isinstance(node, Add):
             return Equation._derive_add_const(node, flag)
 
-        else:
-            raise NotImplementedError(f'{type(node)} equations')
+        raise NotImplementedError(f'{type(node)} equations')
 
     @staticmethod 
     def _zero_eq(node: Node, flag: torch.Tensor) -> Equation:
@@ -521,6 +523,9 @@ class Equation():
     def _derive_conv_const(node: Node, flag: torch.Tensor):
         return torch.tile(node.bias, (node.out_ch_sz, 1)).T.flatten()[flag]
 
+    @staticmethod 
+    def _derive_convtranspose_const(node: Node, flag: torch.Tensor):
+        return torch.tile(node.bias, (node.out_ch_sz, 1)).T.flatten()[flag]
 
     @staticmethod 
     def _derive_gemm_matrix(node: Node, flag: torch.Tensor):

@@ -707,8 +707,7 @@ class MatMul(Node):
         return inp @ self.weights
 
 
-
-class Conv(Node):
+class ConvBase(Node):
     def __init__(
         self,
         from_node: list, 
@@ -747,70 +746,22 @@ class Conv(Node):
             bounds:
                 the concrete bounds of the node.
         """
-        output_shape = Conv.compute_output_shape(
-            input_shape, kernels.shape, pads, strides
-        )
         super().__init__(
             from_node,
             to_node,
             input_shape,
-            output_shape,
+            None,
             config,
             depth=depth,
             bounds=bounds,
             id=id
         )
-
         self.kernels = kernels
         self.bias = bias
         self.pads = pads
         self.strides = strides
-        if len(input_shape) == 3:
-            _, self.in_height, self.in_width = input_shape
-            _, self.out_height, self.out_width = output_shape
-        else:
-            _, _, self.in_height, self.in_width = input_shape
-            _, _, self.out_height, self.out_width = output_shape
-        self.out_ch,  self.in_ch, self.krn_height, self.krn_width = kernels.shape
-        self.out_ch_sz = int(self.output_size / self.out_ch)
+        self.in_height, self.in_width = input_shape[-2:]
 
-    def copy(self):
-        """
-        Copies the node.
-        """
-        return Conv(
-            self.from_node,
-            self.to_node,
-            self.input_shape,
-            self.kernels,
-            self.bias,
-            self.pads,
-            self.strides,
-            self.config,
-            depth=self.depth,
-            bounds=self.bounds.copy(),
-            id=self.id
-        )
-
-    def numpy(self):
-        """
-        Copies the node with numpy data.
-        """
-        return Conv(
-            self.from_node,
-            self.to_node,
-            self.input_shape,
-            self.output_shape,
-            self.kernels.numpy(),
-            self.bias.numpy(),
-            self.pads,
-            self.strides,
-            self.config,
-            depth=self.depth,
-            bounds=self.bounds,
-            id=self.id
-        )
-         
     def get_milp_var_size(self):
         """
         Returns the number of milp variables required for the milp encoding of
@@ -818,226 +769,46 @@ class Conv(Node):
         """
         return self.output_size
 
-    def get_bias(self, index: tuple):
+
+    @staticmethod
+    def get_padded_size(input_shape: tuple, pads: tuple) -> int:
         """
-        Returns the bias of the given output.
-
-        Arguments:
-
-            index: 
-                the index of the output.
-
-        Returns:
-            
-            the bias.
+        Computes the size of the padded input.
         """
-        return self.bias[index[-1]]
-
-    def edge_weight(self, index1: tuple, index2: tuple):
-        """
-        Returns the weight of the edge between output with index1 of the
-        current node and output with index2 of the previous node.
-
-        Arguments:
-
-            index1:
-                index of the output of the current node.
-            index2:
-                index of the output of the previous node.
-
-        Returns:
-         
-            the weight.
-        """
-        height_start = index1[0] * self.strides[0] - self.pads[0]
-        height = index2[0] - height_start
-        width_start = index1[1] * self.strides[1] - self.pads[1]
-        width = index2[1] - width_start
-
-        return self.kernels[index1[0]][index2[0]][height][width]
-        return self.kernels[index1[0]][index2[0]][height][width]
-
-
-    def forward(
-        self,
-        inp: np.array=None,
-        clip=None,
-        add_bias=True,
-        save_output=False
-    ) -> torch.tensor:
-        """
-        Computes the output of the node given an input.
-
-        Arguments:
-            inp:
-                the input.
-            clip:
-                clips the weights to positive values if set to '+' and to
-                negatives if set to '-'
-            add_bias:
-                whether to add bias
-            save_output:
-                Whether to save the output in the node. 
-        Returns: 
-            the output of the node.
-        """
-        assert inp is not None or self.from_node[0].output is not None
-        inp = self.from_node[0].output if inp is None else inp
-
-        if clip is None:
-            kernels = self.kernels
-
-        elif clip == '+':
-            kernels = torch.clamp(self.kernels, 0, math.inf)
-
-        elif clip == '-':
-            kernels = torch.clamp(self.kernels, -math.inf, 0)
-
-        else:
-            raise ValueError(f'Kernel clip value {kernel_clip} not recognised')
-
-        output = torch.nn.functional.conv2d(
-            inp,
-            kernels,
-            bias = self.bias if add_bias is True else None,
-            stride=self.strides,
-            padding=self.pads
-        )
-            
-        if save_output:
-            self.output = output
-
-        return output
-
-
-    def forward_numpy(self, inp: np.array=None, save_output=False) -> np.array:
-        """
-        Computes the output of the node given an input.
-
-        Arguments:
-            inp:
-                the input.
-            save_output:
-                Whether to save the output in the node. 
-        Returns: 
-            the output of the node.
-        """
-        assert inp is not None or self.from_node[0].output is not None
-        inp = self.from_node[0].output if inp is None else inp
-
-        padded_inp = Conv.pad(inp, self.pads)
-
-        inp_strech = Conv.im2col(
-            padded_inp, (self.krn_height, self.krn_width), self.strides
-        )
-
-        kernel_strech = self.kernels.reshape(self.out_ch, -1).numpy()
-
-        output = kernel_strech @ inp_strech
-        output = output.flatten() + np.tile(self.bias.numpy(), (self.out_ch_sz, 1)).T.flatten()
-        output = output.reshape(self.output_shape)
-
-        if save_output is True:
-            self.output = output
-
-        return output
-
-    def transpose(self, inp: torch.tensor) -> torch.tensor:
-        """
-        Computes the input to the node given an output.
-
-        Arguments:
-
-            inp:
-                the output.
-                
-        Returns:
-            
-            the input of the node.
-        """
-        out_pad_height = self.in_height - (self.out_height - 1) * self.strides[0] + 2 * self.pads[0] - self.krn_height
-        out_pad_width = self.in_width - (self.out_width - 1) * self.strides[0] + 2 * self.pads[0] - self.krn_width
-
-        return torch.nn.functional.conv_transpose2d(
-            inp.reshape((inp.shape[0], self.out_ch, self.out_height, self.out_width)),
-            self.kernels,
-            stride=self.strides,
-            padding=self.pads,
-            output_padding=(out_pad_height, out_pad_width)
-        ).reshape(inp.shape[0], - 1)
-
-    def get_non_pad_idxs(self) -> torch.tensor:
-        """
-        Returns:
-
-            Indices of the original input whithin the padded one.
-        """
-        pad_height, pad_width = self.pads
-        size = self.get_input_padded_size()
-        non_pad_idxs = torch.arange(size, dtype=torch.long).reshape(
-            self.in_ch,
-            self.in_height + 2 * pad_height,
-            self.in_width + 2 * pad_width
-        )[:, pad_height:self.in_height + pad_height, pad_width :self.in_width + pad_width].flatten()
-
-        return non_pad_idxs
-
-    def get_input_padded_size(self) -> int:
-        """
-        Returns:
-
-                Size of the padded input.
-        """
-        return (self.in_height + 2 * self.pads[0]) * (self.in_width + 2 * self.pads[1]) * self.in_ch
+        in_ch, in_height, in_width = input_shape
+        pad_height, pad_width = pads
         
+        return (in_height + 2 * pad_height) * (in_width + 2 * pad_width) * in_ch
 
-    def get_input_padded_shape(self) -> tuple:
+    @staticmethod
+    def get_padded_shape(input_shape: tuple, pads: tuple) -> int:
         """
         Computes the shape of padded input.
         """  
+        in_ch, in_height, in_width = input_shape
+        pad_height, pad_width = pads
+
         return (
-            self.in_ch,
-            self.in_height + 2 * self.pads[0],
-            self.in_width + 2 * self.pads[1],
+            in_ch,
+            in_height + 2 * pad_height,
+            in_width + 2 * pad_width
         )
-       
+
     @staticmethod
-    def compute_output_shape(in_shape: tuple, weights_shape: tuple, pads: tuple, strides: tuple) -> tuple:
+    def get_non_pad_idxs(input_shape: tuple, pads: tuple) -> torch.tensor:
         """
-        Computes the output shape of the node.
-
-        Arguments:
-            in_shape:
-                shape of the input tensor to the node.
-            weights_shape:
-                shape of the kernels of the node.
-            pads:
-                pair of int for the width and height of the pads.
-            strides:
-                pair of int for the width and height of the strides.
-        Returns:
-            tuple of the output shape
+        Computes the indices of the original input whithin the padded one.
         """
-        assert len(in_shape) in [3, 4]
+        in_ch, in_height, in_width = input_shape
+        pad_height, pad_width = pads
+        size = ConvBase.get_padded_size(input_shape, pads)
+        non_pad_idxs = torch.arange(size, dtype=torch.long).reshape(
+            in_ch,
+            in_height + 2 * pad_height,
+            in_width + 2 * pad_width
+        )[:, pad_height:in_height + pad_height, pad_width :in_width + pad_width].flatten()
 
-        if len(in_shape) == 3:
-            in_ch, in_height, in_width = in_shape
-        else:
-            batch, in_ch, in_height, in_width = in_shape
-
-        out_ch, _, k_height, k_width = weights_shape
-
-        out_height = int(math.floor(
-            (in_height - k_height + 2 * pads[0]) / strides[0] + 1
-        ))
-        out_width = int(math.floor(
-            (in_width - k_width + 2 * pads[1]) / strides[1] + 1
-        ))
-      
-        if len(in_shape) == 3:
-            return out_ch, out_height, out_width
-        else:
-            return batch, out_ch, out_height, out_width
+        return non_pad_idxs
 
     @staticmethod
     def pad(inp: torch.tensor, pads: tuple, values: tuple=(0,0)) -> torch.tensor:
@@ -1045,16 +816,13 @@ class Conv(Node):
         Pads a given matrix with constants.
 
         Arguments:
-            
             inp:
                 matrix.
             pads:
                 the pads.
             values:
                 the constants.
-
         Returns
-
             padded inp.
         """
         assert(len(inp.shape)) in [3, 4]
@@ -1114,8 +882,281 @@ class Conv(Node):
 
         return opr.take(matrix, start_idx.ravel()[:, None] + offset_idx.ravel())
 
+class Conv(ConvBase):
+    def __init__(
+        self,
+        from_node: list, 
+        to_node: list,
+        input_shape: tuple,
+        kernels: torch.tensor,
+        bias: torch.tensor,
+        pads: tuple,
+        strides: tuple,
+        config: Config,
+        depth=0,
+        bounds=Bounds(),
+        id=None
+    ):
+        """
+        Arguments:
 
-class ConvTranspose(Node):
+            from_node:
+                list of input nodes.
+            to_node:
+                list of output nodes.
+            input_shape:
+                shape of the input tensor to the node. 
+            kernels:
+                the kernels.
+            bias:
+                bias vector.
+            pads:
+                the pads.
+            strides:
+                the strides.
+            config:
+                configuration.
+            depth:
+                the depth of the node.
+            bounds:
+                the concrete bounds of the node.
+        """
+        super().__init__(
+            from_node,
+            to_node,
+            input_shape,
+            kernels,
+            bias,
+            pads,
+            strides,
+            config,
+            depth=depth,
+            bounds=bounds,
+            id=id
+        )
+        self.out_ch,  self.in_ch, self.krn_height, self.krn_width = kernels.shape
+        self.output_shape = self._compute_output_shape()
+        self.output_size = np.prod(self.output_shape)
+        self.out_height, self.out_width = self.output_shape[-2:]
+        self.out_ch_sz = int(self.output_size / self.out_ch)
+
+    def copy(self):
+        """
+        Copies the node.
+        """
+        return Conv(
+            self.from_node,
+            self.to_node,
+            self.input_shape,
+            self.kernels,
+            self.bias,
+            self.pads,
+            self.strides,
+            self.config,
+            depth=self.depth,
+            bounds=self.bounds.copy(),
+            id=self.id
+        )
+
+    def numpy(self):
+        """
+        Copies the node with numpy data.
+        """
+        return Conv(
+            self.from_node,
+            self.to_node,
+            self.input_shape,
+            self.output_shape,
+            self.kernels.numpy(),
+            self.bias.numpy(),
+            self.pads,
+            self.strides,
+            self.config,
+            depth=self.depth,
+            bounds=self.bounds,
+            id=self.id
+        )
+         
+    def get_bias(self, index: tuple):
+        """
+        Returns the bias of the given output.
+
+        Arguments:
+
+            index: 
+                the index of the output.
+
+        Returns:
+            
+            the bias.
+        """
+        return self.bias[index[-1]]
+
+    def edge_weight(self, index1: tuple, index2: tuple):
+        """
+        Returns the weight of the edge between output with index1 of the
+        current node and output with index2 of the previous node.
+
+        Arguments:
+            index1:
+                index of the output of the current node.
+            index2:
+                index of the output of the previous node.
+        Returns:
+            the weight.
+        """
+        height_start = index1[0] * self.strides[0] - self.pads[0]
+        height = index2[0] - height_start
+        width_start = index1[1] * self.strides[1] - self.pads[1]
+        width = index2[1] - width_start
+
+        return self.kernels[index1[0]][index2[0]][height][width]
+
+    def forward(
+        self,
+        inp: np.array=None,
+        clip=None,
+        add_bias=True,
+        save_output=False
+    ) -> torch.tensor:
+        """
+        Computes the output of the node given an input.
+
+        Arguments:
+            inp:
+                the input.
+            clip:
+                clips the weights to positive values if set to '+' and to
+                negatives if set to '-'
+            add_bias:
+                whether to add bias
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0].output if inp is None else inp
+
+        if clip is None:
+            kernels = self.kernels
+
+        elif clip == '+':
+            kernels = torch.clamp(self.kernels, 0, math.inf)
+
+        elif clip == '-':
+            kernels = torch.clamp(self.kernels, -math.inf, 0)
+
+        else:
+            raise ValueError(f'Kernel clip value {kernel_clip} not recognised')
+
+        output = torch.nn.functional.conv2d(
+            inp,
+            kernels,
+            bias = self.bias if add_bias is True else None,
+            stride=self.strides,
+            padding=self.pads
+        )
+            
+        if save_output:
+            self.output = output
+
+        return output
+
+    def forward_numpy(self, inp: np.array=None, save_output=False) -> np.array:
+        """
+        Computes the output of the node given an input.
+
+        Arguments:
+            inp:
+                the input.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0].output if inp is None else inp
+
+        padded_inp = Conv.pad(inp, self.pads)
+
+        inp_strech = Conv.im2col(
+            padded_inp, (self.krn_height, self.krn_width), self.strides
+        )
+
+        kernel_strech = self.kernels.reshape(self.out_ch, -1).numpy()
+
+        output = kernel_strech @ inp_strech
+        output = output.flatten() + np.tile(self.bias.numpy(), (self.out_ch_sz, 1)).T.flatten()
+        output = output.reshape(self.output_shape)
+
+        if save_output is True:
+            self.output = output
+
+        return output
+
+    def transpose(self, inp: torch.tensor) -> torch.tensor:
+        """
+        Computes the input to the node given an output.
+
+        Arguments:
+            inp:
+                the output.
+        Returns:
+            the input of the node.
+        """
+        out_pad_height = self.in_height - (self.out_height - 1) * self.strides[0] + 2 * self.pads[0] - self.krn_height
+        out_pad_width = self.in_width - (self.out_width - 1) * self.strides[0] + 2 * self.pads[0] - self.krn_width
+
+        return torch.nn.functional.conv_transpose2d(
+            inp.reshape((inp.shape[0], self.out_ch, self.out_height, self.out_width)),
+            self.kernels,
+            stride=self.strides,
+            padding=self.pads,
+            output_padding=(out_pad_height, out_pad_width)
+        ).reshape(inp.shape[0], - 1)
+
+    def get_input_padded_size(self) -> int:
+        """
+        Computes the size of the padded input.
+        """
+        return ConvBase.get_padded_size(
+            (self.in_ch, self.in_height, self.in_width), self.pads
+        )
+
+    def get_input_padded_shape(self) -> int:
+        """
+        Computes the shape of padded input.
+        """  
+        return ConvBase.get_padded_shape(
+            (self.in_ch, self.in_height, self.in_width), self.pads
+        )
+
+    def get_non_pad_idxs(self) -> torch.tensor:
+        """
+        Computes the indices of the original input whithin the padded one.
+        """
+        return ConvBase.get_non_pad_idxs(
+            (self.in_ch, self.in_height, self.in_width), self.pads
+        )
+
+    def _compute_output_shape(self) -> tuple:
+        """
+        Computes the output shape of the node.
+        """
+        out_height = int(math.floor(
+            (self.in_height - self.krn_height + 2 * self.pads[0]) / self.strides[0] + 1
+        ))
+        out_width = int(math.floor(
+            (self.in_width - self.krn_width + 2 * self.pads[1]) / self.strides[1] + 1
+        ))
+      
+        if self.has_batch_dimension():
+            return 1, self.out_ch, out_height, out_width
+        else:
+            return self.out_ch, out_height, out_width
+
+class ConvTranspose(ConvBase):
     def __init__(
         self,
         from_node: list, 
@@ -1157,34 +1198,26 @@ class ConvTranspose(Node):
             bounds:
                 the concrete bounds of the node.
         """
-        output_shape = ConvTranspose.compute_output_shape(
-            input_shape, kernels.shape, pads, output_pads, strides
-        )
+        self.output_pads = output_pads
         super().__init__(
             from_node,
             to_node,
             input_shape,
-            output_shape,
+            kernels,
+            bias,
+            pads,
+            strides,
             config,
             depth=depth,
             bounds=bounds,
             id=id
         )
-        assert len(input_shape) in [3, 4]
-
-        self.kernels = kernels
-        self.bias = bias
-        self.pads = pads
-        self.output_pads = output_pads
-        self.strides = strides
-        if len(input_shape) == 3:
-            _, self.in_height, self.in_width = input_shape
-            _, self.out_height, self.out_width = output_shape
-        else:
-            _, _, self.in_height, self.in_width = input_shape
-            _, _, self.out_height, self.out_width = output_shape
         self.in_ch,  self.out_ch, self.krn_height, self.krn_width = kernels.shape
+        self.output_shape = self._compute_output_shape()
+        self.output_size = np.prod(self.output_shape)
+        self.out_height, self.out_width = self.output_shape[-2:]
         self.out_ch_sz = int(self.output_size / self.out_ch)
+        self.in_ch_sz = int(self.input_size / self.in_ch)
 
     def copy(self):
         """
@@ -1194,7 +1227,6 @@ class ConvTranspose(Node):
             self.from_node,
             self.to_node,
             self.input_shape,
-            self.output_shape,
             self.kernels,
             self.bias,
             self.pads,
@@ -1214,7 +1246,6 @@ class ConvTranspose(Node):
             self.from_node,
             self.to_node,
             self.input_shape,
-            self.output_shape,
             self.kernels.numpy(),
             self.bias.numpy(),
             self.pads,
@@ -1226,28 +1257,6 @@ class ConvTranspose(Node):
             id=self.id
         )
          
-    def get_milp_var_size(self):
-        """
-        Returns the number of milp variables required for the milp encoding of
-        the node.
-        """
-        return self.output_size
-
-    def get_bias(self, index: tuple):
-        """
-        Returns the bias of the given output.
-
-        Arguments:
-
-            index: 
-                the index of the output.
-
-        Returns:
-            
-            the bias.
-        """
-        return self.bias[index[-1]]
-
     def forward(
         self,
         inp: np.array=None,
@@ -1310,26 +1319,29 @@ class ConvTranspose(Node):
         Returns: 
             the output of the node.
         """
-        pad_flag = np.zeros(self.get_input_padded_size(), dtype=np.bool)
+        pad_flag = np.zeros(self.get_output_padded_size(), dtype=np.bool)
         pad_flag[self.get_non_pad_idxs()] = True
 
-        pad = np.ones(self.get_input_padded_size()) * self.input_size
-        pad[pad_flag] = np.arange(self.input_size)
+        pad = np.ones(self.get_output_padded_size(), np.uint) * self.output_size
+        pad[pad_flag] = np.arange(self.output_size)
 
         im2col = Conv.im2col(
-            pad.reshape(self.get_input_padded_shape()),
+            pad.reshape(self.get_output_padded_shape()),
             (self.krn_height, self.krn_width),
             self.strides
         )
-        indices = np.repeat(np.arange(self.out_ch_sz), self.out_ch)
+        indices = np.repeat(np.arange(self.in_ch_sz), self.in_ch)
         conv_indices = im2col[:, indices]
 
-        indices = np.repeat(np.arange(self.out_ch), self.out_ch_sz, axis=0)
-        conv_weights = self.kernels.transpose(1, 2, 3, 0).reshape(-1, self.out_ch)[:, indices]
+        indices = np.repeat(np.arange(self.in_ch), self.in_ch_sz, axis=0)
+        conv_weights = self.kernels.numpy().transpose(1, 2, 3, 0)
+        conv_weights = conv_weights.reshape(-1, self.in_ch)[:, indices]
             
-        conv_matrix = np.zeros((self.output_size, self.input_size + 1), dtype=self.config.PRECISION)
-        conv_matrix[np.arange(self.output_size), conv_indices] = conv_weights
-        conv_matrix = conv_matrix[:, :self.input_size].T
+        conv_matrix = np.zeros(
+            (self.input_size, self.output_size + 1), dtype=conv_weights.dtype
+        )
+        conv_matrix[np.arange(self.input_size), conv_indices] = conv_weights
+        conv_matrix = conv_matrix[:, :self.output_size].T
 
         output = (conv_matrix @ inp.flatten()).T
 
@@ -1352,110 +1364,42 @@ class ConvTranspose(Node):
             stride=self.strides,
             padding=self.pads
         )
-
-    def get_non_pad_idxs(self) -> torch.tensor:
+       
+    def get_output_padded_size(self) -> int:
         """
-        Returns:
-
-            Indices of the original input whithin the padded one.
+        Computes the size of the padded input.
         """
-        pad_height, pad_width = self.pads
-        size = self.get_input_padded_size()
-        non_pad_idxs = torch.arange(size, dtype=torch.long).reshape(
-            self.in_ch,
-            self.in_height + 2 * pad_height,
-            self.in_width + 2 * pad_width
-        )[:, pad_height:self.in_height + pad_height, pad_width :self.in_width + pad_width].flatten()
+        return ConvBase.get_padded_size(
+            (self.out_ch, self.out_height, self.out_width), self.pads
+        )
 
-        return non_pad_idxs
-
-    def get_input_padded_size(self) -> int:
-        """
-        Returnst the size of the padded input.
-        """
-        return (self.in_height + 2 * self.pads[0]) * (self.in_width + 2 * self.pads[1]) * self.in_ch
-        
-
-    def get_input_padded_shape(self) -> tuple:
+    def get_output_padded_shape(self) -> int:
         """
         Computes the shape of padded input.
         """  
-        return (
-            self.in_ch,
-            self.in_height + 2 * self.pads[0],
-            self.in_width + 2 * self.pads[1],
+        return ConvBase.get_padded_shape(
+            (self.out_ch, self.out_height, self.out_width), self.pads
         )
-        
-    def compute_output_shape(
-        in_shape: tuple,
-        weights_shape: tuple,
-        pads: tuple,
-        output_pads: tuple,
-        strides: tuple
-    ) -> tuple:
+
+    def get_non_pad_idxs(self) -> torch.tensor:
+        """
+        Computes the indices of the original input whithin the padded one.
+        """
+        return ConvBase.get_non_pad_idxs(
+            (self.out_ch, self.out_height, self.out_width), self.pads
+        )
+
+    def _compute_output_shape(self) -> tuple:
         """
         Computes the output shape of the node.
-
-        Arguments:
-            in_shape:
-                shape of the input tensor to the node.
-            weights_shape:
-                shape of the kernels of the node.
-            pads:
-                pair of int for the width and height of the pads.
-            output_pads:
-                pair of int for the width and height of the output padding.
-            strides:.
-                pair of int for the width and height of the strides.
-        Returns:
-            tuple of the output shape
         """
-        assert len(in_shape) in [3, 4]
-
-        if len(in_shape) == 3:
-            _, in_height, in_width = in_shape
-        else:
-            batch, _, in_height, in_width = in_shape
-
-        out_ch, in_ch, k_height, k_width = weights_shape
-
-        out_height = (in_height - 1) * strides[0] - 2 * pads[0] + k_height + output_pads[0]
-        out_width = (in_width - 1) * strides[0] - 2 * pads[0] + k_width + output_pads[0]
+        out_height = (self.in_height - 1) * self.strides[0] - 2 * self.pads[0] + self.krn_height + self.output_pads[0]
+        out_width = (self.in_width - 1) * self.strides[0] - 2 * self.pads[0] + self.krn_width + self.output_pads[0]
       
-        if len(in_shape) == 3:
-            return in_ch, out_height, out_width
+        if self.has_batch_dimension():
+            return 1, self.out_ch, out_height, out_width
         else:
-            return batch, in_ch, out_height, out_width
-
-    @staticmethod
-    def pad(inp: torch.tensor, pads: tuple, values: tuple=(0,0)) -> torch.tensor:
-        """
-        Pads a given matrix with constants.
-
-        Arguments:
-            
-            inp:
-                matrix.
-            pads:
-                the pads.
-            values:
-                the constants.
-
-        Returns
-
-            padded inp.
-        """
-        assert(len(inp.shape)) in [3, 4]
-
-        if pads == (0, 0):
-            return inp
-       
-        if len(inp.shape) == 3:
-            pads = ((0, 0), pads, pads)
-        else:
-            pads = ((0, 0), (0, 0), pads, pads)
-
-        return np.pad(inp, pads, 'constant', constant_values=values)
+            return self.out_ch, out_height, out_width
 
 
 class MaxPool(Node):

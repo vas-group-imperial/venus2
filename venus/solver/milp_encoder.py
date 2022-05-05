@@ -225,7 +225,6 @@ class MILPEncoder:
                 Gurobi model.
         """
         assert type(node) in [Gemm, Conv, ConvTranspose, MatMul, Sub, Add, BatchNormalization], f"Cannot compute sub onstraints for {type(node)} nodes."
-        
         if type(node) in ['Sub', 'Add'] and node.const is not None:
             output = node.forward_numpy(
                 node.from_node[0].out_vars, node.from_node[1].out_vars

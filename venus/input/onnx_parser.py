@@ -227,7 +227,6 @@ class ONNXParser:
     def parse_conv_transpose(self, node: NodeProto, input_shape: tuple, venus_nodes:list, init: list) -> Node:
         weights = self._to_tensor(node.input[1], venus_nodes, init)
         bias = self._to_tensor(node.input[2], venus_nodes, init)
-
         pads, strides, output_padding = (0, 0), (1, 1), (0, 0)
 
         attr = self._get_attribute(node, "pads")
