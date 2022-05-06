@@ -687,6 +687,9 @@ class MatMul(Node):
         Returns: 
             the output of the node.
         """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0].output if inp is None else inp
+
         output = self.weights.numpy() @ inp 
 
         if save_output is True:
@@ -871,7 +874,6 @@ class ConvBase(Node):
             0, filters * height * width, height * width
         ).reshape(-1, 1)
         start_idx = start_idx + offset_filter
-
 
         # offsetted indices across the height and width of A
         offset_idx = opr.arange(row_extent)[:, None][::strides[0]] * width +  opr.arange(0, col_extent, strides[1])
@@ -1309,16 +1311,87 @@ class ConvTranspose(ConvBase):
 
         return output
 
-    def forward_numpy(self, inp: np.ndarray) -> np.ndarray:
+    def forward_numpy(self, inp: np.ndarray, save_output=False) -> np.ndarray:
         """
         Computes the output of the node given an input.
 
         Arguments:
             inp:
                 the input.
+            save_output:
+                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0].output if inp is None else inp
+  
+        padded_inp = np.zeros(
+            (
+                self.in_ch,
+                self.out_height + self.krn_height - 1,
+                self.out_width + self.krn_width - 1
+            ), 
+            dtype=inp.dtype
+        )
+
+        slices = tuple(
+            [
+                slice(0, self.in_ch, 1),
+                slice(self.krn_height - 1, self.out_height, self.strides[0]),
+                slice(self.krn_width - 1, self.out_width, self.strides[1])
+            ]
+        )
+        padded_inp[slices] = inp
+        if self.has_batch_dimension():
+            padded_inp = padded_inp[np.newaxis, ...]
+
+        inp_strech = Conv.im2col(
+            padded_inp, (self.krn_height, self.krn_width), (1, 1)
+        )
+
+        kernel_strech = self.kernels.permute(1, 0, 2, 3).reshape(self.out_ch, -1).numpy()
+
+        output = kernel_strech @ inp_strech
+        output = output.flatten() + np.tile(self.bias.numpy(), (self.out_ch_sz, 1)).T.flatten()
+        output = output.reshape(self.output_shape)
+
+        if save_output is True:
+            self.output = output
+
+        return output
+
+
+
+
+
+        # padded_inp = ConvBase.pad(inp, self.pads)
+
+        # inp_stretch = Conv.im2col(
+            # padded_inp, (self.krn_height, self.krn_width), self.strides
+        # )
+
+        # kernel_strech = self.kernels.reshape(self.out_ch, -1).numpy()
+
+        # indices = np.repeat(np.arange(self.in_ch_sz), self.in_ch)
+        # conv_indices = im2col[:, indices]
+
+        # indices = np.repeat(np.arange(self.in_ch), self.in_ch_sz, axis=0)
+        # conv_weights = self.kernels.numpy().transpose(1, 2, 3, 0)
+        # conv_weights = conv_weights.reshape(-1, self.in_ch)[:, indices]
+            
+        # conv_matrix = np.zeros(
+            # (self.input_size, self.output_size + 1), dtype=conv_weights.dtype
+        # )
+        # conv_matrix[np.arange(self.input_size), conv_indices] = conv_weights
+        # conv_matrix = conv_matrix[:, :self.output_size].T
+
+        # output = (conv_matrix @ inp.flatten()).T
+
+        # output = output.flatten() + np.tile(self.bias.numpy(), (self.out_ch_sz, 1)).T.flatten()
+
+        # return output.reshape(self.output_shape)
+
         pad_flag = np.zeros(self.get_output_padded_size(), dtype=np.bool)
         pad_flag[self.get_non_pad_idxs()] = True
 
@@ -1343,9 +1416,14 @@ class ConvTranspose(ConvBase):
         conv_matrix[np.arange(self.input_size), conv_indices] = conv_weights
         conv_matrix = conv_matrix[:, :self.output_size].T
 
-        output = (conv_matrix @ inp.flatten()).T
+        output = (conv_matrix @ inp.flatten()).T.flatten()
+        output += np.tile(self.bias.numpy(), (self.out_ch_sz, 1)).T.flatten()
+        output = output.reshape(self.output_shape)
 
-        return output.reshape(self.output_shape)
+        if save_output is True:
+            self.output = output
+
+        return output
 
     def transpose(self, inp: torch.tensor) -> torch.tensor:
         """
@@ -2012,17 +2090,24 @@ class Flatten(Node):
 
         return output
 
-    def forward_numpy(self, inp: np.ndarray) -> np.ndarray:
+    def forward_numpy(self, inp: np.ndarray, save_output=False) -> np.ndarray:
         """
         Computes the output of the node given a numpy input.
 
         Arguments:
             inp:
                 the input.
+            save_output:
+                Whether to save the output in the node. 
         Returns:
             the output of the node.
         """
-        return inp.flatten()
+        output = inp.flatten()
+
+        if save_output is True:
+            self.output = output
+
+        return output
 
 
 class Sub(Node):
@@ -2134,7 +2219,7 @@ class Sub(Node):
 
         return output
 
-    def forward_numpy(self, inp1: np.array, inp2: np.array=None) -> np.array:
+    def forward_numpy(self, inp1: np.array, inp2: np.array=None, save_output=False) -> np.array:
         """
         Computes the output of the node given a numpy input.
 
@@ -2155,6 +2240,9 @@ class Sub(Node):
         inp2 = self.const.numpy() if inp2 is None else inp2
 
         output = inp1 - inp2
+
+        if save_output is True:
+            self.output = output
 
         return output
 
