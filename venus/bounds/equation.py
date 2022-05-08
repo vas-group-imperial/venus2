@@ -434,6 +434,20 @@ class Equation():
                 config
             )
 
+
+    @staticmethod 
+    def _zero_eq(node: Node, flag: torch.Tensor) -> Equation:
+        if isinstance(node.from_node[0], Relu) and \
+        node.from_node[0].get_propagation_count() == 0:
+            return Equation(
+                np.zeros((torch.sum(flag), 0)),
+                Equation._derive_const(node, flag),
+                node.config
+            )
+
+        return None
+
+    @staticmethod
     def _derive_matrix(node: Node, flag: torch.Tensor=None):
         flag = torch.ones(node.output_size, dtype=torch.bool) if flag is None else flag
         
@@ -455,6 +469,7 @@ class Equation():
         else:
             raise NotImplementedError(f'{type(node)} equations')
 
+    @staticmethod
     def _derive_const(node: Node, flag: torch.Tensor):
         flag = torch.ones(node.output_size, dtype=torch.bool) if flag is None else flag
 
@@ -477,17 +492,6 @@ class Equation():
             return Equation._derive_add_const(node, flag)
 
         raise NotImplementedError(f'{type(node)} equations')
-
-    @staticmethod 
-    def _zero_eq(node: Node, flag: torch.Tensor) -> Equation:
-        if isinstance(node.from_node[0], Relu) and \
-        node.from_node[0].get_unstable_count() == 0  and \
-        node.from_node[0].get_active_count() == 0:      
-            return Equation(
-                np.zeros((torch.sum(flag), 0)), Equation._derive_const(node, flag), node.config
-            )
-
-        return None
 
     @staticmethod 
     def _derive_conv_matrix(node: Node, flag: torch.Tensor):

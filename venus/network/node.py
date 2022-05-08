@@ -271,6 +271,10 @@ class Node:
 
         return self.input_shape[0]
 
+    def get_propagation_flag(self) -> torch.tensor:
+        return torch.ones(self.output_size, dtype=torch.bool)
+            
+
 
 class Constant(Node):
     def __init__(self, to_node: list, const: torch.tensor, config: Config, id: int=None):
