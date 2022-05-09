@@ -32,15 +32,15 @@ class Solver():
     # Whether to use Gurobi's default cuts   
     DEFAULT_CUTS: bool = False
     # Whether to use ideal cuts
-    IDEAL_CUTS: bool = True
+    IDEAL_CUTS: bool = False
     # Whether to use inter-depenency cuts
-    INTER_DEP_CUTS: bool = True
+    INTER_DEP_CUTS: bool = False
     # Whether to use intra-depenency cuts
     INTRA_DEP_CUTS: bool = False
     # Whether to use inter-dependency constraints
-    INTER_DEP_CONSTRS: bool = True
+    INTER_DEP_CONSTRS: bool = False
     # Whether to use intra-dependency constraints
-    INTRA_DEP_CONSTRS: bool = True
+    INTRA_DEP_CONSTRS: bool = False
     # whether to monitor the number of MILP nodes solved and initiate
     # splititng only after BRANCH_THRESHOLD is reached.
     MONITOR_SPLIT: bool = False

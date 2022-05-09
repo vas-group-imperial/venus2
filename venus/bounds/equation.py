@@ -338,7 +338,10 @@ class Equation():
             minus_upper = torch.zeros(
                 (self.size, node.input_size), dtype=self.config.PRECISION
             )
-            minus_upper[:, indices][:, lower_max] = _minus[:, lower_max]
+            temp = minus_upper[:, indices]
+            temp[:, lower_max] = _minus[:, lower_max]
+            minus_upper[:, indices] = temp
+            del temp
             matrix = plus_lower + minus_upper
 
             const = _minus @ upper_const + self.const
@@ -351,7 +354,10 @@ class Equation():
             plus_upper = torch.zeros(
                 (self.size, node.input_size), dtype=self.config.PRECISION
             )
-            plus_upper[:, indices][:, lower_max] = _plus[:, lower_max]
+            temp =  plus_upper[:, indices]
+            temp[:, lower_max] = _plus[:, lower_max]
+            plus_upper[:, indices] = temp
+            del temp
             matrix = minus_lower + plus_upper
 
             const = _plus @ upper_const + self.const
