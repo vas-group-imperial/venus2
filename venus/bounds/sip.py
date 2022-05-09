@@ -92,6 +92,7 @@ class SIP:
         )
         self.nn.tail.update_bounds(symb_concr_bounds, flag)
 
+        print('sip done')
         # print(self.nn.tail.bounds.lower)
 
         if self.logger is not None:

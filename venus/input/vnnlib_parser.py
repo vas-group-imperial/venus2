@@ -145,8 +145,10 @@ class VNNParser(Parser):
     def statement(self, p):
         if self.o_f is None:
             self.o_f = p.output_statement
+        elif isinstance(self.o_f, NAryConjFormula):
+            self.o_f = NAryConjFormula(self.o_f.clauses + [p.output_statement])
         else:
-            self.o_f = ConjFormula(self.o_f, p.output_statement)
+            self.o_f = NAryConjFormula([self.o_f, p.output_statement])
 
     @_('LPAR CONST input_id REAL RPAR')
     def statement(self, p):
