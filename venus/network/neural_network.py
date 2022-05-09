@@ -71,7 +71,7 @@ class NeuralNetwork:
         # for i in range(self.tail.depth):
             # nodes = self.get_node_by_depth(i)
             # for j in nodes:
-                # if j.has_relu_activation() or j.has_max_pool():
+                # if j.has_relu_activation():
                     # s += j.output_size
                 # print(i, j, j.output_size)
         # print(s)

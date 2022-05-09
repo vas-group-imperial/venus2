@@ -272,7 +272,16 @@ class Node:
         return self.input_shape[0]
 
     def get_propagation_flag(self) -> torch.tensor:
-        return torch.ones(self.output_size, dtype=torch.bool)
+        if self.has_relu_activation():
+            return self.to_node[0].get_propagation_flag()
+
+        return True
+ 
+    def get_propagation_count(self) -> torch.tensor:
+        if self.has_relu_activation():
+            return self.to_node[0].get_propagation_count()
+
+        return self.output_size
             
 
 
@@ -525,17 +534,19 @@ class Gemm(Node):
         return output
 
 
-    def transpose(self, inp: torch.tensor) -> torch.tensor:
+    def transpose(self, inp: torch.tensor, flag: torch.tensor) -> torch.tensor:
         """
         Computes the input to the node given an output.
 
         Arguments:
             inp:
                 the output.
+            flag:
+                boolean flag of the units in inp.
         Returns:
             the input of the node.
         """
-        return inp @ self.weights
+        return inp @ self.weights[flag, :]
 
 
 class MatMul(Node):
@@ -701,17 +712,19 @@ class MatMul(Node):
 
         return output
 
-    def transpose(self, inp: torch.tensor) -> torch.tensor:
+    def transpose(self, inp: torch.tensor, flag: torch.tensor) -> torch.tensor:
         """
         Computes the input to the node given an output.
 
         Arguments:
             inp:
                 the output.
+            flag:
+                boolean flag of the units in inp.
         Returns:
             the input of the node.
         """
-        return inp @ self.weights
+        return inp @ self.weights[flag, :]
 
 
 class ConvBase(Node):
@@ -846,7 +859,7 @@ class ConvBase(Node):
 
 
     @staticmethod
-    def im2col(matrix: torch.tensor, kernel_shape: tuple, strides: tuple, indices: bool=False) -> torch.tensor:
+    def im2col(matrix: torch.tensor, kernel_shape: tuple, strides: tuple) -> torch.tensor:
         """
         im2col function.
 
@@ -882,11 +895,21 @@ class ConvBase(Node):
         # offsetted indices across the height and width of A
         offset_idx = opr.arange(row_extent)[:, None][::strides[0]] * width +  opr.arange(0, col_extent, strides[1])
 
-        # actual indices
-        if indices is True:
-            return start_idx.ravel()[:, None] + offset_idx.ravel()
+        if len(matrix.shape) == 4:
+            _matrix = matrix.reshape(matrix.shape[0], -1)
+            axis = 1
+        else:
+            _matrix = matrix.flatten()
+            axis = 0
 
-        return opr.take(matrix, start_idx.ravel()[:, None] + offset_idx.ravel())
+        if isinstance(matrix, np.ndarray):
+            return np.take(
+                _matrix, start_idx.ravel()[:, None] + offset_idx.ravel(), axis = axis
+            )
+
+        return torch.index_select(
+                _matrix, 1, start_idx.ravel()[:, None] + offset_idx.ravel()
+        )
 
 class Conv(ConvBase):
     def __init__(
@@ -1101,7 +1124,59 @@ class Conv(ConvBase):
 
         return output
 
-    def transpose(self, inp: torch.tensor) -> torch.tensor:
+
+    def transpose(self, inp: torch.tensor, flag: torch.tensor) -> torch.tensor:
+        """
+        Computes the input to the node given an output.
+
+        Arguments:
+            inp:
+                the output.
+            flag:
+                boolean flag of the units in inp.
+        Returns:
+            the input of the node.
+        """
+        padded_inp = np.zeros(
+            (
+                self.in_ch,
+                self.out_height + self.krn_height - 1,
+                self.out_width + self.krn_width - 1
+            ),
+            dtype=inp.dtype
+        )
+
+        slices = tuple(
+            [
+                slice(0, self.in_ch, 1),
+                slice(self.krn_height - 1, self.out_height, self.strides[0]),
+                slice(self.krn_width - 1, self.out_width, self.strides[1])
+            ]
+        )
+        temp = padded_inp[slices]
+        temp[flag] = inp
+        padded_inp[slices] = temp
+        del temp
+
+        inp_strech = Conv.im2col(
+            padded_inp, (self.krn_height, self.krn_width), (1, 1)
+        )
+
+        #remove columns that are zero
+
+        kernel_strech = self.kernels.permute(1, 0, 2, 3).reshape(self.out_ch, -1).numpy()
+
+        output = kernel_strech @ inp_strech
+        output = output.flatten() + np.tile(self.bias.numpy(), (self.out_ch_sz, 1)).T.flatten()
+        output = output.reshape(self.output_shape)
+
+        if save_output is True:
+            self.output = output
+
+        return output
+
+
+    def transpose_torch(self, inp: torch.tensor) -> torch.tensor:
         """
         Computes the input to the node given an output.
 
