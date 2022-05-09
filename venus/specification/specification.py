@@ -10,6 +10,7 @@
 # ************
 
 from gurobipy import *
+import numpy as np
 import torch
 
 from venus.specification.formula import *
@@ -390,7 +391,11 @@ class Specification:
         Returns:
             Boolean flag of whether each output concerns the specification.
         """
-        return self._get_output_flag(self.output_formula, torch.zeros(output_shape, dtype=torch.bool))
+        flag = self._get_output_flag(
+            self.output_formula, torch.zeros(np.prod(output_shape), dtype=torch.bool)
+        )
+
+        return flag.reshape(output_shape)
 
     def _get_output_flag(self, formula: Formula, flag: torch.tensor):
         """

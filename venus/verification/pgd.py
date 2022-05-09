@@ -105,10 +105,12 @@ class ProjectedGradientDescent:
         x = x.clone().detach().to(torch.float).requires_grad_(True)
         if y is None:
             y = torch.tensor([true_label])
-       
+
         # Compute gradient
+        flag =  prob.spec.get_output_flag(prob.nn.tail.output_shape)
+        output = prob.nn.forward(x)[flag].flatten()[None, :]
         loss_fn = torch.nn.CrossEntropyLoss()
-        loss = loss_fn(prob.nn.forward(x)[None, :], y)
+        loss = loss_fn(output, torch.tensor([0]))
         if targeted:
             loss = -loss
         loss.backward()

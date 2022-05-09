@@ -74,7 +74,7 @@ class SIP:
                     continue
 
                 if j.has_relu_activation():
-                    print(j.output_size, j.to_node[0].get_unstable_count())
+                    # print(j.output_size, j.to_node[0].get_unstable_count())
                     flag =  j.to_node[0].get_unstable_flag()
                 else:
                     flag = torch.ones(node.output_size, dtype=torch.bool)

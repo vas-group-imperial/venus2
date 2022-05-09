@@ -195,7 +195,7 @@ class MILPEncoder:
         for i in range(self.prob.nn.tail.depth + 1):
             nodes = self.prob.nn.get_node_by_depth(i)
             for j in nodes:
-                print(j)
+                # print(j)
                 if isinstance(j, Relu):
                     self.add_relu_constrs(j, gmodel)
 

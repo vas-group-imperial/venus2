@@ -83,15 +83,15 @@ class Verifier:
         start = timer()
 
         # try pgd
-        # pgd = ProjectedGradientDescent(self.config)
-        # cex = pgd.start(self.prob)
-        # if cex is not None:
-            # ver_report.result = SolveResult.UNSAFE
-            # ver_report.cex = cex
-            # Verifier.logger.info('Verification problem was solved via PGD')
-            # ver_report.runtime = timer() - start
+        pgd = ProjectedGradientDescent(self.config)
+        cex = pgd.start(self.prob)
+        if cex is not None:
+            ver_report.result = SolveResult.UNSAFE
+            ver_report.cex = cex
+            Verifier.logger.info('Verification problem was solved via PGD')
+            ver_report.runtime = timer() - start
 
-            # return ver_report
+            return ver_report
 
         # try bound analysis
         self.prob.bound_analysis()

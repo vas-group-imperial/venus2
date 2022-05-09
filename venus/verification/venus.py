@@ -83,7 +83,7 @@ class Venus:
             bounds = Bounds(torch.tensor(lb,dtype=self.config.PRECISION), torch.tensor(ub,dtype=self.config.PRECISION))
             spec = [Specification(
                 Input(bounds, self.config),
-                VarVarConstraint(StateCoordinate((0,0,0,0)), Formula.Sense.LT, StateCoordinate((0,0,0,1))),
+                VarVarConstraint(StateCoordinate((0)), Formula.Sense.LT, StateCoordinate((1))),
                 "adsa"
             )]
 
