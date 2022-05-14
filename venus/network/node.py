@@ -274,12 +274,17 @@ class Node:
     def get_propagation_flag(self) -> torch.tensor:
         if self.has_relu_activation():
             return self.to_node[0].get_propagation_flag()
+        # if len(self.from_node) > 0 and isinstance(self.from_node[0], Relu):
+            # print(self.from_node[0].get_unstable_count(), self.from_node[0].get_active_count(), self.from_node[0].get_propagation_count(), self.from_node[0].output_size)
+            # return self.from_node[0].get_propagation_flag()
 
-        return True
+        return torch.ones(self.output_shape, dtype=torch.bool)
  
     def get_propagation_count(self) -> torch.tensor:
         if self.has_relu_activation():
             return self.to_node[0].get_propagation_count()
+        # if len(self.from_node) > 0 and isinstance(self.from_node[0], Relu):
+            # return self.from_node[0].get_propagation_count()
 
         return self.output_size
             
@@ -534,19 +539,21 @@ class Gemm(Node):
         return output
 
 
-    def transpose(self, inp: torch.tensor, flag: torch.tensor) -> torch.tensor:
+    def transpose(self, inp: torch.tensor, out_flag: torch.tensor, in_flag:torch.tensor) -> torch.tensor:
         """
         Computes the input to the node given an output.
 
         Arguments:
             inp:
                 the output.
-            flag:
-                boolean flag of the units in inp.
+            out_flag:
+                boolean flag of the units in output.
+            in_flag:
+                boolean flag of the units in input.
         Returns:
             the input of the node.
         """
-        return inp @ self.weights[flag, :]
+        return inp @ self.weights[out_flag, :][:, in_flag]
 
 
 class MatMul(Node):
@@ -712,19 +719,21 @@ class MatMul(Node):
 
         return output
 
-    def transpose(self, inp: torch.tensor, flag: torch.tensor) -> torch.tensor:
+    def transpose(self, inp: torch.tensor, out_flag: torch.tensor, in_flag: torch.tensor) -> torch.tensor:
         """
         Computes the input to the node given an output.
 
         Arguments:
             inp:
                 the output.
-            flag:
-                boolean flag of the units in inp.
+            out_flag:
+                boolean flag of the units in output.
+            in_flag:
+                boolean flag of the units in input.
         Returns:
             the input of the node.
         """
-        return inp @ self.weights[flag, :]
+        return inp @ self.weights[out_flag, :][:, in_flag]
 
 
 class ConvBase(Node):
@@ -895,21 +904,22 @@ class ConvBase(Node):
         # offsetted indices across the height and width of A
         offset_idx = opr.arange(row_extent)[:, None][::strides[0]] * width +  opr.arange(0, col_extent, strides[1])
 
+        index = start_idx.ravel()[:, None] + offset_idx.ravel()
+
         if len(matrix.shape) == 4:
-            _matrix = matrix.reshape(matrix.shape[0], -1)
-            axis = 1
-        else:
-            _matrix = matrix.flatten()
-            axis = 0
+            if isinstance(matrix, np.ndarray):
+                return np.take(
+                    matrix.reshape(matrix.shape[0], -1), index, axis=1
+                ).transpose(1, 2, 0)
 
-        if isinstance(matrix, np.ndarray):
-            return np.take(
-                _matrix, start_idx.ravel()[:, None] + offset_idx.ravel(), axis = axis
-            )
+            else:
+                return torch.index_select(
+                    matrix.reshape(matrix.shape[0], -1), 1, index.flatten()
+                ).reshape((matrix.shape[0],) + index.shape).permute(1, 2, 0)
 
-        return torch.index_select(
-                _matrix, 1, start_idx.ravel()[:, None] + offset_idx.ravel()
-        )
+        else:  
+            return opr.take(matrix, index)
+
 
 class Conv(ConvBase):
     def __init__(
@@ -1125,56 +1135,55 @@ class Conv(ConvBase):
         return output
 
 
-    def transpose(self, inp: torch.tensor, flag: torch.tensor) -> torch.tensor:
+    def transpose(self, inp: torch.tensor, out_flag: torch.tensor, in_flag:torch.tensor) -> torch.tensor:
         """
         Computes the input to the node given an output.
 
         Arguments:
             inp:
                 the output.
-            flag:
-                boolean flag of the units in inp.
+            out_flag:
+                boolean flag of the units in output.
+            in_flag:
+                boolean flag of the units in input.
         Returns:
             the input of the node.
         """
-        padded_inp = np.zeros(
-            (
-                self.in_ch,
-                self.out_height + self.krn_height - 1,
-                self.out_width + self.krn_width - 1
-            ),
-            dtype=inp.dtype
-        )
-
+        batch = inp.shape[0] if len(inp.shape) == 2 else 1
+        padded_height = self.out_height + self.krn_height - 1
+        padded_width = self.out_width + self.krn_width - 1
+        padded_inp = torch.ones(
+            (batch, self.out_ch, padded_height, padded_width), dtype=inp.dtype
+        ) * torch.sum(out_flag)
         slices = tuple(
             [
-                slice(0, self.in_ch, 1),
-                slice(self.krn_height - 1, self.out_height, self.strides[0]),
-                slice(self.krn_width - 1, self.out_width, self.strides[1])
+                slice(0, batch, 1),
+                slice(0, self.out_ch, 1),
+                slice(self.krn_height - 1, padded_height, self.strides[0]),
+                slice(self.krn_width - 1, padded_width, self.strides[1])
             ]
         )
-        temp = padded_inp[slices]
-        temp[flag] = inp
-        padded_inp[slices] = temp
+        temp = padded_inp[slices].reshape(batch, -1)
+        temp[:, out_flag] = inp
+        if self.has_batch_dimension():
+            padded_inp[slices] = temp.reshape((batch,) + self.output_shape[1:])
+        else:
+            padded_inp[slices] = temp.reshape((batch,) + self.output_shape)
         del temp
 
-        inp_strech = Conv.im2col(
+        inp_stretch = Conv.im2col(
             padded_inp, (self.krn_height, self.krn_width), (1, 1)
         )
 
-        #remove columns that are zero
+        kernel_stretch = self.kernels.permute(1, 0, 2, 3).reshape(self.in_ch, -1)
 
-        kernel_strech = self.kernels.permute(1, 0, 2, 3).reshape(self.out_ch, -1).numpy()
 
-        output = kernel_strech @ inp_strech
-        output = output.flatten() + np.tile(self.bias.numpy(), (self.out_ch_sz, 1)).T.flatten()
-        output = output.reshape(self.output_shape)
+        result = torch.tensordot(
+            kernel_stretch, inp_stretch, dims=([1], [0])
+        ).reshape(-1, batch).T
+        
 
-        if save_output is True:
-            self.output = output
-
-        return output
-
+        return result
 
     def transpose_torch(self, inp: torch.tensor) -> torch.tensor:
         """
@@ -1429,7 +1438,9 @@ class ConvTranspose(ConvBase):
             padded_inp, (self.krn_height, self.krn_width), (1, 1)
         )
 
-        kernel_strech = self.kernels.permute(1, 0, 2, 3).reshape(self.out_ch, -1).numpy()
+        kernel_strech = np.flip(
+            self.kernels.permute(1, 0, 2, 3), axis=[2, 3]
+        ).reshape(self.out_ch, -1).numpy()
 
         output = kernel_strech @ inp_strech
         output = output.flatten() + np.tile(self.bias.numpy(), (self.out_ch_sz, 1)).T.flatten()
@@ -1440,69 +1451,6 @@ class ConvTranspose(ConvBase):
 
         return output
 
-
-
-
-
-        # padded_inp = ConvBase.pad(inp, self.pads)
-
-        # inp_stretch = Conv.im2col(
-            # padded_inp, (self.krn_height, self.krn_width), self.strides
-        # )
-
-        # kernel_strech = self.kernels.reshape(self.out_ch, -1).numpy()
-
-        # indices = np.repeat(np.arange(self.in_ch_sz), self.in_ch)
-        # conv_indices = im2col[:, indices]
-
-        # indices = np.repeat(np.arange(self.in_ch), self.in_ch_sz, axis=0)
-        # conv_weights = self.kernels.numpy().transpose(1, 2, 3, 0)
-        # conv_weights = conv_weights.reshape(-1, self.in_ch)[:, indices]
-            
-        # conv_matrix = np.zeros(
-            # (self.input_size, self.output_size + 1), dtype=conv_weights.dtype
-        # )
-        # conv_matrix[np.arange(self.input_size), conv_indices] = conv_weights
-        # conv_matrix = conv_matrix[:, :self.output_size].T
-
-        # output = (conv_matrix @ inp.flatten()).T
-
-        # output = output.flatten() + np.tile(self.bias.numpy(), (self.out_ch_sz, 1)).T.flatten()
-
-        # return output.reshape(self.output_shape)
-
-        pad_flag = np.zeros(self.get_output_padded_size(), dtype=np.bool)
-        pad_flag[self.get_non_pad_idxs()] = True
-
-        pad = np.ones(self.get_output_padded_size(), np.uint) * self.output_size
-        pad[pad_flag] = np.arange(self.output_size)
-
-        im2col = Conv.im2col(
-            pad.reshape(self.get_output_padded_shape()),
-            (self.krn_height, self.krn_width),
-            self.strides
-        )
-        indices = np.repeat(np.arange(self.in_ch_sz), self.in_ch)
-        conv_indices = im2col[:, indices]
-
-        indices = np.repeat(np.arange(self.in_ch), self.in_ch_sz, axis=0)
-        conv_weights = self.kernels.numpy().transpose(1, 2, 3, 0)
-        conv_weights = conv_weights.reshape(-1, self.in_ch)[:, indices]
-            
-        conv_matrix = np.zeros(
-            (self.input_size, self.output_size + 1), dtype=conv_weights.dtype
-        )
-        conv_matrix[np.arange(self.input_size), conv_indices] = conv_weights
-        conv_matrix = conv_matrix[:, :self.output_size].T
-
-        output = (conv_matrix @ inp.flatten()).T.flatten()
-        output += np.tile(self.bias.numpy(), (self.out_ch_sz, 1)).T.flatten()
-        output = output.reshape(self.output_shape)
-
-        if save_output is True:
-            self.output = output
-
-        return output
 
     def transpose(self, inp: torch.tensor) -> torch.tensor:
         """
@@ -1914,7 +1862,7 @@ class Relu(Node):
         Returns an array of activity statuses for each ReLU node.
         """
         if self.active_flag is None:
-            self.active_flag = self.from_node[0].bounds.lower.flatten() > 0
+            self.active_flag = self.from_node[0].bounds.lower > 0
 
         return self.active_flag
 
@@ -1932,7 +1880,7 @@ class Relu(Node):
         Returns an array of inactivity statuses for each ReLU node.
         """
         if self.inactive_flag is None:
-            self.inactive_flag = self.from_node[0].bounds.upper.flatten() <= 0
+            self.inactive_flag = self.from_node[0].bounds.upper <= 0
 
         return self.inactive_flag
 
@@ -1953,7 +1901,7 @@ class Relu(Node):
             self.unstable_flag = torch.logical_and(
                 self.from_node[0].bounds.lower < 0,
                 self.from_node[0].bounds.upper > 0
-            ).flatten()
+            )
 
         return self.unstable_flag
 
@@ -1970,7 +1918,7 @@ class Relu(Node):
             self.unstable_flag = torch.logical_and(
                 self.from_node[0].bounds.lower < 0,
                 self.from_node[0].bounds.upper > 0
-            ).flatten()
+            )
 
         return self.unstable_flag
 
@@ -1991,7 +1939,7 @@ class Relu(Node):
             self.stable_flag = torch.logical_or(
                 self.get_active_flag(),
                 self.get_inactive_flag()
-            ).flatten()
+            )
 
         return self.stable_flag
 
@@ -2012,7 +1960,7 @@ class Relu(Node):
             self.propagation_flag = torch.logical_or(
                 self.get_active_flag(),
                 self.get_unstable_flag()
-            ).flatten()
+            )
 
         return self.propagation_flag
 

@@ -57,6 +57,7 @@ class SIP:
         for i in range(self.nn.tail.depth):
             nodes = self.nn.get_node_by_depth(i)
             for j in nodes:
+                print(j)
                 processed_nodes[j.id] = True
                 j.update_bounds(self.compute_ia_bounds(j))
 
@@ -75,7 +76,7 @@ class SIP:
 
                 if j.has_relu_activation():
                     print(j.output_size, j.to_node[0].get_unstable_count())
-                    flag =  j.to_node[0].get_unstable_flag()
+                    flag =  j.to_node[0].get_unstable_flag().flatten()
                 else:
                     flag = torch.ones(node.output_size, dtype=torch.bool)
 
@@ -207,16 +208,17 @@ class SIP:
         )
 
     def _back_substitution(self, eq, node, bound):
+        print('*', node)
         if bound not in ['lower', 'upper']:
             raise ValueError("Bound type {bound} not recognised.")
 
         if isinstance(node, Input):
             return  [eq]
 
-        elif node.has_non_linear_op() is True:
+        elif node.has_relu_activation() or isinstance(node, MaxPool):
             eq = [eq.interval_transpose(node, bound)]
 
-        elif type(node) in [Relu, MaxPool, Flatten]:
+        elif type(node) in [Relu, Flatten]:
             eq = [eq]
 
         else:
