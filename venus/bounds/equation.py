@@ -170,18 +170,15 @@ class Equation():
 
         return c
 
-    def transpose(self, node: Node):
+    def transpose(self, node: Node, flag: bool):
         if type(node) in [Gemm, Conv]:
-            return [self._transpose_affine(node)]
+            return [self._transpose_affine(node, flag)]
 
         elif isinstance(node, MatMul):
-            return [self._transpose_linear(node)]
-
-        elif isinstance(node, Conv):
-            return [self._transpose_conv(node)]
+            return [self._transpose_linear(node, flag)]
 
         elif isinstance(node, BatchNormalization):
-            return [self._transpose_batch_normalization(node)]
+            return [self._transpose_batch_normalization(node, flag)]
 
         elif isinstance(node, Slice):
             return [self._transpose_slice(node)]
@@ -192,34 +189,40 @@ class Equation():
         else:
             raise NotImplementedError(f'Equation transpose for {type(node)}')
 
-    def _transpose_affine(self, node: Node):
+    def _transpose_affine(self, node: Node, flag: bool):
         out_flag = node.get_propagation_flag()
-        in_flag = node.from_node[0].get_propagation_flag()
-        # if node.has_batch_dimension():
-            # shape = (self.size,) + node.output_shape[1:]
-        # else:
-            # shape = (self.size,) + node.output_shape
 
-        # matrix =  node.transpose(self.matrix.reshape(shape), out_flag, in_flag)
-        matrix =  node.transpose(self.matrix, out_flag, in_flag)
-        matrix = matrix.reshape(self.size, -1)
+        if node.has_batch_dimension():
+            shape = (self.size,) + node.output_shape[1:]
+        else:
+            shape = (self.size,) + node.output_shape
+        
+        if flag is True:
+            in_flag = node.from_node[0].get_propagation_flag()
+            matrix =  node.transpose(self.matrix.reshape(shape), out_flag, in_flag)
+            
+        else:
+            matrix = matrix.reshape(self.size, -1)
 
         const = Equation._derive_const(node, out_flag)
         const = (self.matrix @ const) + self.const
 
         return Equation(matrix, const, self.config)
 
-    def _transpose_linear(self, node: Node):
+    def _transpose_linear(self, node: Node, flag: bool):
         out_flag = node.get_propagation_flag()
-        in_flag = node.from_node[0].get_propagation_flag() 
 
-        matrix =  node.transpose(self.matrix, out_flag, in_flag)
+        if flag is True:
+            in_flag = node.from_node[0].get_propagation_flag() 
+            matrix =  node.transpose(self.matrix, out_flag, in_flag)
+
+        else:
+            matrix =  node.transpose(self.matrix)
 
         return Equation(matrix, self.const, self.config)
         
-    def _transpose_batch_normalization(self, node: Node):
+    def _transpose_batch_normalization(self, node: Node, flag: bool):
         out_ch_sz = node.out_ch_sz()
-        prop_flag = node.from_node[0].get_propagation_flag().flatten()
 
         scale = torch.tile(node.scale, (out_ch_sz, 1)).T.flatten()
         bias = torch.tile(node.bias, (out_ch_sz, 1)).T.flatten()
@@ -227,8 +230,13 @@ class Equation():
         mean_var = torch.sqrt(node.input_mean + node.epsilon)
         mean_var = torch.tile(mean_var, (out_ch_sz, 1)).T.flatten()
 
-        matrix = (self.matrix[:, prop_flag] * scale[prop_flag]) / mean_var[prop_flag]
-        batch_const = - input_mean / mean_var * scale + bias 
+        if flag is True:
+            prop_flag = node.from_node[0].get_propagation_flag().flatten()
+            matrix = (self.matrix[:, prop_flag] * scale[prop_flag]) / mean_var[prop_flag]
+        else:
+            matrix = (self.matrix * scale) / mean_var
+
+        batch_const = - input_mean / mean_var * scale + bias
         const = self.matrix @ batch_const + self.const
 
         return Equation(matrix, const, self.config)
@@ -288,13 +296,15 @@ class Equation():
 
         out_flag = node.get_propagation_flag().flatten()
         in_flag = node.from_node[0].get_propagation_flag().flatten()
-        # if node.has_batch_dimension():
-            # shape = (self.size,) + node.output_shape[1:]
-        # else:
-            # shape = (self.size,) + node.output_shape
-        # matrix = node.transpose(plus.reshape(shape), out_flag, in_flag) + node.transpose(minus.reshape(shape), out_flag, in_flag)
 
-        matrix = node.transpose(plus, out_flag, in_flag) + node.transpose(minus, out_flag, in_flag)
+        if node.has_batch_dimension():
+            shape = (self.size,) + node.output_shape[1:]
+        else:
+            shape = (self.size,) + node.output_shape
+
+        matrix = node.transpose(plus.reshape(shape), out_flag, in_flag) + node.transpose(minus.reshape(shape), out_flag, in_flag)
+
+        # matrix = node.transpose(plus, out_flag, in_flag) + node.transpose(minus, out_flag, in_flag)
 
 
         const += self.const
@@ -483,16 +493,16 @@ class Equation():
 
 
     @staticmethod
-    def derive(node: Node, flag: torch.Tensor, config: Config) -> Equation:
-        zero_eq = Equation._zero_eq(node, flag)
+    def derive(node: Node, out_flag: torch.Tensor, in_flag: torch.Tensor, config: Config) -> Equation:
+        zero_eq = Equation._zero_eq(node, out_flag)
         
         if zero_eq is not None:
             return zero_eq
       
         else:
             return Equation(
-                Equation._derive_matrix(node, flag),
-                Equation._derive_const(node, flag),
+                Equation._derive_matrix(node, out_flag, in_flag),
+                Equation._derive_const(node, out_flag),
                 config
             )
 
@@ -510,23 +520,23 @@ class Equation():
         return None
 
     @staticmethod
-    def _derive_matrix(node: Node, flag: torch.Tensor=None):
-        flag = torch.ones(node.output_size, dtype=torch.bool) if flag is None else flag
+    def _derive_matrix(node: Node, out_flag: torch.Tensor=None, in_flag: torch.Tensor=None):
+        out_flag = torch.ones(node.output_size, dtype=torch.bool) if out_flag is None else out_flag
         
         if isinstance(node, Conv):
-            return Equation._derive_conv_matrix(node, flag)
+            return Equation._derive_conv_matrix(node, out_flag, in_flag)
 
         elif isinstance(node, Gemm):
-            return Equation._derive_gemm_matrix(node, flag)
+            return Equation._derive_gemm_matrix(node, out_flag, in_flag)
 
         elif isinstance(node, MatMul):
-            return Equation._derive_matmul_matrix(node, flag)
+            return Equation._derive_matmul_matrix(node, out_flag, in_flag)
         
         elif isinstance(node, Add):
-            return Equation._derive_add_matrix(node, flag)
+            return Equation._derive_add_matrix(node, out_flag)
 
         elif isinstance(node, BatchNormalization):
-            return Equation._derive_batchnormalization_matrix(node, flag)
+            return Equation._derive_batchnormalization_matrix(node, out_flag, in_flag)
 
         else:
             raise NotImplementedError(f'{type(node)} equations')
@@ -556,35 +566,41 @@ class Equation():
         raise NotImplementedError(f'{type(node)} equations')
 
     @staticmethod 
-    def _derive_conv_matrix(node: Node, flag: torch.Tensor):
-        flag_size = torch.sum(flag).item()
+    def _derive_conv_matrix(node: Node, out_flag: torch.Tensor, in_flag: torch.Tensor=None):
+        flag_size = torch.sum(out_flag).item()
 
         prop_flag = torch.zeros(node.get_input_padded_size(), dtype=torch.bool)
-        prop_flag[node.get_non_pad_idxs()] = node.from_node[0].get_propagation_flag().flatten()
+        if in_flag is None:
+            prop_flag[node.get_non_pad_idxs()] = True
+            max_index = node.input_size
+        else:
+            prop_flag[node.get_non_pad_idxs()] = in_flag.flatten()
+            max_index = node.from_node[0].get_propagation_count()
 
         pad = torch.ones(
             node.get_input_padded_size(),
             dtype=torch.long
-        ) * node.from_node[0].get_propagation_count()
-        pad[prop_flag] = torch.arange(node.from_node[0].get_propagation_count())
+        ) * max_index
+        pad[prop_flag] = torch.arange(max_index)
 
         im2col = Conv.im2col(
             pad.reshape(node.get_input_padded_shape()),
             (node.krn_height, node.krn_width),
             node.strides
         )
-        indices = torch.arange(node.out_ch_sz).repeat(node.out_ch)[flag]
+        indices = torch.arange(node.out_ch_sz).repeat(node.out_ch)[out_flag]
         conv_indices = im2col[:, indices]
 
-        indices = torch.repeat_interleave(torch.arange(node.out_ch), node.out_ch_sz, dim=0)[flag]
+        indices = torch.repeat_interleave(
+            torch.arange(node.out_ch), node.out_ch_sz, dim=0
+        )[out_flag]
         conv_weights = node.kernels.permute(1, 2, 3, 0).reshape(-1, node.out_ch)[:, indices]
             
         matrix = torch.zeros(
-            (flag_size, node.from_node[0].get_propagation_count() + 1),
-            dtype=node.config.PRECISION
+            (flag_size, max_index + 1), dtype=node.config.PRECISION
         )
         matrix[torch.arange(flag_size), conv_indices] = conv_weights
-        matrix = matrix[:, :node.from_node[0].get_propagation_count()]
+        matrix = matrix[:, :max_index]
 
         return matrix
 
@@ -597,16 +613,22 @@ class Equation():
         return torch.tile(node.bias, (node.out_ch_sz, 1)).T.flatten()[flag]
 
     @staticmethod 
-    def _derive_gemm_matrix(node: Node, flag: torch.Tensor):
-        return  node.weights[flag, node.from_node[0].get_propagation_flag()]
+    def _derive_gemm_matrix(node: Node, out_flag: torch.Tensor, in_flag: torch.Tensor=None):
+        if in_flag is None:
+            return  node.weights[out_flag, :]
+
+        return  node.weights[out_flag, in_flag]
 
     @staticmethod 
     def _derive_gemm_const(node: Node, flag: torch.Tensor):
         return node.bias[flag]
 
     @staticmethod 
-    def _derive_matmul_matrix(node: Node, flag: torch.Tensor):
-        return  node.weights[flag, node.from_node[0].get_propagation_flag()]
+    def _derive_matmul_matrix(node: Node, out_flag: torch.Tensor, in_flag:torch.Tensor=None):
+        if in_flag is None:
+            return  node.weights[out_flag, :]
+            
+        return  node.weights[out_flag, in_flag]
 
     @staticmethod 
     def _derive_matmul_const(node: Node, flag: torch.Tensor):
