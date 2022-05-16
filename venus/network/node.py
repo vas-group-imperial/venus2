@@ -284,12 +284,9 @@ class Node:
         return self.output_size
 
     def transpose(self, inp: torch.tensor, out_flag: torch.tensor=None, in_flag:torch.tensor=None) -> torch.tensor:
-        print('==', inp.shape)
         if out_flag is None or in_flag is None:
-            print('reg')
             return  self._transpose(inp)
    
-        print('new')
         return self._transpose_flag(inp, out_flag, in_flag)
             
 

@@ -162,11 +162,11 @@ class SIP:
 
     def set_symb_concr_bounds(self, node: Node) -> Bounds:
         if node.has_relu_activation():
-            out_flag =  node.to_node[0].get_unstable_flag().flatten()
+            out_flag =  node.to_node[0].get_unstable_flag()
         elif len(node.to_node) == 0:
             out_flag = self.prob.spec.get_output_flag(node.output_shape)
         else:
-            out_flag = torch.ones(node.output_size, dtype=torch.bool)
+            out_flag = None
 
         stability = node.from_node[0].get_propagation_count()
         if stability / node.input_size >= self.config.SIP.FLAG_THRESHOLD:
@@ -174,7 +174,12 @@ class SIP:
         else:
             in_flag = node.from_node[0].get_propagation_flag()
 
-        symb_eq = Equation.derive(node, out_flag, in_flag, self.config)
+        symb_eq = Equation.derive(
+            node, 
+            None if out_flag is None else out_flag.flatten(),
+            None if in_flag is None else in_flag.flatten(),
+            self.config
+        )
 
         flag = False if in_flag is None else True
         symb_concr_bounds = Bounds(
@@ -218,7 +223,7 @@ class SIP:
             return  [eq]
 
         elif node.has_relu_activation() or isinstance(node, MaxPool):
-            eq = [eq.interval_transpose(node, bound)]
+            eq = [eq.interval_transpose(node, bound, flag)]
 
         elif type(node) in [Relu, Flatten]:
             eq = [eq]
