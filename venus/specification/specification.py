@@ -390,7 +390,9 @@ class Specification:
         Returns:
             Boolean flag of whether each output concerns the specification.
         """
-        return self._get_output_flag(self.output_formula, torch.zeros(output_shape, dtype=torch.bool))
+        return self._get_output_flag(
+            self.output_formula, torch.zeros(output_shape, dtype=torch.bool)
+        )
 
     def _get_output_flag(self, formula: Formula, flag: torch.tensor):
         """

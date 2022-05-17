@@ -252,6 +252,15 @@ class Node:
 
         return True
 
+    def output_shape_no_batch(self) -> int:
+        """
+        Return the output shape without the batch dimension. 
+        """
+        if self.has_batch_dimension():
+            return self.output_shape[1:]
+
+        return self.output_shape
+
     def out_ch_sz(self) -> int:
         """
         Computes the size of an output channel.
@@ -281,15 +290,7 @@ class Node:
         if self.has_relu_activation():
             return self.to_node[0].get_propagation_count()
 
-        return self.output_size
-
-    def transpose(self, inp: torch.tensor, out_flag: torch.tensor=None, in_flag:torch.tensor=None) -> torch.tensor:
-        if out_flag is None or in_flag is None:
-            return  self._transpose(inp)
-   
-        return self._transpose_flag(inp, out_flag, in_flag)
-            
-
+        return self.output_size    
 
 class Constant(Node):
     def __init__(self, to_node: list, const: torch.tensor, config: Config, id: int=None):
@@ -539,8 +540,12 @@ class Gemm(Node):
 
         return output
 
-
-    def transpose(self, inp: torch.tensor, out_flag: torch.tensor, in_flag:torch.tensor) -> torch.tensor:
+    def transpose(
+        self,
+        inp: torch.tensor,
+        in_flag: torch.tensor=True,
+        out_flag: torch.tensor=True
+    ) -> torch.tensor:
         """
         Computes the input to the node given an output.
 
@@ -554,6 +559,9 @@ class Gemm(Node):
         Returns:
             the input of the node.
         """
+        in_flag = range(self.weights.shape[1]) if in_flag is None else in_flag
+        out_flag = range(self.weights.shape[0]) if out_flag is None else out_flag
+
         return inp @ self.weights[out_flag, :][:, in_flag]
 
 
@@ -720,7 +728,12 @@ class MatMul(Node):
 
         return output
 
-    def transpose(self, inp: torch.tensor, out_flag: torch.tensor, in_flag: torch.tensor) -> torch.tensor:
+    def transpose(
+        self,
+        inp: torch.tensor,
+        in_flag: torch.tensor=True,
+        out_flag: torch.tensor=True
+    ) -> torch.tensor:
         """
         Computes the input to the node given an output.
 
@@ -734,6 +747,9 @@ class MatMul(Node):
         Returns:
             the input of the node.
         """
+        in_flag = range(self.weights.shape[1]) if in_flag is None else in_flag
+        out_flag = range(self.weights.shape[0]) if out_flag is None else out_flag
+
         return inp @ self.weights[out_flag, :][:, in_flag]
 
 
@@ -1136,27 +1152,51 @@ class Conv(ConvBase):
         return output
 
 
+    def transpose(
+        self,
+        inp: torch.tensor,
+        in_flag: torch.tensor,
+        out_flag: torch.tensor
+    ) -> torch.tensor:
+        if out_flag is not None:
+            batch = inp.shape[0]
+            filled_inp = torch.zeros(
+                (batch, self.output_size), dtype=inp.dtype
+            ) 
+            filled_inp[:, out_flag.flatten()] = inp
+            filled_inp = filled_inp.reshape((batch,) + self.output_shape_no_batch())
 
-    def _transpose_flag(self, inp: torch.tensor, out_flag: torch.tensor, in_flag:torch.tensor) -> torch.tensor:
+        else:
+            filled_inp = inp
+
+        if in_flag is None:
+            return self._transpose(filled_inp)
+
+        return self._transpose_partial(filled_inp, in_flag)
+
+    def _transpose_partial(
+        self,
+        inp: torch.tensor,
+        in_flag: torch.tensor
+    ) -> torch.tensor:
         """
         Computes the input to the node given an output.
 
         Arguments:
             inp:
                 the output.
-            out_flag:
-                boolean flag of the units in output.
             in_flag:
                 boolean flag of the units in input.
         Returns:
             the input of the node.
         """
-        batch = inp.shape[0] 
-        padded_height = self.out_height + self.krn_height - 1
-        padded_width = self.out_width + self.krn_width - 1
-        padded_inp = torch.ones(
+        batch = inp.shape[0]
+
+        padded_height = self.in_height + self.krn_height - 1
+        padded_width = self.in_width + self.krn_width - 1
+        padded_inp = torch.zeros(
             (batch, self.out_ch, padded_height, padded_width), dtype=inp.dtype
-        ) * torch.sum(out_flag)
+        ) 
         slices = tuple(
             [
                 slice(0, batch, 1),
@@ -1165,13 +1205,14 @@ class Conv(ConvBase):
                 slice(self.krn_width - 1, padded_width, self.strides[1])
             ]
         )
-        temp = padded_inp[slices].reshape(batch, -1)
-        temp[:, out_flag] = inp.reshape(inp.shape[0], -1)
-        if self.has_batch_dimension():
-            padded_inp[slices] = temp.reshape((batch,) + self.output_shape[1:])
-        else:
-            padded_inp[slices] = temp.reshape((batch,) + self.output_shape)
-        del temp
+        padded_inp[slices] = inp
+        # temp = padded_inp[slices].reshape(batch, -1)
+        # temp[:, out_flag] = inp
+        # if self.has_batch_dimension():
+            # padded_inp[slices] = temp.reshape((batch,) + self.output_shape[1:])
+        # else:
+            # padded_inp[slices] = temp.reshape((batch,) + self.output_shape)
+        # del temp
 
         inp_stretch = Conv.im2col(
             padded_inp, (self.krn_height, self.krn_width), (1, 1)
@@ -1181,12 +1222,13 @@ class Conv(ConvBase):
 
         flag = in_flag.reshape(self.in_ch, -1)
 
-        result = torch.zeros((self.in_ch,) + inp_stretch.shape[1:], dtype=self.config.PRECISION)
-
+        result = torch.empty((0, inp_stretch.shape[-1]), dtype=self.config.PRECISION)
+ 
         for i in range(self.in_ch):
-            result[i, ...] =  torch.tensordot(
+            partial_result =  torch.tensordot(
                 kernel_stretch[i, :], inp_stretch[:, flag[i, :], :], dims=([0], [0])
             )
+            result = torch.cat( (result, partial_result), 0)
 
         result = result.reshape(-1, batch).T
         
@@ -1202,10 +1244,11 @@ class Conv(ConvBase):
         Returns:
             the input of the node.
         """
-        out_pad_height = self.in_height - (self.out_height - 1) * self.strides[0] + 2 * self.pads[0] - self.krn_height
-        out_pad_width = self.in_width - (self.out_width - 1) * self.strides[0] + 2 * self.pads[0] - self.krn_width
+        out_pad_height = self.in_height - (self.out_height - 1) * self.strides[0]
+        out_pad_height += 2 * self.pads[0] - self.krn_height
+        out_pad_width = self.in_width - (self.out_width - 1) * self.strides[0]
+        out_pad_width += 2 * self.pads[0] - self.krn_width
 
-        print(inp.shape, self.output_shape)
         return torch.nn.functional.conv_transpose2d(
             inp.reshape((inp.shape[0], self.out_ch, self.out_height, self.out_width)),
             self.kernels,
@@ -1459,8 +1502,7 @@ class ConvTranspose(ConvBase):
 
         return output
 
-
-    def transpose(self, inp: torch.tensor) -> torch.tensor:
+    def _transpose(self, inp: torch.tensor) -> torch.tensor:
         """
         Computes the input to the node given an output.
 
@@ -1477,6 +1519,44 @@ class ConvTranspose(ConvBase):
             stride=self.strides,
             padding=self.pads
         )
+
+    def _transpose_partial(
+        self,
+        inp: torch.tensor,
+        in_flag: torch.tensor,
+        out_flag: torch.tensor,
+    ) -> torch.tensor:
+        """
+        Computes the input to the node given an output.
+
+        Arguments:
+            inp:
+                the output.
+            out_flag:
+                boolean flag of the units in output.
+            in_flag:
+                boolean flag of the units in input.
+        Returns:
+            the input of the node.
+        """
+        # TODO
+        # padded_inp = Conv.pad(inp, self.pads)
+
+        # inp_strech = Conv.im2col(
+            # padded_inp, (self.krn_height, self.krn_width), self.strides
+        # )
+
+        # kernel_strech = self.kernels.reshape(self.in_ch, -1).numpy()
+
+        # output = kernel_strech @ inp_strech
+        # output = output.reshape(self.output_shape)
+
+
+        # return output
+
+
+
+
        
     def get_output_padded_size(self) -> int:
         """
@@ -2044,6 +2124,19 @@ class Reshape(Node):
         """
         return 0
 
+    def get_propagation_flag(self) -> torch.tensor:
+        if isinstance(self.from_node[0], Relu):
+            return self.forward(self.from_node[0].get_propagation_flag())
+
+        return torch.ones(self.output_shape, dtype=torch.bool)
+
+    def get_propagation_count(self) -> torch.tensor:
+        if isinstance(self.from_node[0], Relu):
+            return self.from_node[0].get_propagation_count()
+
+        return self.output_size
+ 
+
 class Flatten(Node):
     def __init__(
         self,
@@ -2143,6 +2236,18 @@ class Flatten(Node):
             self.output = output
 
         return output
+
+    def get_propagation_flag(self) -> torch.tensor:
+        if isinstance(self.from_node[0], Relu):
+            return self.forward(self.from_node[0].get_propagation_flag())
+
+        return torch.ones(self.output_shape, dtype=torch.bool)
+    
+    def get_propagation_count(self) -> torch.tensor:
+        if isinstance(self.from_node[0], Relu):
+            return self.from_node[0].get_propagation_count()
+
+        return self.output_size
 
 
 class Sub(Node):
@@ -2594,7 +2699,7 @@ class BatchNormalization(Node):
         Returns:
             the input of the node.
         """
-        return
+        #TODO
 
 class Slice(Node):
     def __init__(

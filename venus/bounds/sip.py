@@ -57,7 +57,6 @@ class SIP:
         for i in range(self.nn.tail.depth):
             nodes = self.nn.get_node_by_depth(i)
             for j in nodes:
-                print(j.id, j)
                 processed_nodes[j.id] = True
                 self.set_ia_bounds(j)
 
@@ -76,14 +75,17 @@ class SIP:
 
                 self.set_symb_concr_bounds(j)
 
+                print(j.get_propagation_count(), j.output_size)
+
         self.nn.tail.bounds = Bounds(
             torch.ones(self.nn.tail.output_shape) * - math.inf,
             torch.ones(self.nn.tail.output_shape) * math.inf,
         )
         self.set_symb_concr_bounds(self.nn.tail)
 
-        # print(self.nn.tail.bounds.lower)
         print('sip done', timer() - start)
+        import sys
+        sys.exit()
 
         if self.logger is not None:
             SIP.logger.info('Bounds computed, time: {:.3f}, '.format(timer()-start))
@@ -93,8 +95,14 @@ class SIP:
         """
         Determines whether the node implements function requiring a symbolic
         equation for bound calculation.
-        """
-        
+        """ 
+        non_eligible = [
+            BatchNormalization, Input, Relu, MaxPool, Reshape, Flatten, Slice, Concat
+        ]
+
+        if type(node) in non_eligible:
+            return False
+
         if node.has_relu_activation() and node.to_node[0].get_unstable_count() > 0:
             return True
 
@@ -169,11 +177,11 @@ class SIP:
             out_flag = None
 
         stability = node.from_node[0].get_propagation_count()
-        if stability / node.input_size >= self.config.SIP.FLAG_THRESHOLD:
+        if stability / node.input_size >= self.config.SIP.STABILITY_FLAG_THRESHOLD:
             in_flag = None
         else:
             in_flag = node.from_node[0].get_propagation_flag()
-
+        
         symb_eq = Equation.derive(
             node, 
             None if out_flag is None else out_flag.flatten(),
@@ -181,10 +189,9 @@ class SIP:
             self.config
         )
 
-        flag = False if in_flag is None else True
         symb_concr_bounds = Bounds(
-            self.back_substitution(symb_eq, node.from_node[0], flag, 'lower'),
-            self.back_substitution(symb_eq, node.from_node[0], flag, 'upper')
+            self.back_substitution(symb_eq, node.from_node[0], 'lower'),
+            self.back_substitution(symb_eq, node.from_node[0], 'upper')
         )
         node.update_bounds(symb_concr_bounds, out_flag)
 
@@ -202,8 +209,8 @@ class SIP:
         
         return True
 
-    def back_substitution(self, eq, node, flag, bound):
-        eqs = self._back_substitution(eq, node, flag, bound)
+    def back_substitution(self, eq, node, bound):
+        eqs = self._back_substitution(eq, node, bound)
         sum_eq = eqs[0]
         for i in eqs[1:]:
             sum_eq = sum_eq.add(i)
@@ -214,8 +221,7 @@ class SIP:
             bound
         )
 
-    def _back_substitution(self, eq, node, flag, bound):
-        print('*', node)
+    def _back_substitution(self, eq, node, bound):
         if bound not in ['lower', 'upper']:
             raise ValueError("Bound type {bound} not recognised.")
 
@@ -223,18 +229,18 @@ class SIP:
             return  [eq]
 
         elif node.has_relu_activation() or isinstance(node, MaxPool):
-            eq = [eq.interval_transpose(node, bound, flag)]
+            eq = eq.interval_transpose(node, bound)
 
         elif type(node) in [Relu, Flatten]:
             eq = [eq]
 
         else:
-            eq = eq.transpose(node, flag)
+            eq = eq.transpose(node)
 
         eqs = []
 
         for i in eq:
-            eqs.extend(self._back_substitution(i, node.from_node[0], flag, bound))
+            eqs.extend(self._back_substitution(i, node.from_node[0], bound))
 
         return eqs
 
