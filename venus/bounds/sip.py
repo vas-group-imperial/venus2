@@ -57,7 +57,6 @@ class SIP:
         for i in range(self.nn.tail.depth):
             nodes = self.nn.get_node_by_depth(i)
             for j in nodes:
-                print(j)
                 processed_nodes[j.id] = True
                 self.set_ia_bounds(j)
 
@@ -75,6 +74,7 @@ class SIP:
                     continue
 
                 self.set_symb_concr_bounds(j)
+                print(torch.mean(j.bounds.lower))
 
                 # print(j.get_propagation_count(), j.output_size)
 
