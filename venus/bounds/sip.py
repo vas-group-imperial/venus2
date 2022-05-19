@@ -60,7 +60,7 @@ class SIP:
                 processed_nodes[j.id] = True
                 self.set_ia_bounds(j)
 
-                print('---', torch.mean(j.bounds.lower))
+                print(j.id, torch.mean(j.bounds.lower))
 
                 if self.config.MEMORY_OPTIMISATION is True:
                     for k in j.from_node:
@@ -146,6 +146,13 @@ class SIP:
                 node.forward(inp.upper, clip='-', add_bias=True)
             upper = node.forward(inp.lower, clip='-', add_bias=False) + \
                 node.forward(inp.upper, clip='+', add_bias=True)
+            if node.id == 24:
+                x = node.forward(inp.lower, clip='+', add_bias=False) 
+                print(';;;', torch.mean(x))
+                x = node.forward(inp.upper, clip='-', add_bias=True) 
+                print(';;;', torch.mean(x))
+                print(';;;', torch.mean(lower))
+
  
         elif isinstance(node, MatMul):
             lower = node.forward(inp.lower, clip='+') + node.forward(inp.upper, clip='-')
@@ -155,6 +162,7 @@ class SIP:
             raise TypeError(f"IA Bounds computation for {type(node)} is not supported")
         
         if self.delta_flags is not None and node.has_relu_activation() is True:
+            print('asdsadas')
             lower[self.delta_flags[node.to_node[0].id][0]] = 0
             upper[self.delta_flags[node.to_node[0].id][0]] = 0
             lower[self.delta_flags[node.to_node[0].id][1]] = np.clip(
