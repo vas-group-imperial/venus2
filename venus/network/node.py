@@ -561,7 +561,7 @@ class Gemm(Node):
         """
         in_flag = range(self.weights.shape[1]) if in_flag is None else in_flag
         out_flag = range(self.weights.shape[0]) if out_flag is None else out_flag
-
+        
         return inp @ self.weights[out_flag, :][:, in_flag]
 
 

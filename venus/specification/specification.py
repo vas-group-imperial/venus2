@@ -401,8 +401,10 @@ class Specification:
         if isinstance(formula, TrueFormula):
             return flag
         elif isinstance(formula, Constraint):
-            flag[formula.op1.i] = True
-            flag[formula.op2.i] = True
+            if isinstance(formula.op1, StateCoordinate):
+                flag[formula.op1.i] = True
+            if isinstance(formula.op2, StateCoordinate):
+                flag[formula.op2.i] = True
             return flag
         elif type(formula) in [ConjFormula, DisjFormula]:
             flag = self._get_output_flag(formula.left, flag)
