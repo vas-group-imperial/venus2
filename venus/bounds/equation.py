@@ -190,6 +190,9 @@ class Equation():
         elif isinstance(node, Concat):
             tr_eq = self._transpose_concat(node)
 
+        elif isinstance(node, Sub):
+            tr_eq = self._transpose_sub(node)
+
         else:
             raise NotImplementedError(f'Equation transpose for {type(node)}')
 
@@ -357,7 +360,7 @@ class Equation():
                 dtype=self.config.PRECISION,
                 device=self.config.DEVICE
             )
-            idxs = lower < 0 
+            idxs = lower < 0
             upper_slope[idxs] = upper[idxs] /  (upper[idxs] - lower[idxs])
 
             lower_const = Equation._derive_const(

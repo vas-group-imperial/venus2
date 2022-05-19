@@ -75,7 +75,7 @@ class SIP:
 
                 self.set_symb_concr_bounds(j)
 
-                print(j.get_propagation_count(), j.output_size)
+                # print(j.get_propagation_count(), j.output_size)
 
         self.nn.tail.bounds = Bounds(
             torch.ones(self.nn.tail.output_shape) * - math.inf,
@@ -83,6 +83,7 @@ class SIP:
         )
         self.set_symb_concr_bounds(self.nn.tail)
 
+        print(self.nn.tail.bounds.lower)
         print('sip done', timer() - start)
         import sys
         sys.exit()

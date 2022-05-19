@@ -294,7 +294,8 @@ class ONNXParser:
             return Sub([], [], input_shape, self.config, const=const)
 
     def parse_add(self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list) -> Node:
-        if node.input[0] in init or node.input[0] in venus_nodes:
+        if node.input[0] in init or \
+                (node.input[0] in venus_nodes and isinstance(node.input[0], Constant)):
             const0 = self._to_tensor(node.input[0], venus_nodes, init)
             const1 = self._to_tensor(node.input[1], venus_nodes, init)
 

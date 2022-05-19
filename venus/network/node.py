@@ -856,6 +856,17 @@ class ConvBase(Node):
 
         return non_pad_idxs
 
+
+    def get_non_pad_idx_flag(input_shape: tuple, pads: tuple) -> torch.tensor:
+        """
+        Computes the index flag of the original input whithin the padded one.
+        """
+        non_pad_idxs = ConvBase.get_non_pad_idxs(input_shape, pads)
+        flag = torch.zeros(Conv.get_padded_size(input_shape, pads), dtype=torch.bool)
+        flag[non_pad_idxs] = True
+
+        return flag
+
     @staticmethod
     def pad(inp: torch.tensor, pads: tuple, values: tuple=(0,0)) -> torch.tensor:
         """
@@ -876,12 +887,21 @@ class ConvBase(Node):
         if pads == (0, 0):
             return inp
        
-        if len(inp.shape) == 3:
-            pads = ((0, 0), pads, pads)
-        else:
-            pads = ((0, 0), (0, 0), pads, pads)
+        if isinstance(inp, np.ndarray):
+            if len(inp.shape) == 3:
+                pad_par = ((0, 0), pads, pads)
+            else:
+                pad_par = ((0, 0), (0, 0), pads, pads)
 
-        return np.pad(inp, pads, 'constant', constant_values=values)
+            return np.pad(inp, pad_par, 'constant', constant_values=values)
+
+        elif isinstance(inp, torch.Tensor):
+            pad_par = (pads[1], pads[1], pads[0], pads[0])
+
+            return torch.nn.functional.pad(inp, pad_par, 'constant', 0)
+
+        else:
+            raise TypeError(f"Unsupported type {type(inp)} of input")
 
 
     @staticmethod
@@ -1158,16 +1178,16 @@ class Conv(ConvBase):
         in_flag: torch.tensor,
         out_flag: torch.tensor
     ) -> torch.tensor:
-        if out_flag is not None:
+        if out_flag is None:
+            filled_inp = inp
+
+        else:
             batch = inp.shape[0]
             filled_inp = torch.zeros(
                 (batch, self.output_size), dtype=inp.dtype
             ) 
             filled_inp[:, out_flag.flatten()] = inp
             filled_inp = filled_inp.reshape((batch,) + self.output_shape_no_batch())
-
-        else:
-            filled_inp = inp
 
         if in_flag is None:
             return self._transpose(filled_inp)
@@ -1192,8 +1212,8 @@ class Conv(ConvBase):
         """
         batch = inp.shape[0]
 
-        padded_height = self.in_height + self.krn_height - 1
-        padded_width = self.in_width + self.krn_width - 1
+        padded_height = self.in_height + 2 * self.pads[0] + self.krn_height - 1
+        padded_width = self.in_width + 2 * self.pads[1] + self.krn_width - 1
         padded_inp = torch.zeros(
             (batch, self.out_ch, padded_height, padded_width), dtype=inp.dtype
         ) 
@@ -1201,36 +1221,50 @@ class Conv(ConvBase):
             [
                 slice(0, batch, 1),
                 slice(0, self.out_ch, 1),
-                slice(self.krn_height - 1, padded_height, self.strides[0]),
-                slice(self.krn_width - 1, padded_width, self.strides[1])
+                slice(self.krn_height - 1, padded_height - self.krn_height + 1, self.strides[0]),
+                slice(self.krn_width - 1, padded_width - self.krn_width + 1, self.strides[1])
             ]
         )
+
         padded_inp[slices] = inp
-        # temp = padded_inp[slices].reshape(batch, -1)
-        # temp[:, out_flag] = inp
-        # if self.has_batch_dimension():
-            # padded_inp[slices] = temp.reshape((batch,) + self.output_shape[1:])
-        # else:
-            # padded_inp[slices] = temp.reshape((batch,) + self.output_shape)
-        # del temp
 
         inp_stretch = Conv.im2col(
             padded_inp, (self.krn_height, self.krn_width), (1, 1)
         )
 
-        kernel_stretch = self.kernels.permute(1, 0, 2, 3).reshape(self.in_ch, -1)
+        kernel_stretch = torch.flip(
+            self.kernels.permute(1, 0, 2, 3), dims=[2, 3]
+        ).reshape(self.in_ch, -1)
+
 
         flag = in_flag.reshape(self.in_ch, -1)
-
-        result = torch.empty((0, inp_stretch.shape[-1]), dtype=self.config.PRECISION)
+        pad_flag = self.get_non_pad_idx_flag().reshape(self.in_ch, -1)
  
-        for i in range(self.in_ch):
-            partial_result =  torch.tensordot(
-                kernel_stretch[i, :], inp_stretch[:, flag[i, :], :], dims=([0], [0])
-            )
-            result = torch.cat( (result, partial_result), 0)
+        result = torch.empty((0, inp_stretch.shape[-1]), dtype=self.config.PRECISION)
 
-        result = result.reshape(-1, batch).T
+
+        result = torch.tensordot(
+            kernel_stretch, inp_stretch, dims=([1], [0])
+        )
+
+        # for i in range(self.in_ch):
+            # partial_result =  torch.tensordot(
+                # kernel_stretch[i, :], inp_stretch[:, pad_flag[i, :], :][:, flag[i, :], :], dims=([0], [0])
+            # )
+            # result = torch.cat( (result, partial_result), 0)
+
+        # result = result.reshape(batch, - 1)
+        
+        # for i in range(self.in_ch):
+            # partial_result =  torch.tensordot(
+                # kernel_stretch[i, :], inp_stretch, dims=([0], [0])
+            # )
+            # result = torch.cat( (result, partial_result), 0)
+
+        # print(result.shape)
+        result = result.reshape(batch, -1)
+        result = result[:, self.get_non_pad_idxs()]
+        result = result[:, flag.flatten()]
         
         return result
 
@@ -1278,6 +1312,14 @@ class Conv(ConvBase):
         Computes the indices of the original input whithin the padded one.
         """
         return ConvBase.get_non_pad_idxs(
+            (self.in_ch, self.in_height, self.in_width), self.pads
+        )
+
+    def get_non_pad_idx_flag(self) -> torch.tensor:
+        """
+        Computes the index flag of the original input whithin the padded one.
+        """
+        return ConvBase.get_non_pad_idx_flag(
             (self.in_ch, self.in_height, self.in_width), self.pads
         )
 
@@ -1468,8 +1510,8 @@ class ConvTranspose(ConvBase):
         padded_inp = np.zeros(
             (
                 self.in_ch,
-                self.out_height + self.krn_height - 1,
-                self.out_width + self.krn_width - 1
+                self.out_height + 2 * self.pads[0] + self.krn_height - 1,
+                self.out_width + 2 * self.pads[1] +  self.krn_width - 1
             ), 
             dtype=inp.dtype
         )
@@ -1477,8 +1519,8 @@ class ConvTranspose(ConvBase):
         slices = tuple(
             [
                 slice(0, self.in_ch, 1),
-                slice(self.krn_height - 1, self.out_height, self.strides[0]),
-                slice(self.krn_width - 1, self.out_width, self.strides[1])
+                slice(self.krn_height - 1, self.out_height + 2 * self.pads[0], self.strides[0]),
+                slice(self.krn_width - 1, self.out_width + 2 * self.pads[1], self.strides[1])
             ]
         )
         padded_inp[slices] = inp
@@ -1579,6 +1621,14 @@ class ConvTranspose(ConvBase):
         Computes the indices of the original input whithin the padded one.
         """
         return ConvBase.get_non_pad_idxs(
+            (self.out_ch, self.out_height, self.out_width), self.pads
+        )
+
+    def get_non_pad_idx_flag(self) -> torch.tensor:
+        """
+        Computes the index flag of the original input whithin the padded one.
+        """
+        return ConvBase.get_non_pad_idx_flag(
             (self.out_ch, self.out_height, self.out_width), self.pads
         )
 
