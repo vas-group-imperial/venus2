@@ -382,6 +382,7 @@ class Equation():
             upper_const *= upper_slope
             upper_const[idxs]  -= upper_slope[idxs] *  lower[idxs]
 
+        print('oo', torch.mean(upper_slope))
         return (lower_slope, upper_slope), (lower_const, upper_const)
 
     def __get_relu_relaxation(self, node: Node) -> tuple:
