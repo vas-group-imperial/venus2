@@ -267,7 +267,7 @@ class Equation():
 
         return Equation(matrix, self.const, self.config)
 
-    def _transpose_concat(self, node:None):
+    def _transpose_concat(self, node:Node):
         eqs, idx = [], 0
         for i in node.from_node:
             eqs.append(Equation(
@@ -277,6 +277,16 @@ class Equation():
             ))
 
         return eqs
+
+    def _transpose_sub(self. node:Node):
+        if self.const is not None:
+            return Equation(
+                inp - node.const.flatten(), self.const, self.config
+            )
+  
+        return Equation(
+            torch.hstack([self.matrix, -self.matrix], self.const, self.config)
+        )
  
     def interval_transpose(self, node, bound):
 
