@@ -132,7 +132,7 @@ class SIP():
         # oSIP timelimit in seconds
         self.OSIP_TIMELIMIT = 7
         # STABILITY FLAG THRESHOLD
-        self.STABILITY_FLAG_THRESHOLD = 0.5
+        self.STABILITY_FLAG_THRESHOLD = 0
 
     def is_osip_enabled(self):
         return self.OSIP_CONV == OSIPMode.ON  or self.OSIP_FC == OSIPMode.ON

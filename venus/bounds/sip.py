@@ -57,6 +57,7 @@ class SIP:
         for i in range(self.nn.tail.depth):
             nodes = self.nn.get_node_by_depth(i)
             for j in nodes:
+                print(j)
                 processed_nodes[j.id] = True
                 self.set_ia_bounds(j)
 

@@ -279,14 +279,15 @@ class Equation():
         return eqs
 
     def _transpose_sub(self, node:Node):
-        if self.const is not None:
+        if node.const is None:
             return Equation(
-                self.matrix - node.const.flatten(), self.const, self.config
+                torch.hstack([self.matrix, -self.matrix], self.const, self.config)
             )
-  
+            
         return Equation(
-            torch.hstack([self.matrix, -self.matrix], self.const, self.config)
+            self.matrix - node.const.flatten(), self.const, self.config
         )
+  
  
     def interval_transpose(self, node, bound):
 
