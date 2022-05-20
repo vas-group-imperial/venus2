@@ -341,18 +341,28 @@ class Equation():
             idxs = abs(lower) >=  upper
             lower_slope[idxs] = 0.0
 
-            upper_slope = torch.ones(
+
+            upper_slope = torch.zeros(
                 node.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
             )
             idxs = node.to_node[0].get_unstable_flag().flatten()
-            upper_slope[idxs] = upper[idxs] /  (upper[idxs] - lower[idxs])
-            upper_slope[node.to_node[0].get_inactive_flag().flatten()] = 0
+            lower, upper = lower[idxs], upper[idxs]
+            upper_slope[idxs] =  upper / (upper - lower)
+            upper_slope[node.to_node[0].get_active_flag().flatten()] = 1
+
+
+            # upper_slope = torch.ones(
+                # node.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
+            # )
+            # idxs = node.to_node[0].get_unstable_flag().flatten()
+            # upper_slope[idxs] = upper[idxs] /  (upper[idxs] - lower[idxs])
+            # upper_slope[node.to_node[0].get_inactive_flag().flatten()] = 0
 
             lower_const = Equation._derive_const(node)
             upper_const = lower_const.detach().clone()
             lower_const *= lower_slope
             upper_const *= upper_slope
-            upper_const[idxs]  -= upper_slope[idxs] *  lower[idxs]
+            upper_const[idxs]  -= upper_slope[idxs] *  lower
 
         else:
             lower_slope = torch.ones(
@@ -382,7 +392,7 @@ class Equation():
             upper_const *= upper_slope
             upper_const[idxs]  -= upper_slope[idxs] *  lower[idxs]
 
-        print('oo', torch.mean(upper_slope))
+        # print('oo', torch.mean(upper_slope))
         return (lower_slope, upper_slope), (lower_const, upper_const)
 
     def __get_relu_relaxation(self, node: Node) -> tuple:
