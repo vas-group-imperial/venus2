@@ -323,12 +323,13 @@ class Equation():
         else:
             shape = self.matrix.shape
 
-        if isinstance(node, Gemm):
-            print(torch.mean(plus), torch.mean(minus))
         matrix = node.transpose(plus.reshape(shape), in_flag, out_flag) + \
             node.transpose(minus.reshape(shape), in_flag, out_flag)
 
         const += self.const
+
+        if isinstance(node, Gemm):
+            print(torch.mean(_plus), torch.mean(lower_const), torch.mean(_minus), torch.mean(upper_const), torch.mean(self.const))
 
         return Equation(matrix, const, self.config)
 
