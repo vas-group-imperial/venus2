@@ -302,6 +302,7 @@ class Equation():
         else:
             raise TypeError("Expected either relu or maxpool subsequent layer")
 
+
     def interval_relu_transpose(self, node: None, bound: str, in_flag: torch.tensor, out_flag:torch.tensor):
         (lower_slope, upper_slope), (lower_const, upper_const) = self.get_relu_relaxation(node, out_flag)
         _plus, _minus = self._get_plus_matrix(), self._get_minus_matrix()
@@ -341,7 +342,6 @@ class Equation():
             idxs = abs(lower) >=  upper
             lower_slope[idxs] = 0.0
 
-t
             upper_slope = torch.zeros(
                 node.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
             )
