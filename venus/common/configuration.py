@@ -131,6 +131,8 @@ class SIP():
         self.OSIP_FC_NODES = 3
         # oSIP timelimit in seconds
         self.OSIP_TIMELIMIT = 7
+        # STABILITY FLAG THRESHOLD
+        self.STABILITY_FLAG_THRESHOLD = 0
 
     def is_osip_enabled(self):
         return self.OSIP_CONV == OSIPMode.ON  or self.OSIP_FC == OSIPMode.ON
@@ -262,7 +264,6 @@ class Config:
 
     def set_nn_defaults(self, nn):
         if nn.is_fc():
-            print('asdsada')
             self.set_fc_defaults(nn)
         else: 
             self.set_conv_defaults(nn)

@@ -96,6 +96,7 @@ class ONNXParser:
                 i.dim_value if i.dim_value != 0 else 1
                 for i in inp.type.tensor_type.shape.dim
             )
+            # input_shape = (1, 1, 224, 224)
         else:
             input_shape = venus_nodes[node.input[0]].output_shape
         # process node
@@ -293,7 +294,8 @@ class ONNXParser:
             return Sub([], [], input_shape, self.config, const=const)
 
     def parse_add(self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list) -> Node:
-        if node.input[0] in init or node.input[0] in venus_nodes:
+        if node.input[0] in init or \
+                (node.input[0] in venus_nodes and isinstance(node.input[0], Constant)):
             const0 = self._to_tensor(node.input[0], venus_nodes, init)
             const1 = self._to_tensor(node.input[1], venus_nodes, init)
 

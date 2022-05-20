@@ -58,7 +58,7 @@ class SIP:
             nodes = self.nn.get_node_by_depth(i)
             for j in nodes:
                 processed_nodes[j.id] = True
-                j.update_bounds(self.compute_ia_bounds(j))
+                self.set_ia_bounds(j)
 
                 if self.config.MEMORY_OPTIMISATION is True:
                     for k in j.from_node:
@@ -73,26 +73,14 @@ class SIP:
                     saw_symb_eq_node = True
                     continue
 
-                if j.has_relu_activation():
-                    # print(j.output_size, j.to_node[0].get_unstable_count())
-                    flag =  j.to_node[0].get_unstable_flag()
-                else:
-                    flag = torch.ones(node.output_size, dtype=torch.bool)
-
-                symb_concr_bounds = self.compute_symb_concr_bounds(j, flag)
-                j.update_bounds(symb_concr_bounds, flag.reshape(j.output_shape))
+                self.set_symb_concr_bounds(j)
 
         self.nn.tail.bounds = Bounds(
             torch.ones(self.nn.tail.output_shape) * - math.inf,
             torch.ones(self.nn.tail.output_shape) * math.inf,
         )
-        flag =  self.prob.spec.get_output_flag(self.nn.tail.output_shape)
-        symb_concr_bounds = self.compute_symb_concr_bounds(
-            self.nn.tail, flag.flatten() 
-        )
-        self.nn.tail.update_bounds(symb_concr_bounds, flag)
+        self.set_symb_concr_bounds(self.nn.tail)
 
-        print('sip done', timer() - start)
         # print(self.nn.tail.bounds.lower)
 
         if self.logger is not None:
@@ -103,9 +91,12 @@ class SIP:
         """
         Determines whether the node implements function requiring a symbolic
         equation for bound calculation.
-        """
+        """ 
+        non_eligible = [
+            BatchNormalization, Input, Relu, MaxPool, Reshape, Flatten, Slice, Concat
+        ]
 
-        if type(node) in [BatchNormalization, Input, Relu, MaxPool, Reshape, Flatten, Slice, Concat]:
+        if type(node) in non_eligible:
             return False
 
         if node.has_relu_activation() and node.to_node[0].get_unstable_count() > 0:
@@ -113,11 +104,11 @@ class SIP:
 
         if node.has_max_pool():
             return True
-
+    
         return False
 
 
-    def compute_ia_bounds(self, node: Node) -> list:
+    def set_ia_bounds(self, node: Node) -> list:
         inp = node.from_node[0].bounds
 
         if type(node) in [Relu, BatchNormalization, MaxPool, Slice]:
@@ -146,6 +137,13 @@ class SIP:
                 node.forward(inp.upper, clip='-', add_bias=True)
             upper = node.forward(inp.lower, clip='-', add_bias=False) + \
                 node.forward(inp.upper, clip='+', add_bias=True)
+            # if node.id == 24:
+                # x = node.forward(inp.lower, clip='+', add_bias=False) 
+                # print(';;;', torch.mean(inp.lower), torch.mean(inp.upper))
+                # x = node.forward(inp.upper, clip='-', add_bias=False) 
+                # print(';;;', torch.mean(x))
+                # print(';;;', torch.mean(lower))
+
  
         elif isinstance(node, MatMul):
             lower = node.forward(inp.lower, clip='+') + node.forward(inp.upper, clip='-')
@@ -168,18 +166,38 @@ class SIP:
                 math.inf
             )
 
-        return Bounds(
+        ia_bounds = Bounds(
             lower.reshape(node.output_shape), upper.reshape(node.output_shape)
-        ) 
+        )
+        node.update_bounds(ia_bounds)
 
+    def set_symb_concr_bounds(self, node: Node) -> Bounds:
+        if node.has_relu_activation():
+            out_flag =  node.to_node[0].get_unstable_flag()
+        elif len(node.to_node) == 0:
+            out_flag = self.prob.spec.get_output_flag(node.output_shape)
+        else:
+            out_flag = None
 
-    def compute_symb_concr_bounds(self, node: Node, flag: torch.tensor) -> Bounds:
-        symb_eq = Equation.derive(node, flag, self.config)
+        stability = node.from_node[0].get_propagation_count()
+        if stability / node.input_size >= self.config.SIP.STABILITY_FLAG_THRESHOLD:
+            in_flag = None
+        else:
+            in_flag = node.from_node[0].get_propagation_flag()
+        
+        symb_eq = Equation.derive(
+            node, 
+            None if out_flag is None else out_flag.flatten(),
+            None if in_flag is None else in_flag.flatten(),
+            self.config
+        )
 
-        return Bounds(
+        symb_concr_bounds = Bounds(
             self.back_substitution(symb_eq, node.from_node[0], 'lower'),
             self.back_substitution(symb_eq, node.from_node[0], 'upper')
         )
+
+        node.update_bounds(symb_concr_bounds, out_flag)
 
     def osip_eligibility(self, layer):
         if layer.depth == len(self.nodes) - 1:
@@ -214,10 +232,10 @@ class SIP:
         if isinstance(node, Input):
             return  [eq]
 
-        elif node.has_non_linear_op() is True:
-            eq = [eq.interval_transpose(node, bound)]
+        elif node.has_relu_activation() or isinstance(node, MaxPool):
+            eq = eq.interval_transpose(node, bound)
 
-        elif type(node) in [Relu, MaxPool, Flatten]:
+        elif type(node) in [Relu, Flatten]:
             eq = [eq]
 
         else:
