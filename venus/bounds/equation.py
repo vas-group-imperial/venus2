@@ -323,6 +323,8 @@ class Equation():
         else:
             shape = self.matrix.shape
 
+        if isinstance(node, Gemm):
+            print(torch.mean(plus), torch.mean(minus))
         matrix = node.transpose(plus.reshape(shape), in_flag, out_flag) + \
             node.transpose(minus.reshape(shape), in_flag, out_flag)
 
