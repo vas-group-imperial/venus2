@@ -341,7 +341,7 @@ class Equation():
             idxs = abs(lower) >=  upper
             lower_slope[idxs] = 0.0
 
-
+t
             upper_slope = torch.zeros(
                 node.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
             )
