@@ -60,8 +60,6 @@ class SIP:
                 processed_nodes[j.id] = True
                 self.set_ia_bounds(j)
 
-                # print(j, torch.mean(j.bounds.lower), torch.mean(j.bounds.upper))
-
                 if self.config.MEMORY_OPTIMISATION is True:
                     for k in j.from_node:
                         cond = np.array([processed_nodes[l.id] for l in k.to_node])
@@ -77,17 +75,13 @@ class SIP:
 
                 self.set_symb_concr_bounds(j)
 
-                # print(torch.mean(j.bounds.lower), torch.mean(j.bounds.upper))
-
-                # print(j.get_propagation_count(), j.output_size)
-
         self.nn.tail.bounds = Bounds(
             torch.ones(self.nn.tail.output_shape) * - math.inf,
             torch.ones(self.nn.tail.output_shape) * math.inf,
         )
         self.set_symb_concr_bounds(self.nn.tail)
 
-        print(self.nn.tail.bounds.lower, self.nn.tail.bounds.upper)
+        print(self.nn.tail.bounds.lower)
         print('sip done', timer() - start)
         import sys
         sys.exit()

@@ -352,12 +352,8 @@ class Equation():
             lower_const = Equation._derive_const(node)
             upper_const = lower_const.detach().clone()
 
-            if isinstance(node, Gemm):
-                print(torch.mean(upper_const), torch.mean(upper_slope))
             lower_const *= lower_slope
             upper_const *= upper_slope
-            if isinstance(node, Gemm):
-                print(torch.mean(upper_const)) 
 
             upper_const[idxs]  -= upper_slope[idxs] *  lower
 
@@ -391,7 +387,6 @@ class Equation():
             upper_const *= upper_slope
             upper_const[idxs]  -= upper_slope[idxs] *  lower[idxs]
 
-        # print('oo', torch.mean(upper_slope))
         return (lower_slope, upper_slope), (lower_const, upper_const)
 
     def __get_relu_relaxation(self, node: Node) -> tuple:
@@ -674,7 +669,7 @@ class Equation():
     @staticmethod 
     def _derive_gemm_const(node: Node, flag: torch.Tensor):
         if flag is None:
-            return node.bias
+            return node.bias.detach().clone()
 
         return node.bias[flag]
 

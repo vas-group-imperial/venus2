@@ -1180,8 +1180,8 @@ class Conv(ConvBase):
     ) -> torch.tensor:
         if out_flag is None:
             filled_inp = inp
-
         else:
+
             batch = inp.shape[0]
             filled_inp = torch.zeros(
                 (batch, self.output_size), dtype=inp.dtype
@@ -1189,6 +1189,7 @@ class Conv(ConvBase):
             filled_inp[:, out_flag.flatten()] = inp
             filled_inp = filled_inp.reshape((batch,) + self.output_shape_no_batch())
 
+        return self._transpose_partial(filled_inp, in_flag)
         if in_flag is None:
             return self._transpose(filled_inp)
 
@@ -1237,11 +1238,10 @@ class Conv(ConvBase):
         ).reshape(self.in_ch, -1)
 
 
-        flag = in_flag.reshape(self.in_ch, -1)
-        pad_flag = self.get_non_pad_idx_flag().reshape(self.in_ch, -1)
+        # flag = in_flag.reshape(self.in_ch, -1)
+        # pad_flag = self.get_non_pad_idx_flag().reshape(self.in_ch, -1)
  
-        result = torch.empty((0, inp_stretch.shape[-1]), dtype=self.config.PRECISION)
-
+        # result = torch.empty((0, inp_stretch.shape[-1]), dtype=self.config.PRECISION)
 
         result = torch.tensordot(
             kernel_stretch, inp_stretch, dims=([1], [0])
@@ -1264,7 +1264,7 @@ class Conv(ConvBase):
         # print(result.shape)
         result = result.reshape(batch, -1)
         result = result[:, self.get_non_pad_idxs()]
-        result = result[:, flag.flatten()]
+        # result = result[:, flag.flatten()]
         
         return result
 
@@ -1531,7 +1531,7 @@ class ConvTranspose(ConvBase):
             padded_inp, (self.krn_height, self.krn_width), (1, 1)
         )
 
-        kernel_strech = np.flip(
+        kernel_strech = torch.flip(
             self.kernels.permute(1, 0, 2, 3), axis=[2, 3]
         ).reshape(self.out_ch, -1).numpy()
 
