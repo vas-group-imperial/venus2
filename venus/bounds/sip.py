@@ -205,7 +205,7 @@ class SIP:
             self.back_substitution(symb_eq, node.from_node[0], 'lower'),
             self.back_substitution(symb_eq, node.from_node[0], 'upper')
         )
-        print('---',torch.mean(symb_concr_bounds.lower), torch.mean(symb_concr_bounds.upper))
+
         node.update_bounds(symb_concr_bounds, out_flag)
 
     def osip_eligibility(self, layer):

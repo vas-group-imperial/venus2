@@ -311,7 +311,6 @@ class Equation():
             plus, minus = _plus * lower_slope, _minus * upper_slope
             const = _plus @ lower_const + _minus @ upper_const
 
-
         elif bound == 'upper':
             plus, minus = _plus  * upper_slope, _minus * lower_slope
             const = _plus @ upper_const + _minus @ lower_const
