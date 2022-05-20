@@ -290,11 +290,11 @@ class Equation():
   
  
     def interval_transpose(self, node, bound):
-
         in_flag, out_flag = self._get_flags(node)
 
         if node.has_relu_activation():
-            return [self.interval_relu_transpose(node, bound, in_flag, out_flag)]
+            x = [self.interval_relu_transpose(node, bound, in_flag, out_flag)]
+            return x
 
         elif isinstance(node, MaxPool):
             return [self.interval_maxpool_transpose(node, bound)]
@@ -304,7 +304,8 @@ class Equation():
 
 
     def interval_relu_transpose(self, node: None, bound: str, in_flag: torch.tensor, out_flag:torch.tensor):
-        (lower_slope, upper_slope), (lower_const, upper_const) = self.get_relu_relaxation(node, out_flag)
+        (lower_slope, upper_slope), (lower_const, upper_const) = \
+            self.get_relu_relaxation(node, out_flag)
         _plus, _minus = self._get_plus_matrix(), self._get_minus_matrix()
 
         if bound == 'lower':
@@ -541,7 +542,7 @@ class Equation():
     @staticmethod
     def derive(node: Node, out_flag: torch.Tensor, in_flag: torch.Tensor, config: Config) -> Equation:
         zero_eq = Equation._zero_eq(node, out_flag)
-       
+      
         if zero_eq is not None:
             return zero_eq
       

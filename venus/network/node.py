@@ -1246,8 +1246,6 @@ class Conv(ConvBase):
             )
             result = torch.cat( (result, partial_result), 0)
 
-        result = result.T
-        
         return result.T
 
     def _transpose(self, inp: torch.tensor) -> torch.tensor:
