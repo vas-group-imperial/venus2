@@ -328,9 +328,6 @@ class Equation():
 
         const += self.const
 
-        if isinstance(node, Gemm):
-            print(torch.mean(_plus), torch.mean(lower_const), torch.mean(_minus), torch.mean(upper_const), torch.mean(self.const))
-
         return Equation(matrix, const, self.config)
 
 
@@ -352,19 +349,19 @@ class Equation():
             upper_slope[idxs] =  upper / (upper - lower)
             upper_slope[node.to_node[0].get_active_flag().flatten()] = 1
 
-
-            # upper_slope = torch.ones(
-                # node.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
-            # )
-            # idxs = node.to_node[0].get_unstable_flag().flatten()
-            # upper_slope[idxs] = upper[idxs] /  (upper[idxs] - lower[idxs])
-            # upper_slope[node.to_node[0].get_inactive_flag().flatten()] = 0
-
             lower_const = Equation._derive_const(node)
             upper_const = lower_const.detach().clone()
+
+            if isinstance(node, Gemm):
+                print(torch.mean(upper_const), torch.mean(upper_slope))
             lower_const *= lower_slope
             upper_const *= upper_slope
+            if isinstance(node, Gemm):
+                print(torch.mean(upper_const)) 
+
             upper_const[idxs]  -= upper_slope[idxs] *  lower
+
+
 
         else:
             lower_slope = torch.ones(
