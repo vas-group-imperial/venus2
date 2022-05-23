@@ -1162,7 +1162,7 @@ class Conv(ConvBase):
 
         kernel_strech = self.kernels.reshape(self.out_ch, -1).numpy()
 
-        output = kernel_strech @ inp_strech
+        output = np.tensordot(kernel_strech, inp_strech, axes=([1], [0]))
         output = output.flatten() + np.tile(self.bias.numpy(), (self.out_ch_sz, 1)).T.flatten()
         output = output.reshape(self.output_shape)
 

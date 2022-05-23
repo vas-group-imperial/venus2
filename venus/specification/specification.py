@@ -212,12 +212,14 @@ class Specification:
                        for _ in range(len(clauses))]
         constr_sets = []
         constrs = []
-        for i in range(len(clauses)):
-            constr_sets.append(self.get_constrs(clauses[i], gmodel, clause_vars[i]))
-            for j in range(len(output_vars)):
-                constrs.append((split_vars[i] == 1) >> (output_vars[j] == clause_vars[i][j]))
+
+        for i, o in enumerate(clauses):
+            constr_sets.append(self.get_constrs(o, gmodel, clause_vars[i]))
+            for j, p in enumerate(output_vars):
+                constrs.append((split_vars[i] == 1) >> (p == clause_vars[i][j]))
             for disj_constr in constr_sets[i]:
                 constrs.append((split_vars[i] == 1) >> disj_constr)
+
         # exactly one variable must be true
         constrs.append(quicksum(split_vars) == 1)
             
@@ -301,14 +303,14 @@ class Specification:
             sense = formula.sense
             if sense == Formula.Sense.LT:
                 if isinstance(formula, VarVarConstraint):
-                    return upper_bounds[formula.op1.i] < lower_bounds[formula.op2.i]
+                    return upper_bounds[formula.op1.i].item() < lower_bounds[formula.op2.i].item()
                 if isinstance(formula, VarConstConstraint):
-                    return upper_bounds[formula.op1.i] < formula.op2
+                    return upper_bounds[formula.op1.i].item() < formula.op2
             elif sense == Formula.Sense.GT:
                 if isinstance(formula, VarVarConstraint):
-                    return lower_bounds[formula.op1.i] > upper_bounds[formula.op2.i]
+                    return lower_bounds[formula.op1.i].item() > upper_bounds[formula.op2.i].item()
                 if isinstance(formula, VarConstConstraint):
-                    return lower_bounds[formula.op1.i] > formula.op2
+                    return lower_bounds[formula.op1.i].item() > formula.op2
             else:
                 raise Exception('Unexpected sense', formula.sense)
         elif isinstance(formula, ConjFormula):
@@ -330,6 +332,79 @@ class Specification:
         else:
             raise Exception("Unexpected type of formula", type(formula))
 
+    def get_mse_loss(self, output):
+        """
+        Computes the mean squared error of the output. 
+
+        Arguments:
+            output:
+                The output.
+        Returns:
+            MSE of the output.
+        """
+        padded_output = torch.hstack((torch.zeros(1), output))
+        pos_dims, neg_dims, consts = self._get_mse_loss(
+            self.output_formula,
+            padded_output
+        )
+        pos_dims = torch.tensor(pos_dims, dtype=torch.long)
+        neg_dims = torch.tensor(neg_dims, dtype=torch.long)
+        consts = torch.tensor(consts)
+
+        loss = torch.mean((padded_output[pos_dims] - padded_output[neg_dims] - consts) ** 2)
+
+        return loss
+
+    def _get_mse_loss(self, formula, output):
+        """
+        Helper function for get_mse_loss.
+
+        Arguments:
+            formula:
+                subformula of the output formula.
+            output:
+                The output.
+        Returns:
+            MSE Loss.
+        """
+        if isinstance(formula, TrueFormula):
+            return [0], [0], [0]
+
+        elif isinstance(formula, Constraint):
+            sense = formula.sense
+
+            if sense == Formula.Sense.LT:
+                if isinstance(formula, VarVarConstraint):
+                    return [formula.op2.i + 1], [formula.op1.i + 1], [0]
+                if isinstance(formula, VarConstConstraint):
+                    return [0], [formula.op1.i + 1], [- formula.op2]
+
+            elif sense == Formula.Sense.GT:
+                if isinstance(formula, VarVarConstraint):
+                    return [formula.op1.i + 1], [formula.op2.i + 1], [0]
+                if isinstance(formula, VarConstConstraint):
+                    return [formula.op1.i], [0], [formula.op2]
+            else:
+                raise Exception('Unexpected sense', formula.sense)
+
+        elif type(formula) in [ConjFormula, DisjFormula]:
+            pos_dims1, neg_dims1, consts1 = self._get_mse_loss(formula.left, output)
+            pos_dims2, neg_dims2, consts2 = self._get_mse_loss(formula.right, output)
+
+            return pos_dims1 + pos_dims2, neg_dims1 + neg_dims2, consts1 + consts2
+
+        elif type(formula) in [NAryConjFormula, NAryDisjFormula]:
+            pos_dims, neg_dims, consts = [], [], []
+            for clause in formula.clauses:
+                pos_dims2, neg_dims2, consts2 = self._get_mse_loss(clause, output)
+                pos_dims += pos_dims2
+                neg_dims += neg_dims2
+                consts += consts2
+
+            return pos_dims, neg_dims, consts
+
+        else:
+            raise Exception("Unexpected type of formula", type(formula))
 
     def is_adversarial_robustness(self):
         """

@@ -60,23 +60,23 @@ class Verifier:
 
         """
         Verifier.logger.info(f'Verifying {self.prob.to_string()}')
+
         if self.config.VERIFIER.COMPLETE == True:
             ver_report = self.verify_complete()
         else:
             ver_report = self.verify_incomplete()
+
         Verifier.logger.info('Verification completed')
         Verifier.logger.info(ver_report.to_string())
 
         return ver_report
 
-
-
     def verify_incomplete(self):
         """
-        Attempts to solve a verification problem using symbolic interval propagation.
+        Attempts to solve a verification problem using projected gradient
+        descent and symbolic interval propagation.
 
         Returns:
-
             VerificationReport
         """
         ver_report = VerificationReport(self.config.LOGGER.LOGFILE)
@@ -115,18 +115,15 @@ class Verifier:
         Solves a verification problem by solving its MILP representation.
 
         Arguments:
-            
             prob: VerificationProblem
-
         Returns:
-
             VerificationReport
         """
         start = timer()
         # try to solve the problem using the bounds and lp
         report = self.verify_incomplete()
-        # if report.result != SolveResult.UNDECIDED:
-            # return report
+        if report.result != SolveResult.UNDECIDED:
+            return report
     
         # start the splitting and worker processes
         self.generate_procs()
@@ -136,8 +133,6 @@ class Verifier:
 
         ver_report.runtime = timer() - start
 
-
-
         return ver_report
 
     def process_report_queue(self):
@@ -145,8 +140,7 @@ class Verifier:
         Reads results from the reporting queue until encountered an UNSATISFIED
         result, or until all the splits have completed
 
-        Returns
-
+        Returns:
             VerificationReport
         """
         start = timer()
@@ -194,10 +188,6 @@ class Verifier:
     def generate_procs(self):
         """
         Creates splitting and verification processes.
-
-        Returns:
-            
-            None
         """
 
         self.generate_split_procs()
@@ -206,10 +196,6 @@ class Verifier:
     def generate_split_procs(self):
         """
         Creates splitting  processes.
-
-        Returns:
-            
-            None
         """
         if self.config.SPLITTER.SPLIT_STRATEGY != SplitStrategy.NONE \
         and self.config.SOLVER.MONITOR_SPLIT is False:
@@ -242,10 +228,6 @@ class Verifier:
     def generate_ver_procs(self):
         """
         Creates verification  processes.
-
-        Returns:
-            
-        None
         """
         if self.config.SOLVER.MONITOR_SPLIT == True \
         or self.config.SPLITTER.SPLIT_STRATEGY == SplitStrategy.NONE:
@@ -271,10 +253,6 @@ class Verifier:
     def terminate_procs(self):
         """
         Terminates all splitting and verification processes.
-
-        Returns:
-
-            None
         """
         # self.reporting_queue.cancel_join_thread()
         # self.jobs_queue.cancel_join_thread()
@@ -284,10 +262,6 @@ class Verifier:
     def terminate_split_procs(self):
         """
         Terminates all splitting processes.
-
-        Returns:
-
-            None
         """
         try:
             for proc in self.split_procs:
@@ -298,10 +272,6 @@ class Verifier:
     def terminate_ver_procs(self):
         """
         Terminates all verification processes.
-
-        Returns:
-
-            None
         """
         try:
             for proc in self.ver_procs:
