@@ -57,8 +57,7 @@ class MILPSolver:
         me = MILPEncoder(MILPSolver.prob, MILPSolver.config)
 
         if MILPSolver.lp == True:
-            gmodel = me.lp_encode()
-
+            gmodel = me.encode(linear_approx=True)
         else:
             gmodel = me.encode()
 
@@ -68,7 +67,7 @@ class MILPSolver:
             gmodel.setParam('TIME_LIMIT', MILPSolver.config.SOLVER.TIME_LIMIT)
         if not MILPSolver.config.SOLVER.DEFAULT_CUTS: 
             MILPSolver.disable_default_cuts(gmodel)
-        gmodel.setParam('FeasibilityTol', MILPSolver.config.SOLVER.FEASIBILITY_TOL)
+        # gmodel.setParam('FeasibilityTol', MILPSolver.config.SOLVER.FEASIBILITY_TOL)
         gmodel._vars = gmodel.getVars()
         # set callback cuts 
         MILPSolver.id_form = IdealFormulation(
@@ -82,13 +81,12 @@ class MILPSolver:
             MILPSolver.config
         )
         # Optimise
-        if MILPSolver.config.SOLVER.callback_enabled() and MILPSolver.lp == False:
+        if MILPSolver.config.SOLVER.callback_enabled() and MILPSolver.lp is not True:
             gmodel.optimize(MILPSolver._callback)
         else:
             gmodel.optimize()
 
-        runtime =  timer() - start
-        cex = None  
+        runtime, cex =  timer() - start, None
         if MILPSolver.status == SolveResult.BRANCH_THRESHOLD:
             result = SolveResult.BRANCH_THRESHOLD
         elif gmodel.status == GRB.OPTIMAL:

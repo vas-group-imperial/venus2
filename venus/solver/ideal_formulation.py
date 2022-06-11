@@ -65,11 +65,9 @@ class IdealFormulation(Cuts):
             len(i.from_node) != 1 or \
             self.freq_check(i.depth) is not True:
                 continue
+
             counter = 0
-            s, e = self.prob.get_var_indices(i.to_node[0].id, 'delta')
-            delta = self.gmodel._vars[s: e]
-            _delta = np.asarray(self.gmodel.cbGetNodeRel(delta)).reshape(i.output_shape)
-            delta = np.asarray(delta).reshape(i.output_shape)
+            delta, _delta = self.get_var_values(i.to_node[0], 'delta')
             for j in i.to_node[0].get_unstable_indices():
                 if _delta[j] > 0 and _delta[j] < 1:
                     ineqs = self.get_inequalities(i, j, _delta)
@@ -77,11 +75,11 @@ class IdealFormulation(Cuts):
                         lhs, rhs = self.build_constraint(ineqs, i, j, delta)
                         cuts.append((lhs,rhs))
         te = timer()
+
         if len(cuts) > 0:
             self.logger.info(f'Constructed ideal cuts, #cuts: {len(cuts)}, time: {te - ts}')
 
         return cuts
-
 
     def get_inequalities(self, node, unit, _delta):
         """
@@ -96,13 +94,10 @@ class IdealFormulation(Cuts):
                 index of the unit in the node.
 
         Returns:
-            
             list of indices of nodes of p_layer.
         """
 
-        (s, e) = self.prob.get_var_indices(node.from_node[0].id, 'out')
-        in_vars = self.gmodel._vars[s:e]
-        _in = np.asarray(self.gmodel.cbGetNodeRel(in_vars)).reshape(node.from_node[0].output_shape)
+        in_vars, _in = self.get_var_values(node.from_node[0], 'out')
         neighbours = self.prob.nn.calc_neighbouring_units(node.from_node[0], node, unit)
         pos_connected = [i for i in neighbours if node.edge_weight(unit, i) > 0]
         ineqs = []
@@ -139,12 +134,8 @@ class IdealFormulation(Cuts):
 
             bool expressing whether or not to add cuts.
         """
-        (s, e) = self.prob.get_var_indices(node.from_node[0].id, 'out')
-        in_vars = self.gmodel._vars[s:e]
-        _in = np.asarray(self.gmodel.cbGetNodeRel(in_vars)).reshape(node.from_node[0].output_shape)
-        (s, e) = self.prob.get_var_indices(node.to_node[0].id, 'out')
-        out_vars = self.gmodel._vars[s:e]
-        _out = np.asarray(self.gmodel.cbGetNodeRel(out_vars)).reshape(node.to_node[0].output_shape)
+        in_vars, _in = self.get_var_values(node.from_node[0], 'out')
+        out_vars, _out = self.get_var_values(node.to_node[0], 'out')
         s1 = 0
         s2 = 0
 
@@ -182,10 +173,9 @@ class IdealFormulation(Cuts):
             a pair of Grurobi linear expression for lhs and the rhs of the
             linear cut.
         """
-        (s, e) = self.prob.get_var_indices(node.from_node[0].id, 'out')
-        in_vars = np.asarray(self.gmodel._vars[s:e]).reshape(node.from_node[0].output_shape)
-        (s, e) = self.prob.get_var_indices(node.to_node[0].id, 'out')
-        out_vars = np.asarray(self.gmodel._vars[s:e]).reshape(node.to_node[0].output_shape)
+        in_vars, _ = self.get_var_values(node.from_node[0], 'out')
+        out_vars, _ = self.get_var_values(node.to_node[0], 'out')
+
         le = LinExpr()
         s = 0
         for p_unit in self.prob.nn.calc_neighbouring_units(node.from_node[0], node, unit):

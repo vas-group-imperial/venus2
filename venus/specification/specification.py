@@ -495,6 +495,12 @@ class Specification:
         else:
             raise Exception("Unexpected type of formula", type(formula))
 
+    def clean_vars(self):
+        """
+        Nulls out all MILP variables associate with the specification.
+        """
+        self.input_node.clean_vars()
+
     def to_string(self):
         """
         Returns:

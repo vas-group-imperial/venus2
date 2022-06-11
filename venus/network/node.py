@@ -1,5 +1,4 @@
-# ************
-# File: node.py
+# *********** File: node.py
 # Top contributors (to current version): 
 # 	Panagiotis Kouvaros (panagiotis.kouvaros@gmail.com)
 # This file is part of the Venus project.
@@ -69,6 +68,7 @@ class Node:
         self.output = None
         self.outputs = None
         self.bounds = bounds
+        self._milp_var_indices = None
 
     def get_outputs(self):
         """
@@ -93,6 +93,29 @@ class Node:
         """
         self.out_vars = torch.empty(0)
         self.delta_vars = torch.empty(0)
+
+    def get_milp_var_indices(self, var_type: str='out'):
+        """
+        Returns the starting and ending indices of the milp variables encoding
+        the node.
+
+        Arguments:
+            var_type: either 'out' for output variables or 'delta' for binary
+            variables.
+        """
+        if self._milp_var_indices is not None:
+            return self._milp_var_indices
+
+        if len(self.from_node) > 0:
+            start = self.from_node[-1].get_milp_var_indices()[0]
+        else:
+            start = 0
+        end = start + self.output_size
+
+        self._milp_var_indices = (start, end)
+
+        return self._milp_var_indices
+ 
 
         
     def has_non_linear_op(self) -> bool:
@@ -232,7 +255,6 @@ class Node:
         if self.has_relu_activation():
             self.to_node[0].reset_state_flags()
 
-
     def clear_bounds(self) -> None:
         """
         Nulls out the bounds of the node.
@@ -261,9 +283,9 @@ class Node:
 
         return self.output_shape
 
-    def out_ch_sz(self) -> int:
+    def in_ch_sz(self) -> int:
         """
-        Computes the size of an output channel.
+        Computes the size of an input channel.
         """
         if self.has_batch_dimension() is True:
             return np.prod(self.input_shape[2:])
@@ -271,9 +293,9 @@ class Node:
         return np.prod(self.input_shape[1:])
 
     
-    def out_ch(self) -> int:
+    def in_ch(self) -> int:
         """
-        Computes the number of output channels.
+        Computes the number of input channels.
         """
         if self.has_batch_dimension() is True:
             return self.input_shape[1]
@@ -326,6 +348,17 @@ class Constant(Node):
             self.config,
             id=self.id
         )
+
+    def get_milp_var_indices(self, var_type: str):
+        """
+        Returns the starting and ending indices of the milp variables encoding
+        the node.
+
+        Arguments:
+            var_type: either 'out' for output variables or 'delta' for binary
+            variables.
+        """
+        return None
 
 class Input(Node):
     def __init__(self, bounds:torch.tensor, config: Config, id: int=None):
@@ -428,13 +461,6 @@ class Gemm(Node):
             bounds=self.bounds.copy(),
             id=self.id
         )
-
-    def get_milp_var_size(self):
-        """
-        Returns the number of milp variables required for the milp encoding of
-        the node.
-        """
-        return self.output_size
 
     def get_bias(self, index: int) -> float:
         """
@@ -1828,6 +1854,8 @@ class Relu(Node):
         self.active_count = None
         self.inactive_count = None
         self.propagation_count = None
+        self._lower_relaxation_slope = None
+        self._custom_relaxation_slope = False
 
     def copy(self):
         """
@@ -1846,13 +1874,6 @@ class Relu(Node):
         relu.dep_root = self.dep_root.copy()
 
         return relu
-
-    def get_milp_var_size(self):
-        """
-        Returns the number of milp variables required for the milp encoding of
-        the node.
-        """
-        return 2 * self.output_size
 
     def forward(self, inp: torch.tensor=None, save_output=None) -> torch.tensor:
         """
@@ -1902,7 +1923,7 @@ class Relu(Node):
     def reset_state_flags(self):
         """
         Resets calculation flags for relu states
-        """
+        """ 
         self.active_flag = None
         self.inactive_flag = None
         self.stable_flag = None
@@ -1913,6 +1934,8 @@ class Relu(Node):
         self.active_count = None
         self.inactive_count = None
         self.propagation_count = None
+
+
 
     def is_active(self, index):
         """
@@ -1981,7 +2004,7 @@ class Relu(Node):
         Returns an array of activity statuses for each ReLU node.
         """
         if self.active_flag is None:
-            self.active_flag = self.from_node[0].bounds.lower > 0
+            self.active_flag = self.from_node[0].bounds.lower >= 0
 
         return self.active_flag
 
@@ -2029,17 +2052,10 @@ class Relu(Node):
         Returns an array of indices of unstable ReLU units.
         """
         return [
-            tuple(i) 
+            tuple(j.item() for j in tuple(i))
             for i in self.get_unstable_flag().reshape(self.output_shape).nonzero()
         ]
 
-        if self.unstable_flag is None:
-            self.unstable_flag = torch.logical_and(
-                self.from_node[0].bounds.lower < 0,
-                self.from_node[0].bounds.upper > 0
-            )
-
-        return self.unstable_flag
 
     def get_unstable_count(self) -> int:
         """
@@ -2091,6 +2107,72 @@ class Relu(Node):
             self.propagation_count = torch.sum(self.get_propagation_flag())
 
         return self.propagation_count
+
+    def get_lower_relaxation_slope(self) -> torch.Tensor:
+        """
+        Returns the lower bound relaxation slopes.
+        """
+        if self._lower_relaxation_slope is None:
+            self.set_default_lower_relaxation_slope()
+            
+        return self._lower_relaxation_slope
+
+    def set_default_lower_relaxation_slope(self) -> torch.Tensor:
+        """
+        Derives the lower bound relaxation slopes.
+        """
+        slope = torch.ones(
+            self.get_unstable_count(), dtype=self.config.PRECISION, device=self.config.DEVICE
+        )
+        lower = self.from_node[0].bounds.lower[self.get_unstable_flag()]
+        upper = self.from_node[0].bounds.upper[self.get_unstable_flag()]
+        idxs = abs(lower) >= upper
+        slope[idxs] = 0.0
+
+        self._lower_relaxation_slope = (slope, slope)
+
+    def set_custom_lower_relaxation_slope(self, lower: torch.tensor, upper: torch.tensor):
+        """
+        Sets custom lower bound relaxation slopes.
+        """
+        self._lower_relaxation_slope = (lower, upper)
+        self._custom_relaxation_slope = True
+
+    def get_milp_var_indices(self, var_type: str='all'):
+        """
+        Returns the starting and ending indices of the milp variables encoding
+        the node.
+
+        Arguments:
+            var_type: either 'out' for output variables or 'delta' for binary
+            variables of 'all' for all.
+        """
+        if self._milp_var_indices is None:
+            if len(self.from_node) > 0:
+                start_out = self.from_node[-1].get_milp_var_indices()[0]
+                start_delta = self.from_node[-1].get_milp_var_indices()[0] + self.output_size
+            else:
+                start_out = 0
+                start_delta = self.output_size 
+            end_out = start_out + self.output_size
+            end_delta = start_delta + self.get_unstable_count()
+
+            self._milp_var_indices = {
+                'all': (start_out, end_delta),
+                'out': (start_out, end_out),
+                'delta': (start_delta, end_delta)
+            }
+
+        if var_type == 'all': 
+            return self._milp_var_indices['all']
+        if var_type == 'out': 
+            return self._milp_var_indices['out']
+        elif var_type == 'delta':
+            return self._milp_var_indices['delta']
+        else:
+            raise ValueError('var_type can only be out or delta or all')
+
+
 
 class Reshape(Node):
     def __init__(
@@ -2148,12 +2230,16 @@ class Reshape(Node):
             id=self.id
         )
 
-    def get_milp_var_size(self):
+    def get_milp_var_indices(self, var_type: str):
         """
-        Returns the number of milp variables required for the milp encoding of
+        Returns the starting and ending indices of the milp variables encoding
         the node.
+
+        Arguments:
+            var_type: either 'out' for output variables or 'delta' for binary
+            variables.
         """
-        return 0
+        return self.from_node[-1].get_milp_var_indices()
 
     def get_propagation_flag(self) -> torch.tensor:
         if isinstance(self.from_node[0], Relu):
@@ -2220,12 +2306,16 @@ class Flatten(Node):
             id=self.id
         )
 
-    def get_milp_var_size(self):
+    def get_milp_var_indices(self, var_type: str='out'):
         """
-        Returns the number of milp variables required for the milp encoding of
+        Returns the starting and ending indices of the milp variables encoding
         the node.
+
+        Arguments:
+            var_type: either 'out' for output variables or 'delta' for binary
+            variables.
         """
-        return 0
+        return self.from_node[-1].get_milp_var_indices()
 
     def forward(self, inp: torch.tensor=None, save_output=False) -> torch.tensor:
         """
@@ -2507,12 +2597,24 @@ class Add(Node):
             id=self.id
         )
 
-    def get_milp_var_size(self):
+    def get_milp_var_indices(self, var_type: str):
         """
-        Returns the number of milp variables required for the milp encoding of
+        Returns the starting and ending indices of the milp variables encoding
         the node.
+
+        Arguments:
+            var_type: either 'out' for output variables or 'delta' for binary
+            variables.
         """
-        return self.output_size
+        if self._milp_var_indices is not None:
+            return self._milp_var_indices
+
+        from_idxs = self.from_node[-1].get_milp_var_indices()
+        start = from_idxs[0] if var_type == 'out' else from_idxs[0] + self.output_size
+        end = start + self.output_size if var_type == 'out' else start + self.get_unstable_count()
+
+        start, end
+
 
     def forward(self, inp1: torch.tensor=None, inp2: torch.tensor=None, save_output=False) -> torch.tensor:
         """
@@ -2708,13 +2810,13 @@ class BatchNormalization(Node):
         Returns: 
             the output of the node.
         """
-        out_ch_sz = self.out_ch_sz()
+        in_ch_sz = self.in_ch_sz()
 
-        scale = np.tile(self.scale, (out_ch_sz, 1)).T.flatten()
-        bias = np.tile(self.bias, (out_ch_sz, 1)).T.flatten()
-        input_mean = np.tile(self.input_mean, (out_ch_sz, 1)).T.flatten()
+        scale = np.tile(self.scale, (in_ch_sz, 1)).T.flatten()
+        bias = np.tile(self.bias, (in_ch_sz, 1)).T.flatten()
+        input_mean = np.tile(self.input_mean, (in_ch_sz, 1)).T.flatten()
         mean_var = np.sqrt(self.input_mean + self.epsilon)
-        mean_var = np.tile(mean_var, (out_ch_sz, 1)).T.flatten()
+        mean_var = np.tile(mean_var, (in_ch_sz, 1)).T.flatten()
 
         output = (inp.flatten() - input_mean) / mean_var * scale + bias
 
@@ -2790,12 +2892,17 @@ class Slice(Node):
             id=self.id
         )
 
-    def get_milp_var_size(self):
+    def get_milp_var_indices(self, var_type: str):
         """
-        Returns the number of milp variables required for the milp encoding of
+        Returns the starting and ending indices of the milp variables encoding
         the node.
+
+        Arguments:
+            var_type: either 'out' for output variables or 'delta' for binary
+            variables.
         """
-        return 0
+        raise NotImplementedError('get milp var indices for Slice')
+
 
     def forward(self, inp: torch.tensor=None, save_output=False) -> torch.tensor:
         """
@@ -2910,12 +3017,16 @@ class Concat(Node):
             id=self.id
         )
 
-    def get_milp_var_size(self):
+    def get_milp_var_indices(self, var_type: str):
         """
-        Returns the number of milp variables required for the milp encoding of
+        Returns the starting and ending indices of the milp variables encoding
         the node.
+
+        Arguments:
+            var_type: either 'out' for output variables or 'delta' for binary
+            variables.
         """
-        return 0
+        raise NotImplementedError('get milp var indices for Slice')
 
     def forward(self, inps: list=None, save_output=False) -> torch.tensor:
         """

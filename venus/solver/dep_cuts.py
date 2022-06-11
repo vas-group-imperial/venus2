@@ -11,6 +11,7 @@
 
 from venus.dependency.dependency_graph import DependencyGraph
 from venus.dependency.dependency_type import DependencyType
+from venus.network.node import Relu
 from venus.solver.cuts import Cuts
 from venus.common.logger import get_logger
 from timeit import default_timer as timer
@@ -50,7 +51,7 @@ class DepCuts(Cuts):
         # compute runtime bounds
         delta, _delta = self._get_current_delta()
         _delta_flags = {i: [_delta[i] == 0, _delta[i] == 1] for i in _delta}
-        self.prob.set_bounds(_delta_flags)
+        self.prob.set_bounds(delta_flags=_delta_flags)
         # get linear desctiption of the current stabilised binary variables
         le = self._get_lin_descr(delta, _delta)
         # build dependency graph and add dependencies
@@ -100,18 +101,10 @@ class DepCuts(Cuts):
         delta, _delta = {}, {}
 
         for _, i in self.prob.nn.node.items():
-            (s, e) = self.prob.get_var_indices(i.id, 'delta')
-            d = self.gmodel._vars[s: e]
-
-            if len(d) > 0:
-                _d = np.asarray(self.gmodel.cbGetNodeRel(d)).reshape(i.output_shape)
-                d = np.asarray(d).reshape(i.output_shape)
-
-            else:
-                _d = d.copy()
-
-            delta[i.id] = d
-            _delta[i.id] = _d
+            if isinstance(i, Relu):
+                d, _d = self.get_var_values(i.to_node[0], 'delta')
+                delta[i.id] = d
+                _delta[i.id] = _d
 
         return delta, _delta
 

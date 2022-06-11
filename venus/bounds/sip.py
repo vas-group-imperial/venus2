@@ -19,8 +19,7 @@ from venus.bounds.bounds import Bounds
 from venus.bounds.equation import Equation
 from venus.common.logger import get_logger
 from venus.common.configuration import Config
-from venus.specification.formula import Formula, TrueFormula, VarVarConstraint, DisjFormula, \
-    NAryDisjFormula, ConjFormula, NAryConjFormula
+from venus.specification.formula import  * 
 
 torch.set_num_threads(1)
 
@@ -32,40 +31,61 @@ class SIP:
         """
         Arguments:
 
-            nodes:
-                A list [input,layer_1,....,layer_k] of the networks nodes
-                including an input layer defining the input.
+            prob:
+                The verification problem.
             config:
                 Configuration.
-            logfile:
-                The logfile.
         """
         self.prob = prob
-        self.nn = prob.nn
         self.config = config
         self.delta_flags = delta_flags
         if SIP.logger is None and config.LOGGER.LOGFILE is not None:
             SIP.logger = get_logger(__name__, config.LOGGER.LOGFILE)
-
+        
     def set_bounds(self):
         """
-        Sets pre-activation and activation bounds.
+        Sets the bounds.
         """
         start = timer()
-        processed_nodes = {i : False for i in self.nn.node}
+
+        # sets bounds using minimum area approximations
+        self._set_bounds(slopes=self.prob.nn.relu_relaxation_slopes)
+        # optimises the relaxation slopes using gd 
+        if self.config.SIP.SLOPE_OPTIMISATION is True and \
+                self.prob.nn.relu_relaxation_slopes is None:
+            slopes = self.optimise_slopes(self.prob.nn.tail)
+            self.prob.nn.relu_relaxation_slopes = slopes
+            # sets bounds using optimised slopes
+            self._set_bounds(slopes)
+
+        # print('*', torch.mean(self.prob.nn.tail.bounds.upper), torch.mean(self.prob.nn.tail.bounds.lower))
+
+        if self.logger is not None:
+            SIP.logger.info(
+                'Bounds computed, time: {:.3f}, range: {:.3f}, '.format(
+                    timer()-start,
+                    torch.mean(
+                        self.prob.nn.tail.bounds.upper - self.prob.nn.tail.bounds.lower
+                    )
+                )
+            )
+
+    
+    def _set_bounds(self, slopes: tuple[dict]=None, delta_flags: torch.tensor=None):
+        """
+        Sets the bounds.
+        """
         saw_symb_eq_node = False
-        for i in range(self.nn.tail.depth):
-            nodes = self.nn.get_node_by_depth(i)
+        for i in range(self.prob.nn.tail.depth):
+            nodes = self.prob.nn.get_node_by_depth(i)
             for j in nodes:
-                processed_nodes[j.id] = True
-                self.set_ia_bounds(j)
+                if j.bounds.size() > 0 and saw_symb_eq_node is not True:
+                    continue
 
-                if self.config.MEMORY_OPTIMISATION is True:
-                    for k in j.from_node:
-                        cond = np.array([processed_nodes[l.id] for l in k.to_node])
-                        if cond.all() is True:
-                            k.clear_bounds()
+                delta = delta_flags[j.to_node[0]] if delta_flags is not None and j.has_relu_activation() else None
 
+                self.set_ia_bounds(j, slopes=slopes, delta_flags=delta)
+ 
                 if self.is_symb_eq_eligible(j) is not True:
                     continue
 
@@ -73,19 +93,22 @@ class SIP:
                     saw_symb_eq_node = True
                     continue
 
-                self.set_symb_concr_bounds(j)
+                self.set_symb_concr_bounds(j, slopes=slopes) 
 
-        self.nn.tail.bounds = Bounds(
-            torch.ones(self.nn.tail.output_shape) * - math.inf,
-            torch.ones(self.nn.tail.output_shape) * math.inf,
+                # print(j.id, torch.mean(j.bounds.lower), torch.mean(j.bounds.upper))
+
+        self.prob.nn.tail.bounds = Bounds(
+            torch.ones(self.prob.nn.tail.output_shape) * -math.inf,
+            torch.ones(self.prob.nn.tail.output_shape) * math.inf,
         )
-        self.set_symb_concr_bounds(self.nn.tail)
+        self.set_symb_concr_bounds(self.prob.nn.tail, slopes)
 
-        # print(self.nn.tail.bounds.lower)
-
-        if self.logger is not None:
-            SIP.logger.info('Bounds computed, time: {:.3f}, '.format(timer()-start))
-
+        # print(
+            # self.prob.nn.tail.id,
+            # torch.mean(self.prob.nn.tail.bounds.lower[self._get_out_prop_flag(self.prob.nn.tail)]),
+            # torch.mean(self.prob.nn.tail.bounds.upper[self._get_out_prop_flag(self.prob.nn.tail)])
+        # )
+                                                      
 
     def is_symb_eq_eligible(self, node: None) -> bool:
         """
@@ -108,7 +131,7 @@ class SIP:
         return False
 
 
-    def set_ia_bounds(self, node: Node) -> list:
+    def set_ia_bounds(self, node: Node, slopes: tuple[dict]=None, delta_flags: torch.tensor=None) -> list:
         inp = node.from_node[0].bounds
 
         if type(node) in [Relu, BatchNormalization, MaxPool, Slice]:
@@ -137,13 +160,6 @@ class SIP:
                 node.forward(inp.upper, clip='-', add_bias=True)
             upper = node.forward(inp.lower, clip='-', add_bias=False) + \
                 node.forward(inp.upper, clip='+', add_bias=True)
-            # if node.id == 24:
-                # x = node.forward(inp.lower, clip='+', add_bias=False) 
-                # print(';;;', torch.mean(inp.lower), torch.mean(inp.upper))
-                # x = node.forward(inp.upper, clip='-', add_bias=False) 
-                # print(';;;', torch.mean(x))
-                # print(';;;', torch.mean(lower))
-
  
         elif isinstance(node, MatMul):
             lower = node.forward(inp.lower, clip='+') + node.forward(inp.upper, clip='-')
@@ -169,52 +185,106 @@ class SIP:
         ia_bounds = Bounds(
             lower.reshape(node.output_shape), upper.reshape(node.output_shape)
         )
-        node.update_bounds(ia_bounds)
 
-    def set_symb_concr_bounds(self, node: Node) -> Bounds:
-        if node.has_relu_activation():
-            out_flag =  node.to_node[0].get_unstable_flag()
-        elif len(node.to_node) == 0:
-            out_flag = self.prob.spec.get_output_flag(node.output_shape)
-        else:
-            out_flag = None
+        self.update_node_ia_bounds(node, ia_bounds, slopes=slopes, delta_flags=delta_flags)
 
-        stability = node.from_node[0].get_propagation_count()
-        if stability / node.input_size >= self.config.SIP.STABILITY_FLAG_THRESHOLD:
-            in_flag = None
-        else:
-            in_flag = node.from_node[0].get_propagation_flag()
-        
+
+    def update_node_ia_bounds(
+        self,
+        node: None,
+        bounds: Bounds,
+        slopes: tuple[dict]=None,
+        out_flag: torch.tensor=None,
+        delta_flags: torch.tensor=None
+    ):
+        if node.has_relu_activation() and slopes is not None and node.bounds is not None:
+            # relu node with custom slope - leave slope as is but remove from
+            # it newly stable nodes.
+            old_un_flag = node.to_node[0].get_unstable_flag()
+            
+            bounds = Bounds(
+                torch.max(node.bounds.lower, bounds.lower),
+                torch.min(node.bounds.upper, bounds.upper)
+            )
+            if delta_flags is not None:
+                bounds.lower[delta_flags[0]] = 0.0
+                bounds.upper[delta_flags[0]] = 0.0
+
+            new_un_flag = torch.logical_and(
+                bounds.lower[old_un_flag]  < 0, bounds.upper[old_un_flag] > 0
+            )
+
+            slopes[0][node.to_node[0].id] = slopes[0][node.to_node[0].id][new_un_flag]
+            slopes[1][node.to_node[0].id] = slopes[1][node.to_node[0].id][new_un_flag]
+
+        node.update_bounds(bounds, out_flag)
+
+
+    def set_symb_concr_bounds(self, node: Node, slopes: tuple) -> Bounds:
+        in_flag, out_flag = self._get_in_prop_flag(node), self._get_out_prop_flag(node)
         symb_eq = Equation.derive(
             node, 
-            None if out_flag is None else out_flag.flatten(),
-            None if in_flag is None else in_flag.flatten(),
+            None if out_flag is None else out_flag.flatten(), 
+            None if in_flag is None else in_flag.flatten(), 
             self.config
         )
 
-        symb_concr_bounds = Bounds(
-            self.back_substitution(symb_eq, node.from_node[0], 'lower'),
-            self.back_substitution(symb_eq, node.from_node[0], 'upper')
+        lower_bounds = self.back_substitution(
+            symb_eq,
+            node.from_node[0],
+            'lower',
+            None if slopes is None else slopes[0]
         )
+        lower_bounds = torch.max(node.bounds.lower[out_flag], lower_bounds)
+        upper_bounds = self.back_substitution(
+            symb_eq,
+            node.from_node[0],
+            'upper', 
+            None if slopes is None else slopes[1]
+        )
+        upper_bounds = torch.min(node.bounds.upper[out_flag], upper_bounds)
 
-        node.update_bounds(symb_concr_bounds, out_flag)
+        symb_concr_bounds = Bounds(lower_bounds, upper_bounds)
+        self.update_node_symb_concrete_bounds(node, symb_concr_bounds, slopes, out_flag)
 
-    def osip_eligibility(self, layer):
-        if layer.depth == len(self.nodes) - 1:
-            return False
-        if self.config.SIP.OSIP_CONV != OSIPMode.ON:
-            if isinstance(self.nodes[layer.depth+1], Conv2D) \
-            or isinstance(layer, Conv2D):
-                return False
-        if self.config.SIP.OSIP_FC != OSIPMode.ON:
-            if isinstance(self.nodes[layer.depth+1], FullyConnected) \
-            or isinstance(layer, FullyConnected):
-                return False
+
+    def update_node_symb_concrete_bounds(
+        self,
+        node: None,
+        bounds: Bounds,
+        slopes: tuple[dict]=None,
+        out_flag: torch.tensor=None
+    ):
+        if node.has_relu_activation() and slopes is not None and node.bounds is not None:
+            # relu node with custom slope - leave slope as is but remove from
+            # it newly stable nodes.
+            old_un_flag = node.to_node[0].get_unstable_flag() 
+            new_un_flag = out_flag[old_un_flag]
+
+            slopes[0][node.to_node[0].id] = slopes[0][node.to_node[0].id][new_un_flag]
+            slopes[1][node.to_node[0].id] = slopes[1][node.to_node[0].id][new_un_flag]
+
+
+        node.update_bounds(bounds, out_flag)
+
+    def _get_out_prop_flag(self, node: Node):
+        if node.has_relu_activation():
+            return node.to_node[0].get_unstable_flag()
+
+        elif len(node.to_node) == 0:
+            return self.prob.spec.get_output_flag(node.output_shape)
         
-        return True
+        return None 
 
-    def back_substitution(self, eq, node, bound):
-        eqs = self._back_substitution(eq, node, bound)
+    def _get_in_prop_flag(self, node: Node):
+        stability = node.from_node[0].get_propagation_count()
+        if stability / node.input_size >= self.config.SIP.STABILITY_FLAG_THRESHOLD:
+            return  None
+            
+        return node.from_node[0].get_propagation_flag()
+
+    def back_substitution(self, eq: Equation, node: None, bound: str, slopes: dict=None):
+        eqs = self._back_substitution(eq, node, bound, slopes=slopes)
         sum_eq = eqs[0]
         for i in eqs[1:]:
             sum_eq = sum_eq.add(i)
@@ -225,7 +295,7 @@ class SIP:
             bound
         )
 
-    def _back_substitution(self, eq, node, bound):
+    def _back_substitution(self, eq, node, bound, slopes=None):
         if bound not in ['lower', 'upper']:
             raise ValueError("Bound type {bound} not recognised.")
 
@@ -233,7 +303,12 @@ class SIP:
             return  [eq]
 
         elif node.has_relu_activation() or isinstance(node, MaxPool):
-            eq = eq.interval_transpose(node, bound)
+            if slopes is not None and node.to_node[0].id in slopes:
+                node_slopes = slopes[node.to_node[0].id]
+            else:
+                node_slopes = None
+
+            eq = eq.interval_transpose(node, bound, node_slopes)
 
         elif type(node) in [Relu, Flatten]:
             eq = [eq]
@@ -244,7 +319,7 @@ class SIP:
         eqs = []
 
         for i in eq:
-            eqs.extend(self._back_substitution(i, node.from_node[0], bound))
+            eqs.extend(self._back_substitution(i, node.from_node[0], bound, slopes=slopes))
 
         return eqs
 
@@ -349,11 +424,10 @@ class SIP:
 
         return lbounds, ubounds
 
-
     def simplify_formula(self, formula):
         if isinstance(formula, VarVarConstraint):
             coeffs = torch.zeros(
-                (1, self.nn.tail.output_size),
+                (1, self.prob.nn.tail.output_size),
                 dtype=self.config.PRECISION,
                 device=self.config.DEVICE
             )
@@ -368,7 +442,7 @@ class SIP:
                 raise ValueError('Formula sense {formula.sense} not expeted')
             equation = Equation(coeffs, const, self.config)
             diff = self.back_substitution(
-                equation, self.nn.tail, 'lower'
+                equation, self.prob.nn.tail, 'lower'
             )
 
             return formula if diff <= 0 else TrueFormula()
@@ -396,3 +470,57 @@ class SIP:
             return NAryConjFormula(clauses)
 
         return formula
+    
+    def optimise_slopes(self, node: Node):
+        lower_slopes, upper_slopes = {}, {}
+        for _, i in self.prob.nn.node.items():
+            if isinstance(i, Relu) and i.id < node.id:
+                slope = i.get_lower_relaxation_slope()
+                lower_slopes[i.id] = slope[0].detach().clone().requires_grad_(True)
+                upper_slopes[i.id] = slope[1].detach().clone().requires_grad_(True)
+
+        lower_slopes =  self._optimise_slopes(node, 'lower', lower_slopes)
+        upper_slopes =  self._optimise_slopes(node, 'upper', upper_slopes)
+
+        return (lower_slopes, upper_slopes)
+
+
+    def _optimise_slopes(self, node: Node, bound: str, slopes: torch.tensor):
+        in_flag, out_flag = self._get_in_prop_flag(node), self._get_out_prop_flag(node)
+        equation = Equation.derive(
+            node,
+            None if out_flag is None else out_flag.flatten(),
+            None if in_flag is None else in_flag.flatten(),
+            self.config
+        )
+
+        if bound == 'lower':
+            lr, best_slopes, best_mean = -self.config.SIP.GD_LR, None, -math.inf
+        else:
+            lr, best_slopes, best_mean = self.config.SIP.GD_LR, None, math.inf
+
+        for i in range(self.config.SIP.GD_STEPS):
+            bounds = self.back_substitution(
+                equation, node.from_node[0], bound, slopes=slopes
+            ) 
+            bounds = torch.mean(bounds) 
+            bounds.backward()
+
+            if (bound == 'lower' and bounds.item() >= best_mean) or \
+                    (bound == 'upper' and bounds.item() <= best_mean):
+                best_mean = bounds.item()
+                best_slopes = {i: slopes[i].detach().clone() for i in slopes}
+
+            for j in slopes:
+                if slopes[j].grad is not None:
+                    step = lr * (slopes[j].grad.data / torch.mean(slopes[j].grad.data))
+                    if bound == 'upper':
+                        slopes[j].data -=  step + torch.mean(slopes[j])
+                    else:
+                        slopes[j].data += step - torch.mean(slopes[j].data)
+
+                    slopes[j].data = torch.clamp(slopes[j].data, 0, 1)
+
+        self.prob.nn.detach()
+                
+        return best_slopes

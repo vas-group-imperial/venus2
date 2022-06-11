@@ -70,12 +70,12 @@ class Bounds:
         return Bounds(lower, upper)
 
     def detach(self):
-        """
-        Detaches the bounds. 
+        """ 
+        Detaches and clones the bound tensors. 
         """
         if self.lower is not None:
-            self.lower.detach()
+            self.lower = self.lower.detach().clone()
         if self.upper is not None:
-            self.upper.detach()
+            self.upper = self.upper.detach().clone()
 
 

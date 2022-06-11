@@ -10,16 +10,18 @@
 # ************
 
 import traceback
+import torch
+import torch.multiprocessing as mp
 from torch.multiprocessing import Process
-
 from venus.common.logger import get_logger
 from venus.solver.milp_solver import MILPSolver
 from venus.solver.solve_report import SolveReport
 from venus.solver.solve_result import SolveResult
+from venus.verification.pgd import ProjectedGradientDescent
 from timeit import default_timer as timer
 import queue
 
-class VerificationProcess(Process):
+class VerificationProcess:
 
     logger = None
     TIMEOUT = 3600
@@ -57,13 +59,17 @@ class VerificationProcess(Process):
                 # if slv_report.result == SolveResult.SATISFIED:
                 # VerificationProcess.logger.info(f'Verification problem {prob.id} is satisfied from bound analysis.')
                 # else:
-                # slv_report = self.lp_ver(prob)
-                # if slv_report.result == SolveResult.SATISFIED:
-                # VerificationProcess.logger.info(f'Verification problem {prob.id} is satisfied from LP analysis.')
-                # elif slv_report.result == SolveResult.UNSATISFIED:
-                # VerificationProcess.logger.info(f'Verification problem {prob.id} is unsatisfied from LP analysis.')
-                # else:
-                slv_report = self.complete_ver(prob)
+                slv_report = self.lp_ver(prob)
+                if slv_report.result == SolveResult.SAFE:
+                    VerificationProcess.logger.info(
+                        f'Verification problem {prob.id} is satisfied from LP analysis.'
+                    )
+                elif slv_report.result == SolveResult.UNSAFE:
+                    VerificationProcess.logger.info(
+                        f'Verification problem {prob.id} is unsatisfied from LP analysis.'
+                    )
+                else:
+                    slv_report = self.complete_ver(prob)
 
                 VerificationProcess.logger.info(
                     'Subprocess {} '
@@ -78,7 +84,9 @@ class VerificationProcess(Process):
                 self.reporting_queue.put(slv_report)
             except Exception as error:
                 print(traceback.format_exc())
-                VerificationProcess.logger.info(f"Subprocess {self.id} terminated because of {str(error)}.")
+                VerificationProcess.logger.info(
+                    f"Subprocess {self.id} terminated because of {str(error)}."
+                )
                 break
 
 
@@ -104,12 +112,21 @@ class VerificationProcess(Process):
         start = timer()
         slv = MILPSolver(prob, self.config, lp=True) 
         slv_report =  slv.solve()
+
         if slv_report.result == SolveResult.SAFE:
             return SolveReport(SolveResult.SAFE, timer() - start, None)
+
         elif slv_report.result == SolveResult.UNSAFE:
-            nn_out = prob.nn.predict(slv_report.cex)
-            if not prob.spec.is_satisfied(nn_out, nn_out):
+            nn_out = prob.nn.forward(
+                torch.tensor(slv_report.cex, dtype=self.config.PRECISION)
+            )
+            if prob.spec.is_satisfied(nn_out, nn_out) is not True:
                 return SolveReport(SolveResult.UNSAFE, timer() - start, slv_report.cex)
+
+            pgd = ProjectedGradientDescent(self.config)
+            cex = pgd.start(prob)
+            if cex is not None:
+                return SolveReport(SolveResult.UNSAFE, timer() - start, cex)
         
         return SolveReport(SolveResult.UNDECIDED, timer() - start, None)
 

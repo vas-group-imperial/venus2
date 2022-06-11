@@ -38,15 +38,15 @@ class Solver():
     # Whether to use intra-depenency cuts
     INTRA_DEP_CUTS: bool = False
     # Whether to use inter-dependency constraints
-    INTER_DEP_CONSTRS: bool = False
+    INTER_DEP_CONSTRS: bool = True
     # Whether to use intra-dependency constraints
-    INTRA_DEP_CONSTRS: bool = False
+    INTRA_DEP_CONSTRS: bool = True
     # whether to monitor the number of MILP nodes solved and initiate
     # splititng only after BRANCH_THRESHOLD is reached.
     MONITOR_SPLIT: bool = False
     # Number of MILP nodes solved before initiating splitting. Splitting
     # will be initiated only if MONITOR_SPLIT is True.
-    BRANCH_THRESHOLD: int = 500
+    BRANCH_THRESHOLD: int = 300
     # Whether to print gurobi output
     PRINT_GUROBI_OUTPUT: bool = False
     # Gurobi feasibility tolerance
@@ -83,14 +83,20 @@ class Verifier():
     VER_PROC_NUM: int = multiprocessing.cpu_count()
     # console output
     CONSOLE_OUTPUT: bool = True
+    # whether to use lp relaxations
+    LP: bool = True
+    # whether to try verification via PGD
+    PGD: bool = True
+    # whether to try verification via PGD on the LP relaxation
+    PGD_ON_LP: bool = True
     # pgd step size - The epsilon will be divided by this number.
-    PGD_EPS: float = 10
+    PGD_EPS: float = 100
     # pgd number of iterations
-    PGD_NUM_ITER: int = 10
+    PGD_NUM_ITER: int = 100
 
 class Splitter():
     # Maximum  depth for node splitting. 
-    BRANCHING_DEPTH: int = 7
+    BRANCHING_DEPTH: int = 6
     # determinines when the splitting process can idle because there are
     # many unprocessed jobs in the jobs queue
     LARGE_N_OF_UNPROCESSED_JOBS: int = 500
@@ -100,7 +106,7 @@ class Splitter():
     # so that the best split can be chosen exhaustively
     SMALL_N_INPUT_DIMENSIONS: int = 6
     # splitting strategy
-    SPLIT_STRATEGY: SplitStrategy = SplitStrategy.NONE
+    SPLIT_STRATEGY: SplitStrategy = SplitStrategy.NODE
     # the stability ratio weight for computing the difficulty of a problem
     STABILITY_RATIO_WEIGHT: float = 1
     # the value of fixed ratio above which the splitting can stop in any
@@ -121,39 +127,18 @@ class SIP():
         self.OPTIMISE_MEMORY = False
         # formula simplificaton
         self.SIMPLIFY_FORMULA: bool = True
-        # whether to use osip for convolutional layers
-        self.OSIP_CONV = OSIPMode.OFF
-        # number of optimised nodes during osip for convolutional layers
-        self.OSIP_CONV_NODES = 200
-        # whether to use oSIP for fully connected layers
-        self.OSIP_FC = OSIPMode.OFF
-        # number of optimised nodes during oSIP for fully connected
-        self.OSIP_FC_NODES = 3
-        # oSIP timelimit in seconds
-        self.OSIP_TIMELIMIT = 7
+        # whether to use gradient descent optimisation of slopes
+        self.SLOPE_OPTIMISATION: bool = True
+        # gradient descent learning rate for optimising slopes
+        self.GD_LR: float = 0.01
+        # gradient descent steps
+        self.GD_STEPS: int = 10
         # STABILITY FLAG THRESHOLD
         self.STABILITY_FLAG_THRESHOLD = 0
-
-    def is_osip_enabled(self):
-        return self.OSIP_CONV == OSIPMode.ON  or self.OSIP_FC == OSIPMode.ON
-
-    def is_split_osip_enabled(self):
-        return self.OSIP_CONV == OSIPMode.SPLIT  or self.OSIP_FC == OSIPMode.SPLIT
-
-    def is_osip_conv_enabled(self):
-        return self.OSIP_CONV == OSIPMode.ON
-
-    def is_osip_fc_enabled(self, depth=None):
-        return self.OSIP_FC == OSIPMode.ON
 
     def copy(self):
         sip_cf = SIP()
         sip_cf.RELU_APPROXIMATION = self.RELU_APPROXIMATION
-        sip_cf.OSIP_CONV = self.OSIP_CONV
-        sip_cf.OSIP_CONV_NODES = self.OSIP_CONV_NODES
-        sip_cf.OSIP_FC = self.OSIP_FC
-        sip_cf.OSIP_FC_NODES = self.OSIP_FC_NODES
-        sip_cf.OSIP_TIMELIMIT = self.OSIP_TIMELIMIT
 
         return sip_cf
 

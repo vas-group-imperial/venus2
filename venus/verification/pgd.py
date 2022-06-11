@@ -15,13 +15,15 @@ class ProjectedGradientDescent:
     def __init__(self, config):
         self.config = config
 
-    def start(self, prob):
+    def start(self, prob, init_adv: torch.tensor=None):
         """
         PGD (see Madry et al. 2017): https://arxiv.org/pdf/1706.06083.pdf
         
         Arguments:
             prob:
                 Verification Problem.
+            init_adv:
+                Initial candidate adversarial example.
         Returns:
            A tensor for the adversarial example.
         """
@@ -32,8 +34,11 @@ class ProjectedGradientDescent:
         num_iter = self.config.VERIFIER.PGD_NUM_ITER
 
         # Generate a uniformly random tensor within the specification bounds.
-        adv = self.generate_random_adv(prob.spec.input_node.bounds)
-    
+        if init_adv is None:
+            adv = self.generate_random_adv(prob.spec.input_node.bounds)
+        else:
+            adv = init_adv
+
         i = 0
         while i < num_iter:
             adv = self.fast_gradient_signed(
@@ -106,7 +111,7 @@ class ProjectedGradientDescent:
             loss = loss_fn(output, y)
 
         # Compute gradient
-        loss = -loss
+        # loss = -loss
         loss.backward()
 
         # compute perturbation

@@ -42,8 +42,7 @@ class NeuralNetwork:
         self.head = None
         self.tail = None
         self.node = {}
-        self.mean = 0
-        self.std = 1
+        self.relu_relaxation_slopes = None
 
 
     def load(self):
@@ -94,6 +93,8 @@ class NeuralNetwork:
         for i in self.node:
             nn.node[i].from_node = [nn.node[j.id] for j in self.node[i].from_node if isinstance(j, Input) is not True]
             nn.node[i].to_node = [nn.node[j.id] for j in self.node[i].to_node]
+ 
+        nn.relu_relaxation_slopes = self.relu_relaxation_slopes
 
         return nn
 
@@ -134,6 +135,13 @@ class NeuralNetwork:
 
         for _, i in self.node.items():
             del i.output
+
+    def detach(self):
+        """
+        Detaches and clones the bound tensors. 
+        """
+        for _, i in self.node.items():
+            i.bounds.detach()
 
     def predict(self, inp: np.array, mean: float=0, std: float=1):
         """

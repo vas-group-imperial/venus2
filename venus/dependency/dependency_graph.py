@@ -243,7 +243,7 @@ class DependencyGraph:
             None
         """ 
         bounds = n.from_node[0].bounds
-        w = (n.weights[idx1, :], n.weights[idx2, :])
+        w = (n.weights[idx1, :].flatten(), n.weights[idx2, :].flatten())
         b = (n.bias[idx1], n.bias[idx2])
 
         min0, max0 = self._node_intra_dep_helper(w[0], w[1], b[0], b[1], bounds)

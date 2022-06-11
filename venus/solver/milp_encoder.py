@@ -29,7 +29,6 @@ class MILPEncoder:
     def __init__(self, prob: VerificationProblem, config: Config):
         """
         Arguments:
-    
             nn:
                 NeuralNetwork. 
             spec:
@@ -43,13 +42,15 @@ class MILPEncoder:
         if MILPEncoder.logger is None:
             MILPEncoder.logger = get_logger(__name__, config.LOGGER.LOGFILE)
 
-    def encode(self):
+    def encode(self, linear_approx=False):
         """
         Builds a Gurobi Model encoding the  verification problem.
-    
+   
+        Arguments:
+            linear_approx: 
+                whether to use linear approximation for Relu nodes.
         Returns:
-
-            Gurobi Model
+            Gurobi Model.
         """
         start = timer()
 
@@ -59,56 +60,40 @@ class MILPEncoder:
             env.start()
 
             gmodel = Model(env=env)
-            self.add_node_vars(gmodel)
-            self.add_node_constrs(gmodel)
+            self.add_node_vars(gmodel, linear_approx)
+            self.add_node_constrs(gmodel, linear_approx)
+
             self.add_output_constrs(self.prob.nn.tail, gmodel)
-            if self.config.SOLVER.INTRA_DEP_CONSTRS is True or \
-            self.config.SOLVER.INTER_DEP_CONSTRS is True:
+
+            deps_cond = linear_approx is not True and \
+                (
+                    self.config.SOLVER.INTRA_DEP_CONSTRS is True or \
+                    self.config.SOLVER.INTER_DEP_CONSTRS is True
+                )
+            if deps_cond is True:
                 self.add_dep_constrs(gmodel)
 
             gmodel.update()
-            MILPEncoder.logger.info('Encoded verification problem {} into MILP, time: {:.2f}'.format(self.prob.id, timer() - start))
+            MILPEncoder.logger.info(
+                'Encoded verification problem {} into {}, time: {:.2f}'.format(
+                    self.prob.id, 
+                    "LP" if linear_approx is True else "MILP",
+                    timer() - start
+                )
+            )
 
             return gmodel
 
-
-    def lp_encode(self):
-        """
-        constructs the lp encoding of the network
-        """
-
-        gmodel = Model()
-        layers = [self.prob.spec.input_layer] + self.prob.nn.layers
-
-        # Add LP variables
-        for l in layers:
-            self.add_node_vars(l, gmodel)
-        
-        # Add LP constraints
-        for i in range(1,len(layers)):
-            if isinstance(layers[i],Conv2D):
-                preact = self.get_conv_preact(layers[i], layers[i-1].out_vars.reshape(layers[i].input_shape))
-            elif isinstance(layers[i], FullyConnected):
-                preact = self.get_fc_preact(layers[i], layers[i-1].out_vars.flatten())
-            if layers[i].activation == Activations.linear:
-                self.add_linear_constrs(layers[i], preact, gmodel)
-            else:
-                self.add_relu_constrs(layers[i], preact, gmodel, linear_approx=True)
-
-        self.add_output_constrs(layers[-1].out_vars, gmodel)
-        gmodel.update()
-
-        return gmodel
-
-    def add_node_vars(self, gmodel):
+    def add_node_vars(self, gmodel: Model, linear_approx: bool=False):
         """
         Assigns MILP variables for encoding each of the outputs of a given
         node.
 
         Arguments:
-
             gmodel:
                 The gurobi model
+            linear_approx: 
+                whether to use linear approximation for Relu nodes.
         """
         self.add_output_vars(self.prob.spec.input_node, gmodel)
 
@@ -117,7 +102,8 @@ class MILPEncoder:
             for j in nodes:
                 if isinstance(j, Relu):
                     self.add_output_vars(j, gmodel)
-                    self.add_relu_delta_vars(j, gmodel)
+                    if linear_approx is not True:
+                        self.add_relu_delta_vars(j, gmodel)
 
                 elif type(j) in [Flatten, Slice]:
                     j.out_vars = j.forward_numpy(j.from_node[0].out_vars)
@@ -136,8 +122,7 @@ class MILPEncoder:
         Creates a real-valued MILP variable for each of the outputs of a given
         node.
    
-        Arguments:
-            
+        Arguments: 
             node:
                 The node.
             gmodel:
@@ -182,7 +167,7 @@ class MILPEncoder:
             node.delta_vars[i] = gmodel.addVar(vtype=GRB.BINARY)
             node.delta_vars[i].setAttr(GRB.Attr.BranchPriority, node.depth)
 
-    def add_node_constrs(self, gmodel):
+    def add_node_constrs(self, gmodel, linear_approx: bool=False):
         """
         Computes the output constraints of a node given the MILP variables of its
         inputs. It assumes that variables have already been added.
@@ -191,13 +176,14 @@ class MILPEncoder:
 
             gmodel:
                 The gurobi model.
+            linear_approx: 
+                whether to use linear approximation for Relu nodes.
         """
         for i in range(self.prob.nn.tail.depth + 1):
             nodes = self.prob.nn.get_node_by_depth(i)
             for j in nodes:
-                # print(j)
                 if isinstance(j, Relu):
-                    self.add_relu_constrs(j, gmodel)
+                    self.add_relu_constrs(j, gmodel, linear_approx)
 
                 elif type(j) in [Flatten, Concat, Slice]:
                     pass

@@ -39,7 +39,6 @@ class VerificationProblem(object):
         self.stability_ratio = -1
         self.output_range = 0
         self._sip_bounds_computed = False
-        self._osip_bounds_computed = False
 
 
     def bound_analysis(self, delta_flags=None):
@@ -72,21 +71,15 @@ class VerificationProblem(object):
         """
         # check if bounds are already computed
         if delta_flags is None:
-            if self.config.SIP.is_osip_enabled():
-                if self._osip_bounds_computed:
-                    return None
-            else:
-                if self._sip_bounds_computed:
-                    return None
+            if self._sip_bounds_computed:
+                return None
+
         # compute bounds
         sip = SIP(self, self.config, delta_flags)
         sip.set_bounds()
         # flag the computation
         if delta_flags is None:
-            if self.config.SIP.is_osip_enabled():
-                self._osip_bounds_computed = True
-            else:
-                self._sip_bounds_computed = True
+            self._sip_bounds_computed = True
 
         return sip
 
@@ -143,7 +136,7 @@ class VerificationProblem(object):
     def satisfies_spec(self):
         if self.spec.output_formula is None:
             return True
-        if not self._sip_bounds_computed and not self.osip_bounds_computed:
+        if not self._sip_bounds_computed:
             raise Exception('Bounds not computed')
         
         return self.spec.is_satisfied(
@@ -181,12 +174,13 @@ class VerificationProblem(object):
             nodes = self.nn.get_node_by_depth(i)
             for j in nodes:
                 if j.id == nodeid:
+
                     if var_type == 'out':
                         end = start + j.out_vars.size
 
                     elif var_type == 'delta':
                         start += j.out_vars.size
-                        end = start + j.delta_vars.size
+                        end = start + j.get_unstable_count()
 
                     else:
                         raise ValueError(f'Var type {var_type} is not recognised')
@@ -196,6 +190,12 @@ class VerificationProblem(object):
                 else:
                     start += j.get_milp_var_size()
 
+    def clean_vars(self):
+        """
+        Nulls out all MILP variables associate with the verification problem.
+        """
+        self.nn.clean_vars()
+        self.spec.clean_vars()
 
     def to_string(self):
         return self.nn.model_path  + ' against ' + self.spec.to_string()
