@@ -59,9 +59,6 @@ class ONNXParser:
         [tail] = [nodes[i] for i in nodes if len(nodes[i].to_node) == 0]
         self.update_depth(head)
 
-        print('done loading')
-        import sys
-        sys.exit()
 
         return head, tail, nodes
 

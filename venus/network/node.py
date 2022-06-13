@@ -1525,8 +1525,16 @@ class ConvTranspose(ConvBase):
         slices = tuple(
             [
                 slice(0, self.in_ch, 1),
-                slice(self.krn_height - 1, self.out_height + 2 * self.pads[0], self.strides[0]),
-                slice(self.krn_width - 1, self.out_width + 2 * self.pads[1], self.strides[1])
+                slice(
+                    self.krn_height - 1,
+                    self.out_height + 2 * self.pads[0],
+                    self.strides[0]
+                ),
+                slice(
+                    self.krn_width - 1,
+                    self.out_width + 2 * self.pads[1],
+                    self.strides[1]
+                )
             ]
         )
         padded_inp[slices] = inp
@@ -1551,6 +1559,28 @@ class ConvTranspose(ConvBase):
 
         return output
 
+    def transpose(
+        self,
+        inp: torch.tensor,
+        in_flag: torch.tensor,
+        out_flag: torch.tensor
+    ) -> torch.tensor:
+        if out_flag is None:
+            filled_inp = inp
+        else:
+            batch = inp.shape[0]
+            filled_inp = torch.zeros(
+                (batch, self.output_size), dtype=inp.dtype
+            ) 
+            filled_inp[:, out_flag.flatten()] = inp
+            filled_inp = filled_inp.reshape((batch,) + self.output_shape_no_batch())
+
+        if in_flag is None:
+            return self._transpose(filled_inp)
+
+        return self._transpose_partial(filled_inp, in_flag)
+
+
     def _transpose(self, inp: torch.tensor) -> torch.tensor:
         """
         Computes the input to the node given an output.
@@ -1572,8 +1602,7 @@ class ConvTranspose(ConvBase):
     def _transpose_partial(
         self,
         inp: torch.tensor,
-        in_flag: torch.tensor,
-        out_flag: torch.tensor,
+        in_flag: torch.tensor
     ) -> torch.tensor:
         """
         Computes the input to the node given an output.

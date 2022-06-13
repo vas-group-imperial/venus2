@@ -105,21 +105,27 @@ class SubVerifier:
         start = timer()
         
         prob.inc_ver_done = True
+        slv_report = SolveReport(SolveResult.UNDECIDED, 0, None)
 
         # try pgd
         if self.config.VERIFIER.PGD is True and prob.pgd_ver_done is not True:
-            slv_report = self.verify_pgd(prob)
+            subreport = self.verify_pgd(prob)
+            slv_report.result = subreport.result
+            slv_report.cex = subreport.cex
 
         # try bound analysis
         if slv_report.result == SolveResult.UNDECIDED and \
         prob.bounds_ver_done is not True:
-            slv_report = self.verify_bounds(prob)
+            subreport = self.verify_bounds(prob)
+            slv_report.result = subreport.result
 
         # try LP analysis
         if slv_report.result == SolveResult.UNDECIDED and \
         self.config.VERIFIER.LP is True and \
         prob.lp_ver_done is not True:
-            slv_report = self.verify_lp(prob)
+            subreport = self.verify_lp(prob)
+            slv_report.result = subreport.result
+            slv_report.cex = subreport.cex
 
         prob.detach()
         prob.clean_vars()
@@ -165,6 +171,7 @@ class SubVerifier:
         prob.bound_ver_done = True
 
         prob.bound_analysis()
+
         if prob.satisfies_spec():
             SubVerifier.logger.info(
                 f'Verification problem {prob.id} was solved via bound analysis')
@@ -190,6 +197,7 @@ class SubVerifier:
 
         solver = MILPSolver(prob, self.config, lp=True)
         slv_report =  solver.solve()
+
         if slv_report.result == SolveResult.SAFE:
             SubVerifier.logger.info(
                 f'Verification problem {prob.id} was solved via LP')

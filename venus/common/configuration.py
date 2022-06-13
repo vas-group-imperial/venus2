@@ -128,7 +128,7 @@ class SIP():
         # formula simplificaton
         self.SIMPLIFY_FORMULA: bool = True
         # whether to use gradient descent optimisation of slopes
-        self.SLOPE_OPTIMISATION: bool = True
+        self.SLOPE_OPTIMISATION: bool = False
         # gradient descent learning rate for optimising slopes
         self.GD_LR: float = 0.01
         # gradient descent steps

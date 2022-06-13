@@ -97,10 +97,11 @@ class SIP:
 
                 # print(j.id, torch.mean(j.bounds.lower), torch.mean(j.bounds.upper))
 
-        self.prob.nn.tail.bounds = Bounds(
-            torch.ones(self.prob.nn.tail.output_shape) * -math.inf,
-            torch.ones(self.prob.nn.tail.output_shape) * math.inf,
-        )
+        self.set_ia_bounds(self.prob.nn.tail, slopes=slopes)
+        # self.prob.nn.tail.bounds = Bounds(
+            # torch.ones(self.prob.nn.tail.output_shape) * -math.inf,
+            # torch.ones(self.prob.nn.tail.output_shape) * math.inf,
+        # )
         self.set_symb_concr_bounds(self.prob.nn.tail, slopes)
 
         # print(
