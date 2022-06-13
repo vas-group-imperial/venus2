@@ -495,6 +495,12 @@ class Specification:
         else:
             raise Exception("Unexpected type of formula", type(formula))
 
+    def detach(self):
+        """
+        Detaches and clones the bound tensors.
+        """
+        self.input_node.bounds.detach()
+
     def clean_vars(self):
         """
         Nulls out all MILP variables associate with the specification.

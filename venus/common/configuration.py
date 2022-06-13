@@ -43,10 +43,10 @@ class Solver():
     INTRA_DEP_CONSTRS: bool = True
     # whether to monitor the number of MILP nodes solved and initiate
     # splititng only after BRANCH_THRESHOLD is reached.
-    MONITOR_SPLIT: bool = False
+    MONITOR_SPLIT: bool = True
     # Number of MILP nodes solved before initiating splitting. Splitting
     # will be initiated only if MONITOR_SPLIT is True.
-    BRANCH_THRESHOLD: int = 300
+    BRANCH_THRESHOLD: int = 500
     # Whether to print gurobi output
     PRINT_GUROBI_OUTPUT: bool = False
     # Gurobi feasibility tolerance

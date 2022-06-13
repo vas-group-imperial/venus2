@@ -98,13 +98,6 @@ class NeuralNetwork:
 
         return nn
 
-    def detach(self):
-        """
-        Detaches the tensors of the network.
-        """
-        for _, i in self.node.items():
-            i.detach()
-
     def get_node_by_depth(self, depth: int) -> list:
         """
         Finds all nodes of certain depth.

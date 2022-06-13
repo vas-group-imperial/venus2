@@ -2881,7 +2881,7 @@ class Slice(Node):
         """
         Copies the node.
         """
-        return BatchNormalization(
+        return Slice(
             self.from_node,
             self.to_node,
             self.input_shape,
@@ -2953,8 +2953,138 @@ class Slice(Node):
         """
 
         return tuple(
-            len(range(*slices[i].indices(input_shape[i]))) for i in range(len(input_shape))
+            len(range(*slices[i].indices(input_shape[i]))) 
+            for i in range(len(input_shape))
         )
+
+class Unsqueeze(Node):
+    def __init__(
+        self,
+        from_node: list,
+        to_node: list,
+        input_shape: tuple,
+        axes: list,
+        config: Config,
+        depth=0,
+        bounds=Bounds(),
+        id=None
+    ):
+        """
+        Arguments:
+
+            from_node:
+                list of input nodes.
+            to_node:
+                list of output nodes.
+            input_shape:
+                shape of the input tensor to the node.
+            axes:
+                the list of axes
+            config:
+                configuration.
+            depth:
+                the depth of the node.
+            bounds:
+                concrete bounds for the node.
+        """
+        output_shape = Unsqueeze.compute_output_shape(input_shape, axes)
+        super().__init__(
+            from_node,
+            to_node,
+            input_shape,
+            output_shape,
+            config,
+            depth=depth,
+            bounds=bounds,
+            id=id
+        )
+        self.axes = axes
+
+    def copy(self):
+        """
+        Copies the node.
+        """
+        return Unsqueeze(
+            self.from_node,
+            self.to_node,
+            self.input_shape,
+            self.axes,
+            self.config,
+            depth=self.depth,
+            bounds=self.bounds.copy(),
+            id=self.id
+        )
+
+    def get_milp_var_indices(self, var_type: str):
+        """
+        Returns the starting and ending indices of the milp variables encoding
+        the node.
+
+        Arguments:
+            var_type: either 'out' for output variables or 'delta' for binary
+            variables.
+        """
+        raise NotImplementedError('get milp var indices for Unsqueeze')
+
+
+    def forward(self, inp: torch.tensor=None, save_output=False) -> torch.tensor:
+        """
+        Computes the output of the node given an input.
+
+        Arguments:
+            inp:
+                the input.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0].output if inp is None else inp
+
+        output = inp.clone()
+        for i, j in enumerate(self.axes):
+            output = torch.unsqueeze(output, j - i)
+
+        if save_output:
+            self.output = output
+
+        return output
+
+    def forward_numpy(self, inp: np.ndarray) -> np.ndarray:
+        """
+        Computes the output of the node given a numpy input.
+
+        Arguments:
+            inp:
+                the input.
+        Returns: 
+            the output of the node.
+        """
+        output = inp.copy()
+        for i, j in enumerate(self.axes):
+            output = np.expand_dims(output, j - i)
+
+        return output
+
+    @staticmethod
+    def compute_output_shape(input_shape: tuple, axes: list):
+        """
+        Computes the output shape of the node.
+
+        Arguments:
+            in_shape:
+                shape of the input tensor to the node.
+            axes:
+                a list of axes for inserting new dimensions.
+        Returns:
+            tuple of the output shape
+        """
+        temp = np.empty(input_shape)
+        for i, j in enumerate(axes):
+            temp = np.expand_dims(temp, j - i)
+
+        return temp.shape
 
 class Concat(Node):
     def __init__(

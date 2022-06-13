@@ -38,6 +38,10 @@ class VerificationProblem(object):
         self.config = config
         self.stability_ratio = -1
         self.output_range = 0
+        self.bounds_ver_done = False
+        self.inc_ver_done = False
+        self.pgd_ver_done = False
+        self.lp_ver_done = False
         self._sip_bounds_computed = False
 
 
@@ -189,6 +193,13 @@ class VerificationProblem(object):
 
                 else:
                     start += j.get_milp_var_size()
+
+    def detach(self):
+        """
+        Detaches and clones the bound tensors.
+        """
+        self.nn.detach()
+        self.spec.detach()
 
     def clean_vars(self):
         """

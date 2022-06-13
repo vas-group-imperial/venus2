@@ -54,11 +54,14 @@ class ONNXParser:
             else:
                 queue.append(node)
 
-
         nodes = self.simplify(venus_nodes[inp_node.output[0]])
         [head] = [nodes[i] for i in nodes if len(nodes[i].from_node) == 0]
         [tail] = [nodes[i] for i in nodes if len(nodes[i].to_node) == 0]
         self.update_depth(head)
+
+        print('done loading')
+        import sys
+        sys.exit()
 
         return head, tail, nodes
 
@@ -149,7 +152,7 @@ class ONNXParser:
                 vnode = self.parse_cast(node, venus_nodes, init)
 
             elif node.op_type == 'Unsqueeze':
-                vnode = self.parse_unsqueeze(node, venus_nodes, init)
+                vnode = self.parse_unsqueeze(node, input_shape, venus_nodes, init)
 
             elif node.op_type == 'Slice':
                 vnode = self.parse_slice(node, input_shape, venus_nodes, init)
@@ -279,7 +282,9 @@ class ONNXParser:
         )
 
     def parse_sub(self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list) -> Node:
-        if node.input[0] in init or node.input[0] in venus_nodes:
+        if node.input[0] in init or \
+        (node.input[0] in venus_nodes and \
+        isinstance(venus_nodes[node.input[0]], Constant)):
             const0 = self._to_tensor(node.input[0], venus_nodes, init)
             const1 = self._to_tensor(node.input[1], venus_nodes, init)
 
@@ -295,7 +300,8 @@ class ONNXParser:
 
     def parse_add(self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list) -> Node:
         if node.input[0] in init or \
-                (node.input[0] in venus_nodes and isinstance(node.input[0], Constant)):
+        (node.input[0] in venus_nodes and \
+        isinstance(venus_nodes[node.input[0]], Constant)):
             const0 = self._to_tensor(node.input[0], venus_nodes, init)
             const1 = self._to_tensor(node.input[1], venus_nodes, init)
 
@@ -400,14 +406,17 @@ class ONNXParser:
         return Constant([], data.type(dtype), self.config)
 
 
-    def parse_unsqueeze(self, node: NodeProto, venus_nodes: list, init: list) -> Node:
-        data = self._to_tensor(node.input[0], venus_nodes, init)
-
+    def parse_unsqueeze(self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list) -> Node:
         axes = [0]
         attr = self._get_attribute(node, "axes")
         if attr is not None:
             axes = [i for i in attr.ints]
 
+        if node.input[0] in venus_nodes and not isinstance(venus_nodes[node.input[0]], Constant):
+
+            return Unsqueeze([], [], input_shape, axes, self.config)
+
+        data = self._to_tensor(node.input[0], venus_nodes, init)
         for i in axes:
             data = torch.unsqueeze(data, i)
 
@@ -416,7 +425,7 @@ class ONNXParser:
     def parse_slice(self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list) -> Node:    
         starts = self._to_tensor(node.input[1], venus_nodes, init).int()
         ends = self._to_tensor(node.input[2], venus_nodes, init).int()
-        if node.input[3] in venus_nodes:
+        if node.input[3] in venus_nodes or node.input[3] in init:
             axes = self._to_tensor(node.input[3], venus_nodes, init).int()
         else:
             axes = torch.tensor([
@@ -424,7 +433,7 @@ class ONNXParser:
                     len(input_shape) - 1, len(input_shape) - len(starts) - 1, -1
                 )
             ])
-        if node.input[4] in venus_nodes:
+        if node.input[4] in venus_nodes or node.input[4] in init:
             steps = self._to_tensor(node.input[4], venus_nodes, init).int()
         else:
             steps = torch.tensor([1 for i in range(len(starts))])

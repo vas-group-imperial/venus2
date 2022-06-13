@@ -105,7 +105,7 @@ class MILPEncoder:
                     if linear_approx is not True:
                         self.add_relu_delta_vars(j, gmodel)
 
-                elif type(j) in [Flatten, Slice]:
+                elif type(j) in [Flatten, Slice, Unsqueeze]:
                     j.out_vars = j.forward_numpy(j.from_node[0].out_vars)
 
                 elif isinstance(j, Concat):
@@ -185,7 +185,7 @@ class MILPEncoder:
                 if isinstance(j, Relu):
                     self.add_relu_constrs(j, gmodel, linear_approx)
 
-                elif type(j) in [Flatten, Concat, Slice]:
+                elif type(j) in [Flatten, Concat, Slice, Unsqueeze]:
                     pass
 
                 elif type(j) in [Gemm, Conv, ConvTranspose, MatMul, Sub, Add, BatchNormalization]:

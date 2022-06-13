@@ -14,10 +14,10 @@ import queue
 from timeit import default_timer as timer
 
 from venus.verification.verification_problem import VerificationProblem
-from venus.verification.verification_process import VerificationProcess
+from venus.verification.subverifier import SubVerifier
 from venus.verification.verification_report import VerificationReport
 from venus.verification.pgd import ProjectedGradientDescent
-from venus.split.split_process import SplitProcess
+from venus.split.splitter import Splitter
 from venus.split.input_splitter import InputSplitter
 from venus.split.split_strategy import SplitStrategy
 from venus.split.split_report import SplitReport
@@ -32,25 +32,24 @@ from venus.solver.milp_encoder import MILPEncoder
 
 
 def run_split_process(
-        id: int,
         prob: VerificationProblem,
         jobs_queue: mp.Queue,
         reporting_queue: mp.Queue,
         config: Config
 ):
-    proc = SplitProcess(
-        id, prob, jobs_queue, reporting_queue, config
+    proc = Splitter(
+        prob, jobs_queue, reporting_queue, config
     )
     proc.run()
 
-def run_verification_process( 
-        id: int,
+def run_subverifier( 
         jobs_queue: mp.Queue,
         reporting_queue: mp.Queue,
         config: Config
 ):
-    proc = VerificationProcess(
-        id, jobs_queue, reporting_queue, config
+
+    proc = SubVerifier(
+        config, jobs_queue=jobs_queue, reporting_queue=reporting_queue
     )
     proc.run()
 
@@ -71,19 +70,20 @@ class Verifier:
             config:
                 Configuration.
         """
-        self._mp_context = mp.get_context('spawn')
-
         self.prob = VerificationProblem(nn, spec, 0, config)
         self.config = config
 
-        self.reporting_queue = self._mp_context.Manager().Queue()
-        self.jobs_queue = self._mp_context.Manager().Queue()
-        # self.reporting_queue = mp.Manager().Queue()
-        # self.jobs_queue = mp.Manager().Queue()
+        self._mp_context = mp.get_context('spawn')
+        self._manager = self._mp_context.Manager()
+        self.reporting_queue = self._manager.Queue()
+        self.jobs_queue = self._manager.Queue()
+
         if Verifier.logger is None:
             Verifier.logger = get_logger(__name__, config.LOGGER.LOGFILE)
+
         self.split_procs = []
         self.ver_procs = []
+
 
 
     def verify(self):
@@ -91,121 +91,43 @@ class Verifier:
         Verifies a neural network against a specification.
 
         Returns:
-
+            VerificationReport
         """
         Verifier.logger.info(f'Verifying {self.prob.to_string()}')
 
-        if self.config.VERIFIER.COMPLETE == True:
-            # try to solve the problem using the bounds and lp
-            report = self.verify_incomplete()
-            if report.result != SolveResult.UNDECIDED:
-                return report
-    
-            # try milp 
-            ver_report = self.verify_complete()
-        else:
-            ver_report = self.verify_incomplete()
+        start = timer()
+
+        slv_report = SubVerifier(self.config).verify_incomplete(self.prob)
+
+        if slv_report.result != SolveResult.UNDECIDED:
+            ver_report = VerificationReport(
+                slv_report.result, slv_report.cex, slv_report.runtime
+            )
+
+        elif self.config.VERIFIER.COMPLETE is True:
+            if self.config.SOLVER.MONITOR_SPLIT is True:
+                slv_report = SubVerifier(self.config).verify_complete(self.prob)
+                if slv_report.result == SolveResult.BRANCH_THRESHOLD:
+                    # turn off monitor split
+                    self.config.SOLVER.MONITOR_SPLIT = False
+                    # start the splitting and worker processes
+                    self.generate_procs()
+                    # read results
+                    ver_report = self.process_report_queue()
+                    # terminate procs
+                    self.terminate_procs()
+                else:
+                    ver_report = VerificationReport(
+                        slv_report.result, slv_report.cex, slv_report.runtime
+                    )
+
+            ver_report.runtime = timer() - start
 
         Verifier.logger.info('Verification completed')
         Verifier.logger.info(ver_report.to_string())
 
         return ver_report
-
-    def verify_incomplete(self):
-        """
-        Attempts to solve a verification problem using projected gradient
-        descent and symbolic interval propagation.
-
-        Returns:
-            VerificationReport
-        """
-        ver_report = VerificationReport(self.config.LOGGER.LOGFILE)
-        start = timer()
-
-        test_prob = VerificationProblem(self.prob.nn.copy(), self.prob.spec.copy(), 0, self.config)
-        # try pgd
-        if self.config.VERIFIER.PGD is True:
-            pgd = ProjectedGradientDescent(self.config)
-            cex = pgd.start(self.prob)
-            if cex is not None:
-                Verifier.logger.info('Verification problem was solved via PGD')
-                return VerificationReport(SolveResult.UNSAFE, cex, timer() - start)
-
-        Verifier.logger.info('PGD done. Verification problem could not be solved')
-
-        # try bound analysis
-        self.prob.bound_analysis()
-        if self.prob.satisfies_spec():
-            Verifier.logger.info('Verification problem was solved via bound analysis')
-            return VerificationReport(SolveResult.SAFE, None, timer() - start)
-
-        Verifier.logger.info(
-            'Bound analysis done. Verification problem could not be solved'
-        )
-
-        # try LP analysis
-        if self.config.VERIFIER.LP is True:
-            slv = MILPSolver(self.prob, self.config, lp=True)
-            slv_report =  slv.solve()
-            if slv_report.result == SolveResult.SAFE:
-                Verifier.logger.info('Verification problem was solved via LP')
-                return VerificationReport(SolveResult.SAFE, None, timer() - start)   
-
-            elif slv_report.result == SolveResult.UNSAFE:
-                cex =  torch.tensor(
-                    slv_report.cex, dtype=self.config.PRECISION
-                )
-                output = self.prob.nn.forward(cex)
-                if self.prob.spec.is_satisfied(output, output) is not True:
-                    Verifier.logger.info('Verification problem was solved via LP')
-                    return VerificationReport(SolveResult.UNSAFE, cex, timer() - start)
-                elif self.config.VERIFIER.PGD_ON_LP is True:
-                    pgd = ProjectedGradientDescent(self.config)
-                    cex = pgd.start(self.prob, init_adv=cex)
-                    if cex is not None:
-                        Verifier.logger.info(
-                            'Verification problem was solved via PGD on LP'
-                        )
-                        return VerificationReport(
-                            SolveResult.UNSAFE, cex, timer() - start
-                        )
-
-            self.prob.clean_vars()
-     
-        Verifier.logger.info(
-            'LP analysis done. Verification problem could not be solved'
-        )
-        
-        # undecided
-        ver_report.result = SolveResult.UNDECIDED
-        ver_report.runtime = timer() - start
-
-
-        return ver_report
     
-       
-    def verify_complete(self):
-        """
-        Solves a verification problem by solving its MILP representation.
-
-        Arguments:
-            prob: VerificationProblem
-        Returns:
-            VerificationReport
-        """
-        start = timer()
-
-        # start the splitting and worker processes
-        self.generate_procs()
-
-        # read results
-        ver_report = self.process_report_queue()
-        self.terminate_procs()
-
-        ver_report.runtime = timer() - start
-
-        return ver_report
-
     def process_report_queue(self):
         """ 
         Reads results from the reporting queue until encountered an UNSATISFIED
@@ -221,19 +143,21 @@ class Verifier:
                 time_elapsed = timer() - start
                 tmo = self.config.SOLVER.TIME_LIMIT - time_elapsed
                 report = self.reporting_queue.get(timeout=tmo)
+
                 if isinstance(report, SplitReport):
-                    ver_report.process_split_report(report)
+                    self._process_split_report(ver_report, report)
+
                 elif isinstance(report, SolveReport):
-                    ver_report.process_solve_report(report)
-                    if report.result == SolveResult.BRANCH_THRESHOLD:
-                        Verifier.logger.info('Threshold of MIP nodes reached. Turned off monitor split.')
-                        self.config.SOLVER.MONITOR_SPLIT = False
-                        self.generate_procs()
-                    elif report.result == SolveResult.UNSAFE:
+                    self._process_solve_report(ver_report, report)
+
+                    if report.result == SolveResult.UNSAFE:
                         Verifier.logger.info('Read UNSATisfied result. Terminating ...')
                         break
+
                 else:
-                        raise Exception(f'Unexpected report read from reporting queue {type(report)}')
+                        raise Exception(
+                            f'Unexpected report read from queue {type(report)}'
+                        )
 
                 # termination conditions
                 if ver_report.finished_split_procs_count == len(self.split_procs) \
@@ -244,10 +168,12 @@ class Verifier:
                     else:
                         ver_report.result = SolveResult.TIMEOUT
                     break
+
             except queue.Empty:
                 # Timeout occurred
                 ver_report.result = SolveResult.TIMEOUT
                 break
+
             except KeyboardInterrupt:
                 # Received terminating signal
                 ver_report.result = SolveResult.INTERRUPTED
@@ -255,6 +181,30 @@ class Verifier:
                     
         return ver_report
 
+    def _process_split_report(self, ver_report: VerificationReport, split_report: SplitReport):
+        """ 
+        Updates the verification state with a split report. 
+
+        Returns:
+            VerificationReport
+        """
+        ver_report.process_split_report(split_report)
+
+    def _process_solve_report(self, ver_report: VerificationReport, solve_report: SolveReport):
+        """ 
+        Updates the verification state  with a solve report. 
+
+        Returns:
+            VerificationReport
+        """
+        ver_report.process_solve_report(solve_report)
+        if solve_report.result == SolveResult.BRANCH_THRESHOLD:
+            Verifier.logger.info(
+                'Threshold of MIP nodes reached. Turned off monitor split.'
+            )
+            self.config.SOLVER.MONITOR_SPLIT = False
+            self.generate_procs()
+            
 
     def generate_procs(self):
         """
@@ -290,7 +240,6 @@ class Verifier:
                 self._mp_context.Process(
                     target=run_split_process,
                     args=(
-                        i+1,
                         splits[i],
                         self.jobs_queue,
                         self.reporting_queue,
@@ -313,23 +262,22 @@ class Verifier:
         """
         Creates verification  processes.
         """
-        if self.config.SOLVER.MONITOR_SPLIT == True \
-        or self.config.SPLITTER.SPLIT_STRATEGY == SplitStrategy.NONE:
+        if self.config.SOLVER.MONITOR_SPLIT is True or \
+        self.config.SPLITTER.SPLIT_STRATEGY == SplitStrategy.NONE:
             procs_to_gen = range(1)
         else:
             procs_to_gen = range(len(self.ver_procs), self.config.VERIFIER.VER_PROC_NUM)
           
         ver_procs = [
             self._mp_context.Process(
-                    target=run_verification_process,
+                    target=run_subverifier,
                     args=(
-                        i+1,
                         self.jobs_queue,
                         self.reporting_queue,
                         self.config
                     )
             )
-            for i in procs_to_gen
+            for _ in procs_to_gen
         ]
 
         for proc in ver_procs:

@@ -47,7 +47,7 @@ class SIP:
         Sets the bounds.
         """
         start = timer()
-
+        
         # sets bounds using minimum area approximations
         self._set_bounds(slopes=self.prob.nn.relu_relaxation_slopes)
         # optimises the relaxation slopes using gd 
@@ -134,7 +134,7 @@ class SIP:
     def set_ia_bounds(self, node: Node, slopes: tuple[dict]=None, delta_flags: torch.tensor=None) -> list:
         inp = node.from_node[0].bounds
 
-        if type(node) in [Relu, BatchNormalization, MaxPool, Slice]:
+        if type(node) in [Relu, BatchNormalization, MaxPool, Slice, Unsqueeze]:
             lower, upper = node.forward(inp.lower), node.forward(inp.upper)
 
         elif isinstance(node, Flatten):
@@ -310,7 +310,7 @@ class SIP:
 
             eq = eq.interval_transpose(node, bound, node_slopes)
 
-        elif type(node) in [Relu, Flatten]:
+        elif type(node) in [Relu, Flatten, Unsqueeze]:
             eq = [eq]
 
         else:
