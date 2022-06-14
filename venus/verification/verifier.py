@@ -120,6 +120,10 @@ class Verifier:
                     ver_report = VerificationReport(
                         slv_report.result, slv_report.cex, slv_report.runtime
                     )
+            else:
+                ver_report = VerificationReport(
+                    slv_report.result, slv_report.cex, slv_report.runtime
+                )
 
             ver_report.runtime = timer() - start
 

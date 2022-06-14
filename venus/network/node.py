@@ -1246,8 +1246,16 @@ class Conv(ConvBase):
             [
                 slice(0, batch, 1),
                 slice(0, self.out_ch, 1),
-                slice(self.krn_height - 1, padded_height - self.krn_height + 1, self.strides[0]),
-                slice(self.krn_width - 1, padded_width - self.krn_width + 1, self.strides[1])
+                slice(
+                    self.krn_height - 1,
+                    padded_height - self.krn_height + 1, 
+                    self.strides[0]
+                ),
+                slice(
+                    self.krn_width - 1,
+                    padded_width - self.krn_width + 1,
+                    self.strides[1]
+                )
             ]
         )
 
@@ -1512,12 +1520,11 @@ class ConvTranspose(ConvBase):
         """
         assert inp is not None or self.from_node[0].output is not None
         inp = self.from_node[0].output if inp is None else inp
-  
+        padded_height = self.out_height + 2 * self.pads[0] + self.krn_height - 1,
+        padded_width = self.out_width + 2 * self.pads[1] +  self.krn_width - 1
         padded_inp = np.zeros(
             (
-                self.in_ch,
-                self.out_height + 2 * self.pads[0] + self.krn_height - 1,
-                self.out_width + 2 * self.pads[1] +  self.krn_width - 1
+                self.in_ch, padded_height, padded_width
             ), 
             dtype=inp.dtype
         )
@@ -1546,7 +1553,7 @@ class ConvTranspose(ConvBase):
         )
 
         kernel_strech = torch.flip(
-            self.kernels.permute(1, 0, 2, 3), axis=[2, 3]
+            self.kernels.permute(1, 0, 2, 3), dims=[2, 3]
         ).reshape(self.out_ch, -1).numpy()
 
         output = kernel_strech @ inp_strech

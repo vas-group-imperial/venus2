@@ -176,7 +176,7 @@ class SubVerifier:
             SubVerifier.logger.info(
                 f'Verification problem {prob.id} was solved via bound analysis')
      
-            return SolverReport(SolveResult.SAFE, timer() - start, None)
+            return SolveReport(SolveResult.SAFE, timer() - start, None)
 
         SubVerifier.logger.info(
             f'Bound analysis done. Verification problem {prob.id} could not be solved'
