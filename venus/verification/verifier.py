@@ -105,8 +105,12 @@ class Verifier:
             )
 
         elif self.config.VERIFIER.COMPLETE is True:
+            slv_report = SubVerifier(self.config).verify_complete(self.prob)
+            ver_report = VerificationReport(
+                slv_report.result, slv_report.cex, slv_report.runtime
+            )
+
             if self.config.SOLVER.MONITOR_SPLIT is True:
-                slv_report = SubVerifier(self.config).verify_complete(self.prob)
                 if slv_report.result == SolveResult.BRANCH_THRESHOLD:
                     # turn off monitor split
                     self.config.SOLVER.MONITOR_SPLIT = False
@@ -116,14 +120,6 @@ class Verifier:
                     ver_report = self.process_report_queue()
                     # terminate procs
                     self.terminate_procs()
-                else:
-                    ver_report = VerificationReport(
-                        slv_report.result, slv_report.cex, slv_report.runtime
-                    )
-            else:
-                ver_report = VerificationReport(
-                    slv_report.result, slv_report.cex, slv_report.runtime
-                )
 
             ver_report.runtime = timer() - start
 

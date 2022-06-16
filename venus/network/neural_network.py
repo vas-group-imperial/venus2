@@ -42,8 +42,6 @@ class NeuralNetwork:
         self.head = None
         self.tail = None
         self.node = {}
-        self.relu_relaxation_slopes = None
-
 
     def load(self):
         """
@@ -293,3 +291,14 @@ class NeuralNetwork:
         self.clean_outputs()
 
         return output
+
+    def has_custom_relaxation_slope(self):
+        """
+        Returns whether any relu relaxation slope in the network is not the
+        default.
+        """
+        for _, i in self.node.items():
+            if isinstance(i, Relu) and i.has_custom_relaxation_slope():
+                return True
+
+        return False

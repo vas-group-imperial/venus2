@@ -32,21 +32,21 @@ class Solver():
     # Whether to use Gurobi's default cuts   
     DEFAULT_CUTS: bool = False
     # Whether to use ideal cuts
-    IDEAL_CUTS: bool = False
+    IDEAL_CUTS: bool = True
     # Whether to use inter-depenency cuts
-    INTER_DEP_CUTS: bool = False
+    INTER_DEP_CUTS: bool = True
     # Whether to use intra-depenency cuts
     INTRA_DEP_CUTS: bool = False
     # Whether to use inter-dependency constraints
     INTER_DEP_CONSTRS: bool = True
     # Whether to use intra-dependency constraints
-    INTRA_DEP_CONSTRS: bool = True
+    INTRA_DEP_CONSTRS: bool = False
     # whether to monitor the number of MILP nodes solved and initiate
     # splititng only after BRANCH_THRESHOLD is reached.
     MONITOR_SPLIT: bool = True
     # Number of MILP nodes solved before initiating splitting. Splitting
     # will be initiated only if MONITOR_SPLIT is True.
-    BRANCH_THRESHOLD: int = 500
+    BRANCH_THRESHOLD: int = 100
     # Whether to print gurobi output
     PRINT_GUROBI_OUTPUT: bool = False
     # Gurobi feasibility tolerance
@@ -54,9 +54,7 @@ class Solver():
 
     def callback_enabled(self):
         """
-        Returns 
-
-            True iff the MILP SOLVER is using a callback function.
+        Returns True iff the MILP SOLVER is using a callback function.
         """
         if self.IDEAL_CUTS or self.INTER_DEP_CUTS or self.INTRA_DEP_CUTS or self.MONITOR_SPLIT:
             return True
@@ -90,13 +88,13 @@ class Verifier():
     # whether to try verification via PGD on the LP relaxation
     PGD_ON_LP: bool = True
     # pgd step size - The epsilon will be divided by this number.
-    PGD_EPS: float = 100
+    PGD_EPS: float = 10
     # pgd number of iterations
-    PGD_NUM_ITER: int = 100
+    PGD_NUM_ITER: int = 10
 
 class Splitter():
     # Maximum  depth for node splitting. 
-    BRANCHING_DEPTH: int = 6
+    BRANCHING_DEPTH: int = 8
     # determinines when the splitting process can idle because there are
     # many unprocessed jobs in the jobs queue
     LARGE_N_OF_UNPROCESSED_JOBS: int = 500
@@ -128,11 +126,11 @@ class SIP():
         # formula simplificaton
         self.SIMPLIFY_FORMULA: bool = True
         # whether to use gradient descent optimisation of slopes
-        self.SLOPE_OPTIMISATION: bool = False
+        self.SLOPE_OPTIMISATION: bool = True
         # gradient descent learning rate for optimising slopes
         self.GD_LR: float = 0.01
         # gradient descent steps
-        self.GD_STEPS: int = 10
+        self.GD_STEPS: int = 100
         # STABILITY FLAG THRESHOLD
         self.STABILITY_FLAG_THRESHOLD = 0
 

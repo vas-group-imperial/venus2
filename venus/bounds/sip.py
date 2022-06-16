@@ -47,18 +47,22 @@ class SIP:
         Sets the bounds.
         """
         start = timer()
-        
+        # get relaxation slopes
+        if self.prob.nn.has_custom_relaxation_slope() is True:
+            slopes = self.get_lower_relaxation_slopes(gradient=False)
+        else:
+            slopes = None
         # sets bounds using minimum area approximations
-        self._set_bounds(slopes=self.prob.nn.relu_relaxation_slopes)
-        # optimises the relaxation slopes using gd 
+        self._set_bounds(slopes=slopes)
+        # optimises the relaxation slopes using gd
         if self.config.SIP.SLOPE_OPTIMISATION is True and \
-                self.prob.nn.relu_relaxation_slopes is None:
+        self.prob.nn.has_custom_relaxation_slope() is not True:
             slopes = self.optimise_slopes(self.prob.nn.tail)
             self.prob.nn.relu_relaxation_slopes = slopes
             # sets bounds using optimised slopes
             self._set_bounds(slopes)
 
-        # print('*', torch.mean(self.prob.nn.tail.bounds.upper), torch.mean(self.prob.nn.tail.bounds.lower))
+        # print('\n*', torch.mean(self.prob.nn.tail.bounds.upper), torch.mean(self.prob.nn.tail.bounds.lower))
 
         if self.logger is not None:
             SIP.logger.info(
@@ -70,7 +74,6 @@ class SIP:
                 )
             )
 
-    
     def _set_bounds(self, slopes: tuple[dict]=None, delta_flags: torch.tensor=None):
         """
         Sets the bounds.
@@ -97,11 +100,11 @@ class SIP:
 
                 # print(j.id, torch.mean(j.bounds.lower), torch.mean(j.bounds.upper))
 
-        self.set_ia_bounds(self.prob.nn.tail, slopes=slopes)
-        # self.prob.nn.tail.bounds = Bounds(
-            # torch.ones(self.prob.nn.tail.output_shape) * -math.inf,
-            # torch.ones(self.prob.nn.tail.output_shape) * math.inf,
-        # )
+        # self.set_ia_bounds(self.prob.nn.tail, slopes=slopes)
+        self.prob.nn.tail.bounds = Bounds(
+            torch.ones(self.prob.nn.tail.output_shape) * -math.inf,
+            torch.ones(self.prob.nn.tail.output_shape) * math.inf,
+        )
         self.set_symb_concr_bounds(self.prob.nn.tail, slopes)
 
         # print(
@@ -198,7 +201,7 @@ class SIP:
         out_flag: torch.tensor=None,
         delta_flags: torch.tensor=None
     ):
-        if node.has_relu_activation() and slopes is not None and node.bounds is not None:
+        if node.has_relu_activation() and slopes is not None and node.bounds.size() > 0:
             # relu node with custom slope - leave slope as is but remove from
             # it newly stable nodes.
             old_un_flag = node.to_node[0].get_unstable_flag()
@@ -320,7 +323,9 @@ class SIP:
         eqs = []
 
         for i in eq:
-            eqs.extend(self._back_substitution(i, node.from_node[0], bound, slopes=slopes))
+            eqs.extend(
+                self._back_substitution(i, node.from_node[0], bound, slopes=slopes)
+            )
 
         return eqs
 
@@ -473,13 +478,7 @@ class SIP:
         return formula
     
     def optimise_slopes(self, node: Node):
-        lower_slopes, upper_slopes = {}, {}
-        for _, i in self.prob.nn.node.items():
-            if isinstance(i, Relu) and i.id < node.id:
-                slope = i.get_lower_relaxation_slope()
-                lower_slopes[i.id] = slope[0].detach().clone().requires_grad_(True)
-                upper_slopes[i.id] = slope[1].detach().clone().requires_grad_(True)
-
+        lower_slopes, upper_slopes = self.get_lower_relaxation_slopes(gradient=True)
         lower_slopes =  self._optimise_slopes(node, 'lower', lower_slopes)
         upper_slopes =  self._optimise_slopes(node, 'upper', upper_slopes)
 
@@ -495,33 +494,61 @@ class SIP:
             self.config
         )
 
+        best_slopes = slopes
         if bound == 'lower':
-            lr, best_slopes, best_mean = -self.config.SIP.GD_LR, None, -math.inf
+            lr = -self.config.SIP.GD_LR
+            current_mean, best_mean = -math.inf, torch.mean(node.bounds.lower)
         else:
-            lr, best_slopes, best_mean = self.config.SIP.GD_LR, None, math.inf
+            lr = self.config.SIP.GD_LR
+            current_mean, best_mean = math.inf, torch.mean(node.bounds.upper)
+        
 
         for i in range(self.config.SIP.GD_STEPS):
             bounds = self.back_substitution(
                 equation, node.from_node[0], bound, slopes=slopes
             ) 
-            bounds = torch.mean(bounds) 
-            bounds.backward()
+            bounds = torch.mean(bounds)
+            if bound == 'lower' and bounds.item() > current_mean and bounds.item() - current_mean < 10e-3:
+                return slopes
+            elif bound == 'upper' and bounds.item() < current_mean and current_mean - bounds.item() < 10e-3:
+                return slopes
+            current_mean = bounds.item()
 
+            bounds.backward()
+ 
             if (bound == 'lower' and bounds.item() >= best_mean) or \
-                    (bound == 'upper' and bounds.item() <= best_mean):
+            (bound == 'upper' and bounds.item() <= best_mean):
                 best_mean = bounds.item()
                 best_slopes = {i: slopes[i].detach().clone() for i in slopes}
 
             for j in slopes:
                 if slopes[j].grad is not None:
                     step = lr * (slopes[j].grad.data / torch.mean(slopes[j].grad.data))
+
                     if bound == 'upper':
-                        slopes[j].data -=  step + torch.mean(slopes[j])
+                        slopes[j].data -= step + torch.mean(slopes[j].data)
                     else:
                         slopes[j].data += step - torch.mean(slopes[j].data)
 
                     slopes[j].data = torch.clamp(slopes[j].data, 0, 1)
 
+            if (bound == 'lower' and bounds.item() >= best_mean) or \
+            (bound == 'upper' and bounds.item() <= best_mean):
+                best_mean = bounds.item()
+                best_slopes = {i: slopes[i].detach().clone() for i in slopes}
+
         self.prob.nn.detach()
                 
-        return best_slopes
+        return slopes
+
+    def get_lower_relaxation_slopes(self, gradient=False):
+        lower, upper = {}, {}
+        for _, i in self.prob.nn.node.items():
+            if isinstance(i, Relu):
+                slope = i.get_lower_relaxation_slope()
+                if slope[0] is not None:
+                    lower[i.id] = slope[0].detach().clone().requires_grad_(gradient)
+                if slope[1] is not None:
+                    upper[i.id] = slope[1].detach().clone().requires_grad_(gradient)
+
+        return lower, upper

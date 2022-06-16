@@ -19,6 +19,8 @@ from venus.split.input_splitter import InputSplitter
 from venus.split.split_strategy import SplitStrategy
 from venus.verification.verification_problem import VerificationProblem
 from venus.common.utils import ReluApproximation
+from venus.verification.subverifier import SubVerifier
+from venus.solver.solve_result import SolveResult
 from venus.common.logger import get_logger
 
 class Splitter:
@@ -280,10 +282,21 @@ class Splitter:
             None
         """
         for prob in probs:
-            if prob.satisfies_spec(): 
-                Splitter.logger.info(f'Verfication subproblem {prob.id} discarded as it already satisfies the specification')
+            slv_report = SubVerifier(self.config).verify_incomplete(prob)
+            if slv_report.result == SolveResult.SAFE:
+                Splitter.logger.info(
+                    f'Verification subproblem {prob.id} satisfies the specification'
+                )
+
+            elif slv_report.result == SolveResult.UNSAFE:
+                Splitter.logger.info(
+                    f'Verfication subproblem {prob.id} does not satisfy the specification'
+                )
+                self.reporting_queue.put(slv_report)
+
             elif prob.stability_ratio >= self.config.SPLITTER.STABILITY_RATIO_CUTOFF: 
                 self.add_to_job_queue(prob)
+
             else:
                 self.add_to_split_queue(prob)
 

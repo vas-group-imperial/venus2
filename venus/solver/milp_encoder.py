@@ -54,6 +54,8 @@ class MILPEncoder:
         """
         start = timer()
 
+        self.test = True
+
         with gurobipy.Env(empty=True) as env:
             env.setParam('OutputFlag', 0)
             env.setParam('LogToConsole', 0)
@@ -61,6 +63,9 @@ class MILPEncoder:
 
             gmodel = Model(env=env)
             self.add_node_vars(gmodel, linear_approx)
+
+            gmodel.update()
+
             self.add_node_constrs(gmodel, linear_approx)
 
             self.add_output_constrs(self.prob.nn.tail, gmodel)
@@ -74,6 +79,7 @@ class MILPEncoder:
                 self.add_dep_constrs(gmodel)
 
             gmodel.update()
+
             MILPEncoder.logger.info(
                 'Encoded verification problem {} into {}, time: {:.2f}'.format(
                     self.prob.id, 
@@ -100,7 +106,10 @@ class MILPEncoder:
         for i in range(self.prob.nn.tail.depth + 1):
             nodes = self.prob.nn.get_node_by_depth(i)
             for j in nodes:
-                if isinstance(j, Relu):
+                if j.has_relu_activation() is True:
+                    continue
+
+                elif isinstance(j, Relu):
                     self.add_output_vars(j, gmodel)
                     if linear_approx is not True:
                         self.add_relu_delta_vars(j, gmodel)
@@ -131,21 +140,26 @@ class MILPEncoder:
         node.out_vars = np.empty(shape=node.output_shape, dtype=Var)
 
         if node.bounds.size() > 0:
-            for i in node.get_outputs():
-                node.out_vars[i] = gmodel.addVar(
-                    lb=node.bounds.lower[i].item(), ub=node.bounds.upper[i].item()
-                )
+            node.out_vars = np.array(
+                gmodel.addVars(
+                    node.output_size.item(),
+                    lb=node.bounds.lower,
+                    ub=node.bounds.upper
+                ).values()
+            ).reshape(node.output_shape)
         else:
             if isinstance(node, Relu):
-                for i in node.get_outputs():
-                    node.out_vars[i] = gmodel.addVar(
-                        lb=0, ub=GRB.INFINITY
-                    )
+                node.out_vars = np.array(
+                    gmodel.addVars(
+                        (node.output_size,), lb=0, ub=GRB.INFINITY
+                    ).values()
+                ).reshape(node.output_shape)
             else:
-                for i in node.get_outputs():
-                    node.out_vars[i] = gmodel.addVar(
-                        lb=-GRB.INFINITY, ub=GRB.INFINITY
-                    )
+                node.out_vars = np.array(
+                    gmodel.addVars(
+                        (node.output_size,), lb=-GRB.INFINITY, ub=GRB.INFINITY
+                    ).values()
+                ).reshape(node.output_shape)
  
     def add_relu_delta_vars(self, node: Relu, gmodel: Model):
         """
@@ -161,11 +175,15 @@ class MILPEncoder:
                 The gurobi model
         """
         assert(isinstance(node, Relu)), "Cannot add delta variables to non-relu nodes."
-    
-        node.delta_vars = np.empty(shape=node.output_shape, dtype=Var)
-        for i in node.get_unstable_indices():
-            node.delta_vars[i] = gmodel.addVar(vtype=GRB.BINARY)
-            node.delta_vars[i].setAttr(GRB.Attr.BranchPriority, node.depth)
+   
+        node.delta_vars = np.empty(shape=node.output_size, dtype=Var)
+        if node.get_unstable_count() > 0:
+            node.delta_vars[node.get_unstable_flag()] = np.array(
+                gmodel.addVars(
+                    node.get_unstable_count().item(), vtype=GRB.BINARY
+                ).values()
+            )
+        node.delta_vars = node.delta_vars.reshape(node.output_shape)
 
     def add_node_constrs(self, gmodel, linear_approx: bool=False):
         """
@@ -182,14 +200,17 @@ class MILPEncoder:
         for i in range(self.prob.nn.tail.depth + 1):
             nodes = self.prob.nn.get_node_by_depth(i)
             for j in nodes:
-                if isinstance(j, Relu):
+                if j.has_relu_activation() is True:
+                    continue
+                
+                elif isinstance(j, Relu):
                     self.add_relu_constrs(j, gmodel, linear_approx)
 
                 elif type(j) in [Flatten, Concat, Slice, Unsqueeze]:
                     pass
 
                 elif type(j) in [Gemm, Conv, ConvTranspose, MatMul, Sub, Add, BatchNormalization]:
-                    self.add_linear_constrs(j, gmodel)
+                    self.add_affine_constrs(j, gmodel)
 
                 elif isinstance(j, MaxPool):
                     self.add_maxpool_constrs(j, gmodel)
@@ -198,9 +219,9 @@ class MILPEncoder:
                     raise TypeError(f'The MILP encoding of node {j} is not supported')
 
     
-    def add_linear_constrs(self, node: Gemm, gmodel: Model):
+    def add_affine_constrs(self, node: Gemm, gmodel: Model):
         """
-        Computes the output constraints of a linar node given the MILP
+        Computes the output constraints of an affine node given the MILP
         variables of its inputs. It assumes that variables have already been
         added.
     
@@ -210,7 +231,9 @@ class MILPEncoder:
             gmodel:
                 Gurobi model.
         """
-        assert type(node) in [Gemm, Conv, ConvTranspose, MatMul, Sub, Add, BatchNormalization], f"Cannot compute sub onstraints for {type(node)} nodes."
+        if type(node) not in [Gemm, Conv, ConvTranspose, MatMul, Sub, Add, BatchNormalization]:
+            raise TypeError(f"Cannot compute sub onstraints for {type(node)} nodes.")
+
         if type(node) in ['Sub', 'Add'] and node.const is not None:
             output = node.forward_numpy(
                 node.from_node[0].out_vars, node.from_node[1].out_vars
@@ -219,11 +242,8 @@ class MILPEncoder:
         else:
             output = node.forward_numpy(node.from_node[0].out_vars)
 
-
         for i in node.get_outputs():
-            gmodel.addConstr(
-                node.out_vars[i] == output[i]
-            )
+            gmodel.addConstr(node.out_vars[i] == output[i])
  
 
     def add_relu_constrs(self, node: Relu, gmodel: Model, linear_approx=False):
@@ -238,12 +258,26 @@ class MILPEncoder:
                 Gurobi model.
         """
         assert(isinstance(node, Relu)), "Cannot compute relu constraints for non-relu nodes."
-   
-        inp = node.from_node[0].out_vars
-        out = node.out_vars
-        delta = node.delta_vars
-        l = node.from_node[0].bounds.lower
-        u = node.from_node[0].bounds.upper
+         
+        inp = node.from_node[0].forward_numpy(node.from_node[0].from_node[0].out_vars)
+        out, delta = node.out_vars, node.delta_vars
+        l, u = node.from_node[0].bounds.lower, node.from_node[0].bounds.upper
+
+        # if self.test is True:
+            # gmodel.addConstrs(out[i] == inp[i] for i in node.get_active_indices())
+            # gmodel.addConstrs(out[i] == 0 for i in node.get_inactive_indices())
+            # gmodel.addConstrs(inp[i] <= 0 for i in node.get_deproot_indices())
+            # idx = node.get_unstable_indices()
+            # if linear_approx is True:
+                # gmodel.addConstrs(out[i] >= inp[i] for i in idx)
+                # gmodel.addConstrs(out[i] >= 0 for i in idx)
+                # gmodel.addConstrs(out[i] <= (u[i].item() / (u[i].item() - l[i].item())) * (inp[i] - l[i].item()) for i in idx)
+            # else:
+                # gmodel.addConstrs(out[i] >= inp[i] for i in idx)
+                # gmodel.addConstrs(out[i] <= inp[i] - l[i].item() * (1 - delta[i]) for i in idx)
+                # gmodel.addConstrs(out[i] <= u[i].item() * delta[i] for i in idx)
+
+            # return
 
         for i in node.get_outputs():
             if l[i] >= 0 or node.state[i] == ReluState.ACTIVE:
@@ -319,9 +353,9 @@ class MILPEncoder:
             gmodel:
                 The gurobi model.
         """
-        constrs = self.prob.spec.get_output_constrs(gmodel, node.out_vars)
-        for constr in constrs:
-            gmodel.addConstr(constr)
+        constrs = self.prob.spec.get_output_constrs(gmodel, node.out_vars.flatten())
+        for i in constrs:
+            gmodel.addConstr(i)
 
     def add_dep_constrs(self, gmodel):
         """

@@ -883,6 +883,7 @@ class ConvBase(Node):
         return non_pad_idxs
 
 
+    @staticmethod
     def get_non_pad_idx_flag(input_shape: tuple, pads: tuple) -> torch.tensor:
         """
         Computes the index flag of the original input whithin the padded one.
@@ -1323,7 +1324,7 @@ class Conv(ConvBase):
 
     def get_non_pad_idxs(self) -> torch.tensor:
         """
-        Computes the indices of the original input whithin the padded one.
+        Computes the indices of the original input within the padded one.
         """
         return ConvBase.get_non_pad_idxs(
             (self.in_ch, self.in_height, self.in_width), self.pads
@@ -1520,13 +1521,10 @@ class ConvTranspose(ConvBase):
         """
         assert inp is not None or self.from_node[0].output is not None
         inp = self.from_node[0].output if inp is None else inp
-        padded_height = self.out_height + 2 * self.pads[0] + self.krn_height - 1,
+        padded_height = self.out_height + 2 * self.pads[0] + self.krn_height - 1
         padded_width = self.out_width + 2 * self.pads[1] +  self.krn_width - 1
         padded_inp = np.zeros(
-            (
-                self.in_ch, padded_height, padded_width
-            ), 
-            dtype=inp.dtype
+            (self.in_ch, padded_height, padded_width), dtype=inp.dtype
         )
 
         slices = tuple(
@@ -1534,12 +1532,12 @@ class ConvTranspose(ConvBase):
                 slice(0, self.in_ch, 1),
                 slice(
                     self.krn_height - 1,
-                    self.out_height + 2 * self.pads[0],
+                    padded_height - self.krn_height + 1,
                     self.strides[0]
                 ),
                 slice(
                     self.krn_width - 1,
-                    self.out_width + 2 * self.pads[1],
+                    padded_width - self.krn_width + 1,
                     self.strides[1]
                 )
             ]
@@ -1556,9 +1554,10 @@ class ConvTranspose(ConvBase):
             self.kernels.permute(1, 0, 2, 3), dims=[2, 3]
         ).reshape(self.out_ch, -1).numpy()
 
-        output = kernel_strech @ inp_strech
-        output = output[:, self.get_non_pad_idxs()]
-        output = output.flatten() + np.tile(self.bias.numpy(), (self.out_ch_sz, 1)).T.flatten()
+        output = np.tensordot(kernel_strech, inp_strech, axes = ([1], [0]))
+        pad_flag = self.get_non_pad_idx_flag().flatten()
+        output = output.flatten()[pad_flag]
+        output = output + np.tile(self.bias.numpy(), (self.out_ch_sz, 1)).T.flatten()
         output = output.reshape(self.output_shape)
 
         if save_output is True:
@@ -1639,10 +1638,7 @@ class ConvTranspose(ConvBase):
 
         # return output
 
-
-
-
-       
+   
     def get_output_padded_size(self) -> int:
         """
         Computes the size of the padded input.
@@ -1872,12 +1868,10 @@ class Relu(Node):
             id=id
         )
         self.state = np.array(
-            [ReluState.UNSTABLE] * self.output_size,
-            dtype=ReluState,
+            [ReluState.UNSTABLE] * self.output_size, dtype=ReluState
         ).reshape(self.output_shape)
         self.dep_root = np.array(
-            [False] * self.output_size,
-            dtype=bool
+            [False] * self.output_size, dtype=bool
         ).reshape(self.output_shape)
 
         self.active_flag = None
@@ -1890,7 +1884,8 @@ class Relu(Node):
         self.active_count = None
         self.inactive_count = None
         self.propagation_count = None
-        self._lower_relaxation_slope = None
+        self.forced_states = 0
+        self._lower_relaxation_slope = (None, None)
         self._custom_relaxation_slope = False
 
     def copy(self):
@@ -1911,6 +1906,31 @@ class Relu(Node):
 
         return relu
 
+    def set_state(self, unit: tuple, state: ReluState):
+        """
+        Forces the state of a relu unit.
+
+        Arguments:
+            unit:
+                The relu unit.
+            state:
+                The state of the unit.
+        """
+        self.state[unit] = state 
+        self.forced_states += 1
+ 
+    def set_dep_root(self, unit: tuple, root_status: bool):
+        """
+        Forces the dependency root status of a relu unit.
+
+        Arguments:
+            unit:
+                The relu unit.
+            root_status:
+                The dependency root status.
+        """
+        self.dep_root[unit] = root_status
+        
     def forward(self, inp: torch.tensor=None, save_output=None) -> torch.tensor:
         """
         Computes the output of the node given an input.
@@ -1955,7 +1975,6 @@ class Relu(Node):
 
         return output
 
-
     def reset_state_flags(self):
         """
         Resets calculation flags for relu states
@@ -1970,8 +1989,6 @@ class Relu(Node):
         self.active_count = None
         self.inactive_count = None
         self.propagation_count = None
-
-
 
     def is_active(self, index):
         """
@@ -2041,6 +2058,11 @@ class Relu(Node):
         """
         if self.active_flag is None:
             self.active_flag = self.from_node[0].bounds.lower >= 0
+            if self.forced_states > 0:
+                self.active_flag = torch.logical_or(
+                    self.active_flag, 
+                    torch.tensor(self.state == ReluState.ACTIVE)
+                )
 
         return self.active_flag
 
@@ -2059,6 +2081,11 @@ class Relu(Node):
         """
         if self.inactive_flag is None:
             self.inactive_flag = self.from_node[0].bounds.upper <= 0
+            if self.forced_states > 0:
+                self.inactive_flag = torch.logical_or(
+                    self.inactive_flag, 
+                    torch.tensor(self.state == ReluState.INACTIVE)
+                )
 
         return self.inactive_flag
 
@@ -2080,6 +2107,11 @@ class Relu(Node):
                 self.from_node[0].bounds.lower < 0,
                 self.from_node[0].bounds.upper > 0
             )
+            if self.forced_states > 0:
+                self.unstable_flag = torch.logical_or(
+                    self.unstable_flag,
+                    torch.tensor(self.state == ReluState.UNSTABLE)
+                )
 
         return self.unstable_flag
 
@@ -2089,9 +2121,35 @@ class Relu(Node):
         """
         return [
             tuple(j.item() for j in tuple(i))
-            for i in self.get_unstable_flag().reshape(self.output_shape).nonzero()
+            for i in self.get_unstable_flag().nonzero()
         ]
 
+    def get_active_indices(self) -> torch.tensor:
+        """
+        Returns an array of indices of active ReLU units.
+        """
+        return [
+            tuple(j.item() for j in tuple(i))
+            for i in self.get_active_flag().nonzero()
+        ]
+
+    def get_inactive_indices(self) -> torch.tensor:
+        """
+        Returns an array of indices of inactive ReLU units.
+        """
+        return [
+            tuple(j.item() for j in tuple(i))
+            for i in self.get_inactive_flag().nonzero()
+        ]
+
+    def get_deproot_indices(self) -> torch.tensor:
+        """
+        Returns an array of indices of dependency root ReLU units.
+        """
+        idx = self.dep_root.nonzero()
+        return [
+            tuple(i[j].item() for i in idx) for j in range(len(idx[0]))
+        ]
 
     def get_unstable_count(self) -> int:
         """
@@ -2108,8 +2166,7 @@ class Relu(Node):
         """
         if self.stable_flag is None:
             self.stable_flag = torch.logical_or(
-                self.get_active_flag(),
-                self.get_inactive_flag()
+                self.get_active_flag(), self.get_inactive_flag()
             )
 
         return self.stable_flag
@@ -2148,31 +2205,42 @@ class Relu(Node):
         """
         Returns the lower bound relaxation slopes.
         """
-        if self._lower_relaxation_slope is None:
-            self.set_default_lower_relaxation_slope()
+        if self.bounds.size() == 0:
+            return None, None
+        
+        elif self._lower_relaxation_slope == (None, None):
+            self.set_lower_relaxation_slope()
             
         return self._lower_relaxation_slope
 
-    def set_default_lower_relaxation_slope(self) -> torch.Tensor:
+    def set_lower_relaxation_slope(
+        self, lower: torch.tensor=None, upper: torch.tensor=None
+    ) -> torch.Tensor:
         """
         Derives the lower bound relaxation slopes.
         """
-        slope = torch.ones(
-            self.get_unstable_count(), dtype=self.config.PRECISION, device=self.config.DEVICE
-        )
-        lower = self.from_node[0].bounds.lower[self.get_unstable_flag()]
-        upper = self.from_node[0].bounds.upper[self.get_unstable_flag()]
-        idxs = abs(lower) >= upper
-        slope[idxs] = 0.0
+        if lower is not None and upper is not None:
+            self._lower_relaxation_slope = (lower, upper)
+            self._custom_relaxation_slope = True
+        else:
+            slope = torch.ones(
+                self.get_unstable_count(),
+                dtype=self.config.PRECISION,
+                device=self.config.DEVICE
+            )
+            lower = self.from_node[0].bounds.lower[self.get_unstable_flag()]
+            upper = self.from_node[0].bounds.upper[self.get_unstable_flag()]
+            idxs = abs(lower) >= upper
+            slope[idxs] = 0.0
+    
+            self._lower_relaxation_slope = (slope, slope)
 
-        self._lower_relaxation_slope = (slope, slope)
 
-    def set_custom_lower_relaxation_slope(self, lower: torch.tensor, upper: torch.tensor):
+    def has_custom_relaxation_slope(self):
         """
-        Sets custom lower bound relaxation slopes.
+        Returns whether the relaxation slope is not the default.
         """
-        self._lower_relaxation_slope = (lower, upper)
-        self._custom_relaxation_slope = True
+        return self._custom_relaxation_slope
 
     def get_milp_var_indices(self, var_type: str='all'):
         """
@@ -2207,8 +2275,6 @@ class Relu(Node):
             return self._milp_var_indices['delta']
         else:
             raise ValueError('var_type can only be out or delta or all')
-
-
 
 class Reshape(Node):
     def __init__(

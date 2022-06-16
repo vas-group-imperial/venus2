@@ -44,7 +44,7 @@ class Specification:
         if self.output_formula is None:
             return []
    
-        negated_output_formula = NegationFormula(self.output_formula).to_NNF()  
+        negated_output_formula = NegationFormula(self.output_formula).to_NNF()
         return self.get_constrs(negated_output_formula, gmodel, output_vars)
 
     def get_constrs(self, formula, gmodel, output_vars):
@@ -64,21 +64,21 @@ class Specification:
         assert isinstance(formula, Formula), f'Got {type(formula)} instead of Formula'
 
         if isinstance(formula, Constraint):
-            return [self.get_atomic_constr(formula, output_vars)]
+            return [self._get_atomic_constr(formula, output_vars)]
         elif isinstance(formula, ConjFormula):
-            return self.get_conj_formula_constrs(formula, gmodel, output_vars)
+            return self._get_conj_formula_constrs(formula, gmodel, output_vars)
         elif isinstance(formula, NAryConjFormula):
-            return self.get_nary_conj_formula_constrs(formula, gmodel, output_vars)
+            return self._get_nary_conj_formula_constrs(formula, gmodel, output_vars)
         elif isinstance(formula, DisjFormula):
-            return self.get_disj_formula_constrs(formula, gmodel, output_vars)
+            return self._get_disj_formula_constrs(formula, gmodel, output_vars)
         elif isinstance(formula, NAryDisjFormula):
-            return self.get_nary_disj_formula_constrs(formula, gmodel, output_vars)
+            return self._get_nary_disj_formula_constrs(formula, gmodel, output_vars)
         elif isinstance(formula, FalseFormula):
             return [output_vars[0] == GRB.INFINITY]
         else:
             raise Exception(f'Unexpected type {type(formula)} of formula')
 
-    def get_atomic_constr(self, constraint, output_vars):
+    def _get_atomic_constr(self, constraint, output_vars):
         """
         Encodes an atomic constraint into MILP
 
@@ -117,8 +117,7 @@ class Specification:
         else:
             raise Exception("Unexpected type of sense", sense)
 
-
-    def get_conj_formula_constrs(self, formula, gmodel, output_vars):
+    def _get_conj_formula_constrs(self, formula, gmodel, output_vars):
         """
         Encodes a conjunctive formula into MILP
 
@@ -137,7 +136,7 @@ class Specification:
 
         return self.get_constrs(formula.left, gmodel, output_vars) + self.get_constrs(formula.right, gmodel, output_vars)
 
-    def get_nary_conj_formula_constrs(self, formula, gmodel, output_vars):
+    def _get_nary_conj_formula_constrs(self, formula, gmodel, output_vars):
         """
         Encodes an nary conjunctive formula into MILP
 
@@ -159,7 +158,56 @@ class Specification:
 
         return constrs
 
-    def get_disj_formula_constrs(self, formula, gmodel, output_vars):
+    def _get_disj_formula_constrs(self, formula, gmodel, output_vars):
+        """
+        Encodes a disjunctive formula into MILP
+
+        Arguments:
+            formula:
+                disjunctive formula to encode
+            gmodel:
+                gurobi model.
+            output_vars:
+                list of gurobi variables of the output of the network. 
+        Returns:
+            list of gurobi constraints encoding the given formula
+        """
+        assert isinstance(formula, DisjFormula), f'Got {type(formula)} instead of DisjFormula'
+
+        index_flag = self.get_output_flag(output_vars.shape, formula)
+        index_flag_len = torch.sum(index_flag).item()
+
+        split_var = gmodel.addVar(vtype=GRB.BINARY)
+        clause_vars = [
+            np.empty(output_vars.shape, dtype=Var),
+            np.empty(output_vars.shape, dtype=Var)
+        ]
+        clause_vars[0][index_flag] = np.array(
+            gmodel.addVars(len(index_flag_len), lb=-GRB.INFINITY).values()
+        )
+        clause_vars[1][index_flag] = np.array(
+            gmodel.addVars(len(index_flag_len), lb=-GRB.INFINITY).values()
+        )
+
+        constr_sets = [
+            self.get_constrs(formula.left, gmodel, clause_vars[0]),
+            self.get_constrs(formula.right, gmodel, clause_vars[1])
+        ]
+        constrs = []
+
+        for i in [0, 1]:
+            for j in index_flag.nonzero():
+                constrs.append(
+                    (split_var == i) >> (output_vars[j] == clause_vars[i][j])
+                )
+            for disj_constr in constr_sets[i]:
+                constrs.append(
+                    (split_var == i) >> disj_constr
+                )
+
+        return constrs
+
+    def __get_disj_formula_constrs(self, formula, gmodel, output_vars):
         """
         Encodes a disjunctive formula into MILP
 
@@ -176,20 +224,77 @@ class Specification:
         assert isinstance(formula, DisjFormula), f'Got {type(formula)} instead of DisjFormula'
 
         split_var = gmodel.addVar(vtype=GRB.BINARY)
-        clause_vars = [gmodel.addVars(len(output_vars), lb=-GRB.INFINITY), 
-                       gmodel.addVars(len(output_vars), lb=-GRB.INFINITY)]
-        constr_sets = [self.get_constrs(formula.left, gmodel, clause_vars[0]), 
-                       self.get_constrs(formula.right, gmodel, clause_vars[1])]
+        clause_vars = [
+            gmodel.addVars(len(output_vars), lb=-GRB.INFINITY),
+            gmodel.addVars(len(output_vars), lb=-GRB.INFINITY)
+        ]
+        constr_sets = [
+            self.get_constrs(formula.left, gmodel, clause_vars[0]),
+            self.get_constrs(formula.right, gmodel, clause_vars[1])
+        ]
         constrs = []
+
         for i in [0, 1]:
             for j in range(len(output_vars)):
-                constrs.append((split_var == i) >> (output_vars[j] == clause_vars[i][j]))
+                constrs.append(
+                    (split_var == i) >> (output_vars[j] == clause_vars[i][j])
+                )
             for disj_constr in constr_sets[i]:
-                constrs.append((split_var == i) >> disj_constr)
+                constrs.append(
+                    (split_var == i) >> disj_constr
+                )
 
         return constrs
 
-    def get_nary_disj_formula_constrs(self, formula, gmodel, output_vars):
+
+    def _get_nary_disj_formula_constrs(self, formula, gmodel, output_vars):
+        """
+        Encodes an nary disjunctive formula into MILP
+
+        Arguments:
+
+            formula:
+                nary disjunctive formula to encode.
+            gmodel:
+                gurobi model.
+            output_vars:
+                list of gurobi variables of the output of the network.
+        Returns:
+            list of gurobi constraints encoding the given formula
+        """
+        assert isinstance(formula, NAryDisjFormula), f'Got {type(formula)} instead of NAryDisjFormula'
+
+        clauses = formula.clauses
+        split_vars = gmodel.addVars(len(clauses), vtype=GRB.BINARY)
+        constrs = []
+
+        for i, j in enumerate(clauses):
+            index_flag = self.get_output_flag(output_vars.shape, j)
+            index_flag_len = torch.sum(index_flag).item()
+
+            clause_vars = np.empty(output_vars.shape, dtype=Var)
+            clause_vars[index_flag] = np.array(
+                gmodel.addVars(index_flag_len, lb=-GRB.INFINITY).values()
+            )
+
+            constr_sets = self.get_constrs(j, gmodel, clause_vars)
+
+            for k in index_flag.nonzero():
+                constrs.append(
+                    (split_vars[i] == 1) >> (output_vars[k] == clause_vars[k])
+                )
+            for disj_constr in constr_sets:
+                constrs.append(
+                    (split_vars[i] == 1) >> disj_constr
+                )
+
+        # exactly one variable must be true
+        constrs.append(quicksum(split_vars) == 1)
+            
+        return constrs
+
+
+    def __get_nary_disj_formula_constrs(self, formula, gmodel, output_vars):
         """
         Encodes an nary disjunctive formula into MILP
 
@@ -456,18 +561,21 @@ class Specification:
         else:
             raise Exception("Unexpected type of formula", type(formula))
 
-    def get_output_flag(self, output_shape: tuple):
+    def get_output_flag(self, output_shape: tuple, formula: Formula=None):
         """
         Creates a boolean flag of the outputs units that the specification refers to.
 
         Arguments:
             output_shape:
                 the output shape of the network.
+            formula:
+                the formula for which to get the output flag. 
         Returns:
             Boolean flag of whether each output concerns the specification.
         """
+        output_formula = self.output_formula if formula is None else formula
         flag = self._get_output_flag(
-            self.output_formula, torch.zeros(np.prod(output_shape), dtype=torch.bool)
+            output_formula, torch.zeros(np.prod(output_shape), dtype=torch.bool)
         )
 
         return flag.reshape(output_shape)

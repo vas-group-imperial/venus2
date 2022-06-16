@@ -112,9 +112,9 @@ class NodeSplitter(object):
             prob.depth + 1,
             self.config
         )
-        prob1.nn.node[dgnode.nodeid].dep_root[dgnode.index] = True
+        prob1.nn.node[dgnode.nodeid].set_dep_root(dgnode.index, True)
         if self.set_states(prob1, dg, dgnode, ReluState.ACTIVE):
-            prob1.bound_analysis()
+            # prob1.bound_analysis()
             subprobs.append(prob1)
 
 
@@ -125,9 +125,9 @@ class NodeSplitter(object):
             self.config
         )
 
-        prob2.nn.node[dgnode.nodeid].dep_root[dgnode.index] = True
+        prob2.nn.node[dgnode.nodeid].set_dep_root(dgnode.index, True)
         if self.set_states(prob2, dg, dgnode, ReluState.INACTIVE):
-            prob2.bound_analysis()
+            # prob2.bound_analysis()
             subprobs.append(prob2)
 
         return subprobs
@@ -161,7 +161,7 @@ class NodeSplitter(object):
             # self.logger.warning(f'Inconsisteny in setting states, layer {l}, node {n}.')
             return False
         
-        prob.nn.node[dgnode.nodeid].state[dgnode.index] = state
+        prob.nn.node[dgnode.nodeid].set_state(dgnode.index, state)
 
         dgnode.dfs_state[state] = DFSState.VISITING
         for key in dgnode.adjacent:
@@ -188,6 +188,7 @@ class NodeSplitter(object):
             
             None
         """
+        prob.bounds_ver_done = True
         self.subprobs = [prob] + self.subprobs
         # self.logger.info(f'Added subproblem {prob.id} to node subproblems list.')
 

@@ -57,7 +57,7 @@ class SubVerifier:
             try:
                 prob = self.jobs_queue.get(timeout=self.TIMEOUT)
                 SubVerifier.logger.info(
-                    'Verification SubVerifier {} started job {}, '.format(
+                    'SubVerifier {} started job {}, '.format(
                         self.id, prob.id
                     )
                 )
@@ -70,7 +70,6 @@ class SubVerifier:
                         slv_report.runtime
                     )
                 )
-                print(prob.id, self.config.SOLVER.MONITOR_SPLIT)
                 self.reporting_queue.put(slv_report)
 
             except Exception as error:
@@ -213,7 +212,7 @@ class SubVerifier:
                 SubVerifier.logger.info(
                     f'Verification problem {prob.id} was solved via PGD on LP'
                 )
-                return SolveReport(SolverReport.UNSAFE, timer() - start, cex)
+                return SolveReport(SolveResult.UNSAFE, timer() - start, cex)
      
         SubVerifier.logger.info(
             'LP analysis done. Verification problem could not be solved'

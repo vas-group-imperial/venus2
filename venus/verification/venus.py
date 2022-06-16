@@ -132,40 +132,54 @@ class Venus:
                 undecided,
                 timeout
             ))
-            f.write('Total Time:       {:6.4f}\tAvg Time:       {:6.4f}\n'.format(
-                total_time,
-                total_time / len(self.queries)
-            ))
-            f.write('Total SAFE Time:   {:6.4f}\tAvg SAFE Time:   {:6.4f}\n'.format(
-                total_safe_time,
-                avg_safe_time
-            ))
-            f.write('Total UNSAFE Time: {:6.4f}\tAvg UNSAFE Time: {:6.4f}\n\n'.format(
-                total_unsafe_time,
-                avg_unsafe_time
-            ))
+            f.write(
+                'Total Time:       {:6.4f}\tAvg Time:       {:6.4f}\n'.format(
+                    total_time,
+                    total_time / len(self.queries)
+                )
+            )
+            f.write(
+                'Total SAFE Time:   {:6.4f}\tAvg SAFE Time:   {:6.4f}\n'.format(
+                    total_safe_time,
+                    avg_safe_time
+                )
+            )
+            f.write(
+                'Total UNSAFE Time: {:6.4f}\tAvg UNSAFE Time: {:6.4f}\n\n'.format(
+                    total_unsafe_time,
+                    avg_unsafe_time
+                )
+            )
     
         if self.config.VERIFIER.CONSOLE_OUTPUT:
-            print('\nVerified: {}\tSAFE: {}\tUNSAFE: {}\tUndecided: {}\tTimeouts: {}\n'.format(
-                safe + unsafe,
-                safe,
-                unsafe,
-                undecided,
-                timeout
-            ))
-            print('Total Time:       {:6.4f}\tAvg Time:       {:6.4f}'.format(
-                total_time,
-                total_time / len(self.queries)
-            ))
-            print('Total SAFE Time:   {:6.4f}\tAvg SAFE Time:   {:6.4f}'.format(
-                total_safe_time,
-                avg_safe_time
-            ))
-            print('Total UNSAFE Time: {:6.4f}\tAvg UNSAFE Time: {:6.4f}'.format(
-                total_unsafe_time,
-                avg_unsafe_time
-            ))
-
+            print(
+                '\nVerified: {}\tSAFE: {}\tUNSAFE: {}\tUndecided: {}\tTimeouts: {}\n'.format(
+                    safe + unsafe,
+                    safe,
+                    unsafe,
+                    undecided,
+                    timeout
+                )
+            )
+            print(
+                'Total Time:       {:6.4f}\tAvg Time:       {:6.4f}'.format(
+                    total_time,
+                    total_time / len(self.queries)
+                )
+            )
+            print(
+                'Total SAFE Time:   {:6.4f}\tAvg SAFE Time:   {:6.4f}'.format(
+                    total_safe_time,
+                    avg_safe_time
+                )
+            )
+            print(
+                'Total UNSAFE Time: {:6.4f}\tAvg UNSAFE Time: {:6.4f}'.format(
+                    total_unsafe_time,
+                    avg_unsafe_time
+                )
+            )
+    
         return results[0] if len(results) == 1 else results
 
     def verify_query(self, nn, spec):

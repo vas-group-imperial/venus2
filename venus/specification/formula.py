@@ -29,13 +29,11 @@ class Formula:
         """
         return self
 
-
 class BinaryFormula(Formula):
 
     def __init__(self, left, right):
         self.left = left
         self.right = right
-
 
 class ConjFormula(BinaryFormula):
 
@@ -210,10 +208,7 @@ class NegationFormula(UnaryFormula):
         else:
             raise Exception(f'Unexpeced type {type(subformula)} of formula')
 
-
-
 class ENextFormula(UnaryFormula):
-
     """
     Represents formulas of the form  E X^k phi
     """
