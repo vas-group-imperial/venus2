@@ -243,16 +243,16 @@ class Equation():
         scale = torch.tile(node.scale, (in_ch_sz, 1)).T.flatten()
         bias = torch.tile(node.bias, (in_ch_sz, 1)).T.flatten()
         input_mean = torch.tile(node.input_mean, (in_ch_sz, 1)).T.flatten()
-        mean_var = torch.sqrt(node.input_mean + node.epsilon)
-        mean_var = torch.tile(mean_var, (in_ch_sz, 1)).T.flatten()
+        var = torch.sqrt(node.input_var + node.epsilon)
+        var = torch.tile(var, (in_ch_sz, 1)).T.flatten()
 
         if in_flag is None:
-            matrix = (self.matrix * scale) / mean_var
+            matrix = (self.matrix * scale) / var
         else:
             prop_flag = in_flag.flatten()
-            matrix = (self.matrix[:, prop_flag] * scale[prop_flag]) / mean_var[prop_flag]
+            matrix = (self.matrix[:, prop_flag] * scale[prop_flag]) / var[prop_flag]
 
-        batch_const = - input_mean / mean_var * scale + bias
+        batch_const = - input_mean / var * scale + bias
         const = self.matrix @ batch_const + self.const
 
         return Equation(matrix, const, self.config)

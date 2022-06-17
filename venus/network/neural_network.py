@@ -68,7 +68,7 @@ class NeuralNetwork:
         # for i in range(self.tail.depth):
             # nodes = self.get_node_by_depth(i)
             # for j in nodes:
-                # if j.has_relu_activation():
+                # if j.has_relu_activation() or j.has_max_pool():
                     # s += j.output_size
                 # print(i, j, j.output_size)
         # print(s)
@@ -280,12 +280,24 @@ class NeuralNetwork:
         Returns
             The output given inp.
         """
-        self.head.from_node[0].output = inp
+        if isinstance(inp, np.ndarray):
+            numpy = True 
+        elif isinstance(inp, torch.Tensor):
+            numpy = False
+        else:
+            raise TypeError("Only numpy arrays or torch tensors are supported")
 
+        self.head.from_node[0].output = inp
         for i in range(self.tail.depth + 1):
             nodes = self.get_node_by_depth(i)
             for j in nodes:
-                j.forward(save_output=True)
+                if numpy is True:
+                    j.forward_numpy(save_output=True)
+                    print(j, np.mean(j.output))
+                else:
+                    j.forward_torch(save_output=True)
+                    print(j, torch.mean(j.output))
+                    
 
         output = self.tail.output
         self.clean_outputs()

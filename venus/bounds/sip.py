@@ -445,7 +445,7 @@ class SIP:
             elif formula.sense == Formula.Sense.LT:
                 coeffs[0, formula.op1.i], coeffs[0, formula.op2.i] = -1, 1
             else:
-                raise ValueError('Formula sense {formula.sense} not expeted')
+                raise ValueError('Formula sense {formula.sense} not expected')
             equation = Equation(coeffs, const, self.config)
             diff = self.back_substitution(
                 equation, self.prob.nn.tail, 'lower'

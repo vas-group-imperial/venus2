@@ -143,8 +143,8 @@ class MILPEncoder:
             node.out_vars = np.array(
                 gmodel.addVars(
                     node.output_size.item(),
-                    lb=node.bounds.lower,
-                    ub=node.bounds.upper
+                    lb=node.bounds.lower.flatten(),
+                    ub=node.bounds.upper.flatten()
                 ).values()
             ).reshape(node.output_shape)
         else:
@@ -178,7 +178,7 @@ class MILPEncoder:
    
         node.delta_vars = np.empty(shape=node.output_size, dtype=Var)
         if node.get_unstable_count() > 0:
-            node.delta_vars[node.get_unstable_flag()] = np.array(
+            node.delta_vars[node.get_unstable_flag().flatten()] = np.array(
                 gmodel.addVars(
                     node.get_unstable_count().item(), vtype=GRB.BINARY
                 ).values()
@@ -324,22 +324,37 @@ class MILPEncoder:
         assert(isinstance(node, MaxPool)), "Cannot compute maxpool constraints for non-maxpool nodes."
   
         inp = node.from_node[0].out_vars
+        padded_inp = Conv.pad(inp, node.pads).reshape((node.in_ch(), 1) + inp.shape[-2:])
+        im2col = Conv.im2col(
+            padded_inp, node.kernel_shape, node.strides
+        )
 
-        for i in node.get_outputs():
-            kernel, height, width = i[-3:]
-            win = []
-            for kh, kw in itertools.product(
-                    range(node.kernel_shape[0]), range(node.kernel_shape[1])
-            ):
-                index_h = height * node.kernel_shape[0] + kh
-                index_w = width * node.kernel_shape[1] + kw
-                if node.from_node[0].has_batch_dimension():
-                    index = (0, kernel, index_h, index_w)
-                else:
-                    index = (kernel, index_h, index_w)
-                win.append(inp[index])
+        idxs = np.array(node.get_outputs).reshape(
+            node.output_shape_no_batch
+        ).tranpose(2, 0, 1).reshape(np.prod(kernel_shape), node.in_ch())
 
-            gmodel.addConstr(node.out_vars[i] == max_(win))
+        for i, j in itertools.product(
+                range(np.prod(node.kernel_shape), range(node.in_ch()))
+        ):
+            gmodel.addConstr(
+                node.out_vars[idxs[i, j]] == max_(im2col[:, i, j].tolist())
+            )
+
+        # for i in node.get_outputs():
+            # kernel, height, width = i[-3:]
+            # win = []
+            # for kh, kw in itertools.product(
+                    # range(node.kernel_shape[0]), range(node.kernel_shape[1])
+            # ):
+                # index_h = height * node.kernel_shape[0] + kh
+                # index_w = width * node.kernel_shape[1] + kw
+                # if node.from_node[0].has_batch_dimension():
+                    # index = (0, kernel, index_h, index_w)
+                # else:
+                    # index = (kernel, index_h, index_w)
+                # win.append(inp[index])
+
+            # gmodel.addConstr(node.out_vars[i] == max_(win))
 
 
     def add_output_constrs(self, node: Node, gmodel: Model):

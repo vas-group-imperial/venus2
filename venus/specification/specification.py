@@ -74,7 +74,8 @@ class Specification:
         elif isinstance(formula, NAryDisjFormula):
             return self._get_nary_disj_formula_constrs(formula, gmodel, output_vars)
         elif isinstance(formula, FalseFormula):
-            return [output_vars[0] == GRB.INFINITY]
+            return []
+            # return [output_vars[0] == GRB.INFINITY]
         else:
             raise Exception(f'Unexpected type {type(formula)} of formula')
 
@@ -264,11 +265,10 @@ class Specification:
         """
         assert isinstance(formula, NAryDisjFormula), f'Got {type(formula)} instead of NAryDisjFormula'
 
-        clauses = formula.clauses
-        split_vars = gmodel.addVars(len(clauses), vtype=GRB.BINARY)
+        split_vars = gmodel.addVars(len(formula.clauses), vtype=GRB.BINARY)
         constrs = []
 
-        for i, j in enumerate(clauses):
+        for i, j in enumerate(formula.clauses):
             index_flag = self.get_output_flag(output_vars.shape, j)
             index_flag_len = torch.sum(index_flag).item()
 
@@ -584,7 +584,7 @@ class Specification:
         """
         Helper function for get_output_flag.
         """
-        if isinstance(formula, TrueFormula):
+        if isinstance(formula, FalseFormula):
             return flag
         elif isinstance(formula, Constraint):
             if isinstance(formula.op1, StateCoordinate):
