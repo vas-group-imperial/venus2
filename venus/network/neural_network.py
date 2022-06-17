@@ -280,24 +280,11 @@ class NeuralNetwork:
         Returns
             The output given inp.
         """
-        if isinstance(inp, np.ndarray):
-            numpy = True 
-        elif isinstance(inp, torch.Tensor):
-            numpy = False
-        else:
-            raise TypeError("Only numpy arrays or torch tensors are supported")
-
         self.head.from_node[0].output = inp
         for i in range(self.tail.depth + 1):
             nodes = self.get_node_by_depth(i)
             for j in nodes:
-                if numpy is True:
-                    j.forward_numpy(save_output=True)
-                    print(j, np.mean(j.output))
-                else:
-                    j.forward_torch(save_output=True)
-                    print(j, torch.mean(j.output))
-                    
+                j.forward_numpy(save_output=True)     
 
         output = self.tail.output
         self.clean_outputs()

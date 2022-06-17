@@ -32,18 +32,18 @@ class Solver():
     # Whether to use Gurobi's default cuts   
     DEFAULT_CUTS: bool = False
     # Whether to use ideal cuts
-    IDEAL_CUTS: bool = True
+    IDEAL_CUTS: bool = False
     # Whether to use inter-depenency cuts
-    INTER_DEP_CUTS: bool = True
+    INTER_DEP_CUTS: bool = False
     # Whether to use intra-depenency cuts
     INTRA_DEP_CUTS: bool = False
     # Whether to use inter-dependency constraints
-    INTER_DEP_CONSTRS: bool = True
+    INTER_DEP_CONSTRS: bool = False
     # Whether to use intra-dependency constraints
     INTRA_DEP_CONSTRS: bool = False
     # whether to monitor the number of MILP nodes solved and initiate
     # splititng only after BRANCH_THRESHOLD is reached.
-    MONITOR_SPLIT: bool = True
+    MONITOR_SPLIT: bool = False
     # Number of MILP nodes solved before initiating splitting. Splitting
     # will be initiated only if MONITOR_SPLIT is True.
     BRANCH_THRESHOLD: int = 100
@@ -82,11 +82,11 @@ class Verifier():
     # console output
     CONSOLE_OUTPUT: bool = True
     # whether to use lp relaxations
-    LP: bool = True
+    LP: bool = False
     # whether to try verification via PGD
     PGD: bool = True
     # whether to try verification via PGD on the LP relaxation
-    PGD_ON_LP: bool = True
+    PGD_ON_LP: bool = False
     # pgd step size - The epsilon will be divided by this number.
     PGD_EPS: float = 10
     # pgd number of iterations
@@ -104,7 +104,7 @@ class Splitter():
     # so that the best split can be chosen exhaustively
     SMALL_N_INPUT_DIMENSIONS: int = 6
     # splitting strategy
-    SPLIT_STRATEGY: SplitStrategy = SplitStrategy.NODE
+    SPLIT_STRATEGY: SplitStrategy = SplitStrategy.NONE
     # the stability ratio weight for computing the difficulty of a problem
     STABILITY_RATIO_WEIGHT: float = 1
     # the value of fixed ratio above which the splitting can stop in any
@@ -124,9 +124,9 @@ class SIP():
         # optimise memory
         self.OPTIMISE_MEMORY = False
         # formula simplificaton
-        self.SIMPLIFY_FORMULA: bool = True
+        self.SIMPLIFY_FORMULA: bool = False
         # whether to use gradient descent optimisation of slopes
-        self.SLOPE_OPTIMISATION: bool = True
+        self.SLOPE_OPTIMISATION: bool = False
         # gradient descent learning rate for optimising slopes
         self.GD_LR: float = 0.01
         # gradient descent steps
