@@ -284,7 +284,10 @@ class NeuralNetwork:
         for i in range(self.tail.depth + 1):
             nodes = self.get_node_by_depth(i)
             for j in nodes:
-                j.forward_numpy(save_output=True)     
+                j.forward(save_output=True)     
+                print(j, torch.mean(j.output))
+                if isinstance(j, Conv):
+                    print(j.kernels.shape, j.pads, j.strides)
 
         output = self.tail.output
         self.clean_outputs()

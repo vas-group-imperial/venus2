@@ -53,6 +53,7 @@ class ProjectedGradientDescent:
                 prob.spec.input_node.bounds.upper
             )
 
+            print('***')
             output = prob.nn.forward(adv)
             if prob.spec.is_satisfied(output, output) is not True:
                 return adv.detach()

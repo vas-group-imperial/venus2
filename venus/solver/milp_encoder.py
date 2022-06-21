@@ -62,14 +62,13 @@ class MILPEncoder:
             env.start()
 
             gmodel = Model(env=env)
+
             self.add_node_vars(gmodel, linear_approx)
 
             gmodel.update()
 
             self.add_node_constrs(gmodel, linear_approx)
-
             self.add_output_constrs(self.prob.nn.tail, gmodel)
-
             deps_cond = linear_approx is not True and \
                 (
                     self.config.SOLVER.INTRA_DEP_CONSTRS is True or \
@@ -115,10 +114,10 @@ class MILPEncoder:
                         self.add_relu_delta_vars(j, gmodel)
 
                 elif type(j) in [Flatten, Slice, Unsqueeze]:
-                    j.out_vars = j.forward_numpy(j.from_node[0].out_vars)
+                    j.out_vars = j.forward(j.from_node[0].out_vars)
 
                 elif isinstance(j, Concat):
-                    j.out_vars = j.forward_numpy([k.out_vars for k in j.from_node])
+                    j.out_vars = j.forward([k.out_vars for k in j.from_node])
 
                 elif type(j) in [Gemm, MatMul, Conv, ConvTranspose, Sub, BatchNormalization, MaxPool]:
                     self.add_output_vars(j, gmodel)
@@ -137,8 +136,6 @@ class MILPEncoder:
             gmodel:
                 The gurobi model
         """ 
-        node.out_vars = np.empty(shape=node.output_shape, dtype=Var)
-
         if node.bounds.size() > 0:
             node.out_vars = np.array(
                 gmodel.addVars(
@@ -235,12 +232,12 @@ class MILPEncoder:
             raise TypeError(f"Cannot compute sub onstraints for {type(node)} nodes.")
 
         if type(node) in ['Sub', 'Add'] and node.const is not None:
-            output = node.forward_numpy(
+            output = node.forward(
                 node.from_node[0].out_vars, node.from_node[1].out_vars
             )
  
         else:
-            output = node.forward_numpy(node.from_node[0].out_vars)
+            output = node.forward(node.from_node[0].out_vars)
 
         for i in node.get_outputs():
             gmodel.addConstr(node.out_vars[i] == output[i])
@@ -259,7 +256,7 @@ class MILPEncoder:
         """
         assert(isinstance(node, Relu)), "Cannot compute relu constraints for non-relu nodes."
          
-        inp = node.from_node[0].forward_numpy(node.from_node[0].from_node[0].out_vars)
+        inp = node.from_node[0].forward(node.from_node[0].from_node[0].out_vars)
         out, delta = node.out_vars, node.delta_vars
         l, u = node.from_node[0].bounds.lower, node.from_node[0].bounds.upper
 
@@ -329,15 +326,13 @@ class MILPEncoder:
             padded_inp, node.kernel_shape, node.strides
         )
 
-        idxs = np.array(node.get_outputs).reshape(
-            node.output_shape_no_batch
-        ).tranpose(2, 0, 1).reshape(np.prod(kernel_shape), node.in_ch())
+        idxs = np.arange(node.output_size).reshape(
+            node.output_shape_no_batch()
+        ).transpose(1, 2, 0).reshape(-1, node.in_ch())
 
-        for i, j in itertools.product(
-                range(np.prod(node.kernel_shape), range(node.in_ch()))
-        ):
+        for i in itertools.product(*[range(j) for j in idxs.shape]):
             gmodel.addConstr(
-                node.out_vars[idxs[i, j]] == max_(im2col[:, i, j].tolist())
+                np.take(node.out_vars, idxs[i]) == max_(im2col[:, i[0], i[1]].tolist())
             )
 
         # for i in node.get_outputs():

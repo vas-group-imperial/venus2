@@ -181,9 +181,6 @@ class Equation():
         elif isinstance(node, MatMul):
             tr_eq = self._transpose_linear(node, in_flag, out_flag)
 
-        elif isinstance(node, BatchNormalization):
-            tr_eq = self._transpose_batch_normalization(node, in_flag, out_flag)
-
         elif isinstance(node, Slice):
             tr_eq = self._transpose_slice(node)
 
@@ -237,26 +234,6 @@ class Equation():
 
         return Equation(matrix, self.const, self.config)
         
-    def _transpose_batch_normalization(self, node: Node, in_flag: torch.tensor, out_flag: torch.tensor):
-        in_ch_sz = node.in_ch_sz()
-
-        scale = torch.tile(node.scale, (in_ch_sz, 1)).T.flatten()
-        bias = torch.tile(node.bias, (in_ch_sz, 1)).T.flatten()
-        input_mean = torch.tile(node.input_mean, (in_ch_sz, 1)).T.flatten()
-        var = torch.sqrt(node.input_var + node.epsilon)
-        var = torch.tile(var, (in_ch_sz, 1)).T.flatten()
-
-        if in_flag is None:
-            matrix = (self.matrix * scale) / var
-        else:
-            prop_flag = in_flag.flatten()
-            matrix = (self.matrix[:, prop_flag] * scale[prop_flag]) / var[prop_flag]
-
-        batch_const = - input_mean / var * scale + bias
-        const = self.matrix @ batch_const + self.const
-
-        return Equation(matrix, const, self.config)
-
     def _transpose_slice(self, node: Node):
         matrix = torch.zeros(
             (self.matrix.size, node.input_size),
@@ -296,6 +273,13 @@ class Equation():
             return [
                 self.interval_relu_transpose(
                     node, bound, in_flag, out_flag, slopes
+                )
+            ]
+
+        elif isinstance(node, BatchNormalization):
+            return [
+                self._interval_batch_normalization_transpose(
+                    node, bound, in_flag, out_flag
                 )
             ]
 
@@ -419,6 +403,37 @@ class Equation():
             upper_const[idxs]  -= upper_slope[idxs] *  lower[idxs]
 
         return (lower_slope, upper_slope), (lower_const, upper_const)
+
+
+    def _interval_batch_normalization_transpose(
+        self,
+        node: Node,
+        in_flag: torch.tensor,
+        out_flag: torch.tensor
+    ):
+        in_ch_sz = node.in_ch_sz()
+
+        scale = torch.tile(node.scale, (in_ch_sz, 1)).T.flatten()
+        bias = torch.tile(node.bias, (in_ch_sz, 1)).T.flatten()
+        input_mean = torch.tile(node.input_mean, (in_ch_sz, 1)).T.flatten()
+        var = torch.sqrt(node.input_var + node.epsilon)
+        var = torch.tile(var, (in_ch_sz, 1)).T.flatten()
+
+        scale_var = scale / var
+        idxs = scale_var < 0
+        scale_var[idxs] = -scale_var[idxs]
+
+        if in_flag is None:
+            matrix = self.matrix * scale_var
+        else:
+            prop_flag = in_flag.flatten()
+            matrix = self.matrix[:, prop_flag] * scale_var[prop_flag]
+
+        batch_const = - input_mean / var * scale + bias
+        const = self.matrix @ batch_const + self.const
+
+        return Equation(matrix, const, self.config)
+
 
     def __get_relu_relaxation(self, node: Node) -> tuple:
         lower_slope = torch.ones(

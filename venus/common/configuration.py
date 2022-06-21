@@ -119,10 +119,10 @@ class Splitter():
 class SIP():
 
     def __init__(self):
+        # optimise memory
+        self.SYMBOLIC_BOUNDS = True
         # relu approximation
         self.RELU_APPROXIMATION = ReluApproximation.MIN_AREA
-        # optimise memory
-        self.OPTIMISE_MEMORY = False
         # formula simplificaton
         self.SIMPLIFY_FORMULA: bool = False
         # whether to use gradient descent optimisation of slopes

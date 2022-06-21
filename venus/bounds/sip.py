@@ -85,11 +85,15 @@ class SIP:
                 if j.bounds.size() > 0 and saw_symb_eq_node is not True:
                     continue
 
-                delta = delta_flags[j.to_node[0]] if delta_flags is not None and j.has_relu_activation() else None
+                if delta_flags is not None and j.has_relu_activation() is True:
+                    delta = delta_flags[j.to_node[0]] 
+                else:
+                    delta = None
 
                 self.set_ia_bounds(j, slopes=slopes, delta_flags=delta)
  
-                if self.is_symb_eq_eligible(j) is not True:
+                if self.is_symb_eq_eligible(j) is not True or 
+                self.config.SIP.SYMBOLIC_BOUNDS is not True:
                     continue
 
                 if saw_symb_eq_node is not True:
@@ -100,12 +104,13 @@ class SIP:
 
                 # print(j.id, torch.mean(j.bounds.lower), torch.mean(j.bounds.upper))
 
-        # self.set_ia_bounds(self.prob.nn.tail, slopes=slopes)
-        self.prob.nn.tail.bounds = Bounds(
-            torch.ones(self.prob.nn.tail.output_shape) * -math.inf,
-            torch.ones(self.prob.nn.tail.output_shape) * math.inf,
-        )
-        self.set_symb_concr_bounds(self.prob.nn.tail, slopes)
+        self.set_ia_bounds(self.prob.nn.tail, slopes=slopes)
+        # self.prob.nn.tail.bounds = Bounds(
+            # torch.ones(self.prob.nn.tail.output_shape) * -math.inf,
+            # torch.ones(self.prob.nn.tail.output_shape) * math.inf,
+        # )
+        if self.config.SIP.SYMBOLIC_BOUNDS is True:
+            self.set_symb_concr_bounds(self.prob.nn.tail, slopes)
 
         # print(
             # self.prob.nn.tail.id,
@@ -139,7 +144,8 @@ class SIP:
         inp = node.from_node[0].bounds
 
         if type(node) in [Relu, BatchNormalization, MaxPool, Slice, Unsqueeze]:
-            lower, upper = node.forward(inp.lower), node.forward(inp.upper)
+            f_l, f_u = node.forward(inp.lower), node.forward(inp.upper)
+            lower, upper = torch.min(f_l, f_u), torch.max(f_l, f_u)
 
         elif isinstance(node, Flatten):
             lower, upper = inp.lower, inp.upper
