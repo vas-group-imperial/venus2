@@ -1,5 +1,5 @@
 # ************
-# File: config.py
+    # File: config.py
 # Top contributors (to current version): 
 # 	Panagiotis Kouvaros (panagiotis.kouvaros@gmail.com)
 # This file is part of the Venus project.
@@ -32,25 +32,23 @@ class Solver():
     # Whether to use Gurobi's default cuts   
     DEFAULT_CUTS: bool = False
     # Whether to use ideal cuts
-    IDEAL_CUTS: bool = False
+    IDEAL_CUTS: bool = True
     # Whether to use inter-depenency cuts
-    INTER_DEP_CUTS: bool = False
+    INTER_DEP_CUTS: bool = True
     # Whether to use intra-depenency cuts
     INTRA_DEP_CUTS: bool = False
     # Whether to use inter-dependency constraints
-    INTER_DEP_CONSTRS: bool = False
+    INTER_DEP_CONSTRS: bool = True
     # Whether to use intra-dependency constraints
     INTRA_DEP_CONSTRS: bool = False
     # whether to monitor the number of MILP nodes solved and initiate
     # splititng only after BRANCH_THRESHOLD is reached.
-    MONITOR_SPLIT: bool = False
+    MONITOR_SPLIT: bool = True
     # Number of MILP nodes solved before initiating splitting. Splitting
     # will be initiated only if MONITOR_SPLIT is True.
     BRANCH_THRESHOLD: int = 100
     # Whether to print gurobi output
     PRINT_GUROBI_OUTPUT: bool = False
-    # Gurobi feasibility tolerance
-    FEASIBILITY_TOL: float = 10e-6
 
     def callback_enabled(self):
         """
@@ -82,15 +80,15 @@ class Verifier():
     # console output
     CONSOLE_OUTPUT: bool = True
     # whether to use lp relaxations
-    LP: bool = False
+    LP: bool = True
     # whether to try verification via PGD
     PGD: bool = True
     # whether to try verification via PGD on the LP relaxation
-    PGD_ON_LP: bool = False
+    PGD_ON_LP: bool = True
     # pgd step size - The epsilon will be divided by this number.
-    PGD_EPS: float = 10
+    PGD_EPS: float = 1
     # pgd number of iterations
-    PGD_NUM_ITER: int = 10
+    PGD_NUM_ITER: int = 100
 
 class Splitter():
     # Maximum  depth for node splitting. 
@@ -104,7 +102,7 @@ class Splitter():
     # so that the best split can be chosen exhaustively
     SMALL_N_INPUT_DIMENSIONS: int = 6
     # splitting strategy
-    SPLIT_STRATEGY: SplitStrategy = SplitStrategy.NONE
+    SPLIT_STRATEGY: SplitStrategy = SplitStrategy.NODE
     # the stability ratio weight for computing the difficulty of a problem
     STABILITY_RATIO_WEIGHT: float = 1
     # the value of fixed ratio above which the splitting can stop in any
@@ -119,8 +117,10 @@ class Splitter():
 class SIP():
 
     def __init__(self):
-        # optimise memory
-        self.SYMBOLIC_BOUNDS = True
+        # one step symbolic bounds
+        self.ONE_STEP_SYMBOLIC = True
+        # symbolic bounds using back-substitution
+        self.SYMBOLIC = True
         # relu approximation
         self.RELU_APPROXIMATION = ReluApproximation.MIN_AREA
         # formula simplificaton

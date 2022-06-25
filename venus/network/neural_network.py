@@ -92,8 +92,6 @@ class NeuralNetwork:
             nn.node[i].from_node = [nn.node[j.id] for j in self.node[i].from_node if isinstance(j, Input) is not True]
             nn.node[i].to_node = [nn.node[j.id] for j in self.node[i].to_node]
  
-        nn.relu_relaxation_slopes = self.relu_relaxation_slopes
-
         return nn
 
     def get_node_by_depth(self, depth: int) -> list:
@@ -285,9 +283,6 @@ class NeuralNetwork:
             nodes = self.get_node_by_depth(i)
             for j in nodes:
                 j.forward(save_output=True)     
-                print(j, torch.mean(j.output))
-                if isinstance(j, Conv):
-                    print(j.kernels.shape, j.pads, j.strides)
 
         output = self.tail.output
         self.clean_outputs()

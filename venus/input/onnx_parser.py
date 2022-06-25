@@ -22,7 +22,7 @@ class ONNXParser:
     SUPPORTED_NODES = ['Flatten', 'Shape', 'Constant', 'Concat', 'Unsqueeze',
                        'Gather', 'Relu', 'Gemm', 'Conv', 'Transpose', 'MatMul',
                        'Add', 'Div', 'Sub', 'BatchNormalization', 'Slice',
-                       'MaxPool','ConvTranspose', 'Cast']
+                       'MaxPool','ConvTranspose', 'Cast', 'Reshape']
 
     def __init__(self, config: Config):
         self.config = config
@@ -96,7 +96,8 @@ class ONNXParser:
                 i.dim_value if i.dim_value != 0 else 1
                 for i in inp.type.tensor_type.shape.dim
             )
-            # input_shape = (1, 1, 224, 224)
+            if len(input_shape) == 2:
+                input_shape = (input_shape[1],)
         else:
             input_shape = venus_nodes[node.input[0]].output_shape
         # process node
@@ -141,6 +142,9 @@ class ONNXParser:
 
             elif node.op_type == 'Shape':
                 vnode = self.parse_shape(node, input_shape)
+
+            elif node.op_type == 'Reshape':
+                vnode = self.parse_reshape(node, input_shape, venus_nodes, init)
 
             elif node.op_type == 'Gather':
                 vnode = self.parse_gather(node, venus_nodes, init)
@@ -349,7 +353,7 @@ class ONNXParser:
 
         return Constant([], const, self.config)
 
-    def parse_shape(self, node: NodeProto, input_shape:tuple) -> Node:
+    def parse_shape(self, node: NodeProto, input_shape: tuple) -> Node:
         start = 0
         attr = self._get_attribute(node, "start")
         if attr is not None:
@@ -363,6 +367,12 @@ class ONNXParser:
         shape = torch.tensor(input_shape[start: end], dtype=torch.int32)
 
         return Constant([], shape, self.config)
+
+    def parse_reshape(self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list):
+        new_shape = self._to_tensor(node.input[1], venus_nodes, init)
+        new_shape = tuple(i.int().item() for i in new_shape)
+
+        return Reshape([], [], input_shape, new_shape, self.config)
 
     def parse_gather(self, node: NodeProto, venus_nodes: list, init: list) -> Node:
         data = self._to_tensor(node.input[0], venus_nodes, init)
@@ -545,21 +555,6 @@ class ONNXParser:
         return None
 
 
-    # def process_reshape(self, model, node, from_node, input_shape, depth):
-        # output_shape = [t for t in model.graph.initializer if t.name == node.input[1]] 
-        # [shape_node] = [c for c in self.consts if c.output[0] == node.input[1]]
-        # output_shape = shape_node.attribute
-        # output_shape =  np.squeeze(onnx.numpy_helper.to_array(output_shape[0].t)).copy()  
-        # output_shape =  (output_shape[2], output_shape[3], output_shape[1])
-
-        # return Reshape(
-            # from_node,
-            # [],
-            # input_shape,
-            # output_shape,
-            # depth,
-            # self.config
-        # )
 
     # def process_transpose(node, input_shape):
         # for att in node.attribute:

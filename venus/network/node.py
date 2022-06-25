@@ -271,9 +271,19 @@ class Node:
 
         return True
 
+
+    def input_shape_no_batch(self) -> int:
+        """
+        Returns the input shape without the batch dimension. 
+        """
+        if self.has_batch_dimension():
+            return self.input_shape[1:]
+
+        return self.input_shape
+
     def output_shape_no_batch(self) -> int:
         """
-        Return the output shape without the batch dimension. 
+        Returns the output shape without the batch dimension. 
         """
         if self.has_batch_dimension():
             return self.output_shape[1:]
@@ -2500,8 +2510,8 @@ class Reshape(Node):
             input_shape,
             output_shape,
             config,
-            depth=self.depth,
-            bounds=self.bounds,
+            depth=depth,
+            bounds=bounds,
             id=id
         )
 
@@ -2519,6 +2529,29 @@ class Reshape(Node):
             bounds=self.bounds.copy(),
             id=self.id
         )
+
+    def forward(self, inp: torch.Tensor=None, save_output=None) -> torch.Tensor:
+        """
+        Computes the output of the node given an input.
+
+        Arguments:
+            inp:
+                the input.
+            save_output:
+                Whether to save the output in the node.
+        Returns:
+            the output of the node.
+        """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0].output if inp is None else inp
+
+
+        output = inp.reshape(self.output_shape)
+
+        if save_output is True:
+            self.output = output
+
+        return output
 
     def get_milp_var_indices(self, var_type: str):
         """
@@ -2622,10 +2655,10 @@ class Flatten(Node):
         assert inp is not None or self.from_node[0].output is not None
         inp = self.from_node[0].output if inp is None else inp
         
-        if isinstance(inp1, torch.Tensor):
+        if isinstance(inp, torch.Tensor):
             return self._forward_torch(inp, save_output)
 
-        elif isinstance(inp1, np.ndarray):
+        elif isinstance(inp, np.ndarray):
             return self._forward_numpy(inp, save_output)
 
         else:

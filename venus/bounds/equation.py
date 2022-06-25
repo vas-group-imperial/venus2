@@ -39,13 +39,14 @@ class Equation():
         self.matrix = matrix
         self.const = const
         self.config = config
-        self.size = len(matrix)
+        self.size, self.coeffs_size = matrix.shape
+
 
     def copy(self, matrix=None, const=None) -> Equation:
         return Equation(
             self.matrix.detach().clone(),
             self.const.detach().clone(),
-            self.size
+            self.config
         )
 
 
@@ -129,7 +130,9 @@ class Equation():
         return self.interval_dot('lower', lower, upper)
 
 
-    def interval_dot(self, bound: str, lower: torch.Tensor, upper: torch.Tensor) -> torch.Tensor:
+    def interval_dot(
+        self, bound: str, lower: torch.Tensor, upper: torch.Tensor
+    ) -> torch.Tensor:
         """
         Computes the interval dot product with either a matrix or an Equation.
         """
@@ -170,11 +173,72 @@ class Equation():
 
         return c
 
+    def forward(self, node: Node, bound=None, slopes=None):
+        if type(node) in [Gemm]:
+            equation =  self._forward_gemm(node)
 
-    def transpose(self, node: Node):
+        elif isinstance(node, Conv):
+            equation = self._forward_conv(node)
 
-        in_flag, out_flag = self._get_flags(node)
+        elif isinstance(node, MatMul):
+            equation = self._forward_matmul(node)
 
+        elif isinstance(node, Slice):
+            equation = self._forward_slice(node)
+
+        elif isinstance(node, Relu):
+            equation = self._forward_relu(node, bound, slopes)
+
+        elif type(node) in [Flatten, Reshape]:
+            equation = self
+
+        else:
+            raise NotImplementedError(f'Equation forward for {type(node)}')
+
+        return equation
+
+    def _forward_gemm(self, node: Node):
+        matrix = node.forward(self.matrix, add_bias=False)
+        const = node.forward(self.const, add_bias=True)
+
+        return Equation(matrix, const, self.config)
+
+    def _forward_conv(self, node: Node):
+        shape = (self.coeffs_size,) + node.input_shape_no_batch()
+        matrix = node.forward(self.matrix.T.reshape(shape), add_bias=False)
+        matrix = matrix.reshape(self.coeffs_size, -1).T
+        const = node.forward(
+            self.const.reshape(node.input_shape), add_bias=True
+        ).flatten()
+
+        return Equation(matrix, const, self.config)
+
+    def _forward_matmul(self, node: Node):
+        matrix = node.forward(self.matrix)
+        const = node.forward(self.const)
+
+        return Equation(matrix, const, self.config)
+
+    def _forward_slice(self, node: Node):
+        shape = (self.size,) + node.input_shape_no_batch()
+        slices = [slice(0, self.size)] + node.slices
+        matrix = self.matrix.reshape(shape)[slices]
+        const = self.const.reshape(node.input_shape_no_batch())[node.slices]
+
+        return Equation(matrix, const, self.config)
+
+    def _forward_relu(self, node: Node, bound: str, slopes: torch.Tensor=None):
+        slope = self._get_relu_slope(node.from_node[0], bound, bound, None, slopes)
+        matrix = (self.matrix.T * slope).T
+        const = self._get_relu_const(
+            node.from_node[0], self.const, bound, slope
+        )
+
+        return Equation(matrix, const, self.config)
+
+    def transpose(
+            self, node: Node, out_flag: torch.Tensor=None, in_flag: torch.Tensor=None
+    ):
         if type(node) in [Gemm, Conv, ConvTranspose]:
             tr_eq =  self._transpose_affine(node, in_flag, out_flag)
 
@@ -190,9 +254,11 @@ class Equation():
         elif isinstance(node, Sub):
             tr_eq = self._transpose_sub(node)
 
+        elif isinstance(node, Reshape):
+            tr_eq = self._transpose_reshape(node)
+
         else:
             raise NotImplementedError(f'Equation transpose for {type(node)}')
-
 
         return tr_eq if isinstance(tr_eq, list) else [tr_eq]
 
@@ -216,7 +282,7 @@ class Equation():
             shape = (self.size,) + node.output_shape_no_batch()
         else:
             shape = self.matrix.shape
- 
+
         matrix =  node.transpose(self.matrix.reshape(shape), in_flag, out_flag)
         matrix = matrix.reshape(self.size, -1)
 
@@ -236,11 +302,10 @@ class Equation():
         
     def _transpose_slice(self, node: Node):
         matrix = torch.zeros(
-            (self.matrix.size, node.input_size),
-            dtype=node.config.PRECISION,
-            device=node.config.DEVICE
+            (self.size,) + node.input_shape, dtype=node.config.PRECISION
         )
-        matrix[node.slices] = self.matrix
+        slices = slice(0, self.size) + node.slices
+        matrix[slices] = self.matrix
 
         return Equation(matrix, self.const, self.config)
 
@@ -255,6 +320,18 @@ class Equation():
 
         return eqs
 
+    def _transpose_reshape(self, node:Node):
+        matrix = self.matrix.reshape(
+            (self.size,) + node.input_shape
+        ).reshape(
+            (self.size,) + node.output_shape
+        ).reshape(self.size, -1)
+
+        const = self.const.reshape(node.input_shape).flatten().reshape(node.output_shape).flatten()
+
+        return Equation(matrix, self.const, self.config)
+        
+
     def _transpose_sub(self, node:Node):
         if node.const is None:
             return Equation(
@@ -264,44 +341,59 @@ class Equation():
         return Equation(
             self.matrix - node.const.flatten(), self.const, self.config
         )
-  
  
-    def interval_transpose(self, node: Node, bound: str, slopes: torch.tensor=None):
-        in_flag, out_flag = self._get_flags(node)
 
+    def interval_transpose(
+            self, 
+            node: Node,
+            bound: str,
+            in_flag: torch.Tensor=None,
+            out_flag: torch.Tensor=None,
+            slopes: torch.tensor=None
+    ):
         if node.has_relu_activation():
             return [
-                self.interval_relu_transpose(
+                self._relu_transpose(
                     node, bound, in_flag, out_flag, slopes
                 )
             ]
 
         elif isinstance(node, BatchNormalization):
             return [
-                self._interval_batch_normalization_transpose(
+                self._batch_normalization_transpose(
                     node, bound, in_flag, out_flag
                 )
             ]
 
         elif isinstance(node, MaxPool):
             return [
-                self.interval_maxpool_transpose(node, bound)
+                self._maxpool_transpose(node, bound)
             ]
 
         else:
-            raise TypeError("Expected either relu or maxpool subsequent layer")
+            raise NotImplementedError(f'Interval forward for node {type(node)}')
 
 
-    def interval_relu_transpose(
+    def _relu_transpose(
             self,
             node: None,
             bound: str,
-            in_flag: torch.tensor,
-            out_flag: torch.tensor,
+            out_flag: torch.tensor=None,
+            in_flag: torch.tensor=None,
             slopes: torch.tensor = None
     ):
-        (lower_slope, upper_slope), (lower_const, upper_const) = \
-            self.get_relu_relaxation(node, bound, out_flag, slopes)
+        lower_slope = self._get_relu_slope(node, 'lower', bound, out_flag, slopes)
+        upper_slope = self._get_relu_slope(node, 'upper', bound, out_flag, slopes)
+        out_flag = None if out_flag is None else out_flag.flatten()
+        lower_const = Equation._derive_const(node, out_flag)
+        upper_const = lower_const.detach().clone()
+        lower_const = self._get_relu_const(
+            node, lower_const, 'lower', lower_slope, out_flag
+        )
+        upper_const =  self._get_relu_const(
+             node, upper_const, 'upper', upper_slope, out_flag
+         )
+
         _plus, _minus = self._get_plus_matrix(), self._get_minus_matrix()
 
         if bound == 'lower':
@@ -328,6 +420,100 @@ class Equation():
         return Equation(matrix, const, self.config)
 
 
+    def _get_relu_slope(
+        self, 
+        node: Node,
+        slope_type: str,
+        bound: str,
+        out_flag: torch.tensor=None,
+        slopes: torch.tensor=None
+    ) -> torch.Tensor:
+        if out_flag is None:
+            if slope_type  == 'lower':
+                sl = torch.ones(node.output_size, dtype=self.config.PRECISION)
+                sl[node.to_node[0].get_inactive_flag().flatten()] = 0.0
+                idxs = node.to_node[0].get_unstable_flag().flatten()
+                if slopes is None:
+                    slopes = node.to_node[0].get_lower_relaxation_slope()
+                    sl[idxs] = slopes[0] if bound == 'lower' else slopes[1]
+                else:
+                    sl[idxs] = slopes
+
+            elif slope_type == 'upper':
+                sl = torch.zeros(node.output_size, dtype=self.config.PRECISION)
+                idxs = node.to_node[0].get_unstable_flag().flatten()
+                lower = node.bounds.lower.flatten()[idxs] 
+                upper = node.bounds.upper.flatten()[idxs]
+                sl[idxs] =  upper / (upper - lower)
+                sl[node.to_node[0].get_active_flag().flatten()] = 1
+
+            else:
+                raise Exception(f"Slope type {slope_type} is not recognised.")
+
+        else:
+            if slope_type == 'lower':
+                sl = torch.ones(
+                    node.to_node[0].get_propagation_count(), dtype=self.config.PRECISION
+                ) 
+                upper = node.bounds.upper[out_flag].flatten()
+                lower = node.bounds.lower[out_flag].flatten()
+                if slopes is None:
+                    idxs = lower < 0 
+                    slopes = node.to_node[0].get_lower_relaxation_slope()
+                    sl[idxs] = slopes[0] if bound_type == 'lower' else slopes[1]
+                else:
+                    idxs = abs(lower) >=  upper
+                    sl[idxs] = 0.0
+
+            elif slope_type == 'upper':
+                lower = node.bounds.lower[out_flag].flatten()
+                upper = node.bounds.upper[out_flag].flatten()
+                
+                sl = torch.ones(
+                    node.to_node[0].get_propagation_count(), dtype=self.config.PRECISION
+                )
+                idxs = lower < 0
+                sl[idxs] = upper[idxs] /  (upper[idxs] - lower[idxs])
+
+            else:
+                raise Exception(f"Slope type {slope_type} is not recognised.")
+
+        return sl
+
+    def _get_relu_const(
+        self, 
+        node: Node, 
+        const: torch.tensor,
+        const_type :str,  
+        relu_slope: torch.Tensor,
+        out_flag: torch.Tensor=None
+    ) -> torch.Tensor:
+        if out_flag is None:
+            if const_type == 'lower':
+                relu_const = const * relu_slope
+
+            elif const_type == 'upper':
+                idxs = node.to_node[0].get_unstable_flag().flatten()
+                lower  = node.bounds.lower.flatten()[idxs]
+                relu_const = const * relu_slope
+                relu_const[idxs]  -= relu_slope[idxs] * lower
+
+            else:
+                raise Exception(f"Const type {const_type} is not recognised.")
+
+        else:
+            if const_type == 'lower':
+                relu_const = const * relu_slope
+            
+            elif const_type == 'upper':
+                lower = node.bounds.lower[out_flag].flatten()
+                idxs = lower < 0
+                relu_const = const * relu_slope
+                relu_const[idxs]  -= relu_slope[idxs] *  lower[idxs]
+
+        return relu_const
+
+
     def get_relu_relaxation(self, node: Node, bound:str, out_flag: torch.tensor, slopes: torch.tensor) -> tuple:
         if out_flag is None:
             lower_slope = torch.ones(
@@ -336,15 +522,9 @@ class Equation():
 
             lower, upper = node.bounds.lower.flatten(), node.bounds.upper.flatten()
 
-            # if slopes is None:
-                # idxs = abs(lower) >=  upper
-                # lower_slope[idxs] = 0.0
-            # else:
-                # idxs = node.to_node[0].get_unstable_flag().flatten()
-                # lower_slope[idxs] = slopes
-
             lower_slope[node.to_node[0].get_inactive_flag().flatten()] = 0.0
             idxs = node.to_node[0].get_unstable_flag().flatten()
+
             if slopes is None:
                 slopes = node.to_node[0].get_lower_relaxation_slope()
                 lower_slope[idxs] = slopes[0] if bound == 'lower' else slopes[1]
@@ -366,8 +546,6 @@ class Equation():
             upper_const *= upper_slope
 
             upper_const[idxs]  -= upper_slope[idxs] *  lower
-
-
 
         else:
             lower_slope = torch.ones(
@@ -402,10 +580,10 @@ class Equation():
             upper_const *= upper_slope
             upper_const[idxs]  -= upper_slope[idxs] *  lower[idxs]
 
-        return (lower_slope, upper_slope), (lower_const, upper_const)
+        return lower_slope, upper_slope, lower_const, upper_const
 
 
-    def _interval_batch_normalization_transpose(
+    def _batch_normalization_transpose(
         self,
         node: Node,
         in_flag: torch.tensor,
@@ -434,38 +612,7 @@ class Equation():
 
         return Equation(matrix, const, self.config)
 
-
-    def __get_relu_relaxation(self, node: Node) -> tuple:
-        lower_slope = torch.ones(
-            node.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
-        )
-        upper = node.bounds.upper.flatten()
-        lower = node.bounds.lower.flatten()
-        idxs = abs(lower) >=  upper
-        lower_slope[idxs] = 0.0
-        lower_slope[node.to_node[0].get_inactive_flag()] = 0.0
-        lower_slope[node.to_node[0].get_active_flag()] = 1.0
-
-
-        upper_slope = torch.zeros(
-            node.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
-        )
-        upper = upper[node.to_node[0].get_unstable_flag()]
-        lower = lower[node.to_node[0].get_unstable_flag()]
-        upper_slope[node.to_node[0].get_unstable_flag()] = upper /  (upper - lower)
-        upper_slope[node.to_node[0].get_active_flag()] = 1.0
-
-        lower_const = Equation._derive_const(node)
-        upper_const = lower_const.detach().clone()
-        lower_const *= lower_slope
-        upper_const *= upper_slope
-        upper_const[node.to_node[0].get_unstable_flag()]  -= \
-            upper_slope[node.to_node[0].get_unstable_flag()] * \
-            node.bounds.lower.flatten()[node.to_node[0].get_unstable_flag()]
-
-        return (lower_slope, upper_slope), (lower_const, upper_const)
-
-    def interval_maxpool_transpose(self, node: Node, bound:str):
+    def _maxpool_transpose(self, node: Node, bound:str):
         lower, indices = node.forward(node.from_node[0].bounds.lower, return_indices=True)
         
         idx_correction = torch.tensor(
@@ -525,28 +672,6 @@ class Equation():
 
         return Equation(matrix, const, self.config)
 
-
-        # matrix = torch.zeros(
-            # (node.output_size, node.input_size), dtype=self.config.PRECISION, device=self.config.DEVICE
-        # )
-        # matrix[indices] = 1.0
-        # const = torch.zeros(
-            # node.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
-        # )
-        # lower = Equation(matrix, const, self.config)
-            
-        # matrix = torch.zeros(
-            # (self.output_size, node.input_size), dtype=self.config.PRECISION, device=self.config.DEVICE
-        # )
-        # matrix[indices][lower_max] = 1.0
-        # const = torch.zeros(
-            # node.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
-        # ) 
-        # const[indices][not_lower_max] = node.bounds.upper.flatten()[indices][not_lower_max]
-        # upper = Equation(matrix, const, self.config)
-
-        # return lower, upper
-
     def get_max_pool_relaxation(self, node: Node) -> tuple:
         lower, indices = node.to_node[0].forward(node.bounds.lower, return_indices=True)
         
@@ -587,9 +712,9 @@ class Equation():
     @staticmethod
     def derive(
         node: Node,
-        out_flag: torch.Tensor,
-        in_flag: torch.Tensor,
         config: Config,
+        out_flag: torch.Tensor=None,
+        in_flag: torch.Tensor=None,
         sparse: bool=False
     ) -> Equation:
         zero_eq = Equation._zero_eq(node, out_flag)
@@ -629,17 +754,19 @@ class Equation():
         if isinstance(node, Conv):
             return Equation._derive_conv_matrix(node, out_flag, in_flag, sparse)
 
-        elif isinstance(node, Gemm):
+        if isinstance(node, Gemm):
             return Equation._derive_gemm_matrix(node, out_flag, in_flag)
 
-        elif isinstance(node, MatMul):
+        if isinstance(node, MatMul):
             return Equation._derive_matmul_matrix(node, out_flag, in_flag)
         
-        elif isinstance(node, Add):
+        if isinstance(node, Add):
             return Equation._derive_add_matrix(node, out_flag)
 
-        else:
-            raise NotImplementedError(f'{type(node)} equations')
+        if isinstance(node, Flatten):
+            return Equation._derive_flatten_matrix(node, out_flag, in_flag)
+
+        raise NotImplementedError(f'{type(node)} equations')
 
     @staticmethod
     def _derive_const(node: Node, flag: torch.Tensor=None):
@@ -660,6 +787,9 @@ class Equation():
         
         if isinstance(node, Add):
             return Equation._derive_add_const(node, flag)
+
+        if isinstance(node, Flatten):
+            return Equation._derive_flatten_const(node, flag)
 
         raise NotImplementedError(f'{type(node)} equations')
 
@@ -763,9 +893,9 @@ class Equation():
     @staticmethod 
     def _derive_add_matrix(node: Node, flag: torch.Tensor):
         if node.const is not None:
-            matrix =  np.identity(node.input_size, dtype=node.config.PRECISION)[:, flag] 
+            matrix =  torch.identity(node.input_size, dtype=node.config.PRECISION)[flag, :]
         else:
-            matrix = np.zeros((node.output_size, 2 * node.output_size), dtype=node.config.PRECISION)
+            matrix = torch.zeros((node.output_size, 2 * node.output_size), dtype=node.config.PRECISION)
             matrix[range(node.output_size), range(node.output_size)] = 1
             matrix[range(node.output_size), range(node.output_size, 2 * node.output_size)] = 1
 
@@ -782,6 +912,29 @@ class Equation():
             torch.sum(flag).item(), dtype=node.config.PRECISION, device=node.config.DEVICE
         )
 
+    @staticmethod 
+    def _derive_flatten_matrix(
+        node: Node, out_flag:torch.tensor=None, in_flag: torch.tensor=None
+    ):
+        if in_flag is None:
+            return torch.eye(
+                node.output_size, dtype=node.config.PRECISION
+            ).squeeze()[out_flag, :]
+
+        
+        return torch.eye(
+            node.output_size, dtype=node.config.PRECISION
+        ).squeeze()[out_flag, :][:, in_flag]
+
+    @staticmethod
+    def _derive_flatten_const(node: Node, flag: torch.Tensor):
+        if flag is None:
+            return torch.zeros(node.output_size, dtype=node.config.PRECISION)
+
+        return torch.zeros(
+            torch.sum(flag).item(), dtype=node.config.PRECISION, device=node.config.DEVICE
+        )
+
     @staticmethod
     def _derive_batchnormalization_const(node: Node, flag: torch.Tensor):
         if flag is None:
@@ -793,63 +946,101 @@ class Equation():
             torch.sum(flag).item(), dtype=node.config.PRECISION, device=node.config.DEVICE
         )
 
+    @staticmethod
+    def interval_forward(
+            node: Node,
+            bound: str,
+            lower_eq: Equation,
+            upper_eq: Equation
+    ):
 
-    # def set_lower_slope(self, lbound, ubound):
-        # """ 
-        # Sets the lower slopes for the equations, one for computing the lower
-        # bounds during back-substitution and one for computing the upper bound.
+        if isinstance(node, Gemm):
+            return Equation._interval_gemm_forward(node, bound, lower_eq, upper_eq)
 
-        # Arguments:
-            
-            # lbound: vector of the lower slope for the lower bound.
-            
-            # ubound: vector of the lower slope for the upper bound.
+        elif isinstance(node, Conv):
+            return Equation._interval_conv_forward(node, bound, lower_eq, upper_eq)
 
-        # Returns:
 
-            # None
-        # """
-        # self.lower_slope_l_bound = lbound
-        # self.lower_slope_u_bound = ubound
-        # self.is_slope_optimised = True
+        else:
+            raise NotImplementedError(f'Interval forward for node {type(node)}')
 
-    # def get_lower_slope(self, l, u, approx=ReluApproximation.MIN_AREA):
-        # """
-        # Derives the slope of the lower linear relaxation of the equations.
+    @staticmethod
+    def _interval_gemm_forward(
+            node: Node,
+            bound: str,
+            lower_eq: Equation,
+            upper_eq: Equation
+    ):
+        if  bound == 'lower':
+            matrix = node.forward(
+                lower_eq.matrix, clip='+', add_bias=False
+            ) + node.forward(
+                upper_eq.matrix, clip='-', add_bias=False
+            )
+            const = node.forward(
+                lower_eq.const, clip='+', add_bias=False
+            ) + node.forward(
+                upper_eq.const, clip='-', add_bias=True
+                
+            )
 
-        # Arguments:
+        elif bound == 'upper':
+            matrix = node.forward(
+                lower_eq.matrix, clip='-', add_bias=False
+            ) + node.forward(
+                upper_eq.matrix, clip='+', add_bias=False
+            )
+            const = node.forward(
+                lower_eq.const, clip='-', add_bias=False
+            ) + node.forward(
+                upper_eq.const, clip='+', add_bias=True
+            )
 
-            # lower: vector of lower bounds of the equations
-            
-            # upper: vector of upper bounds of the equations
+        else:
+            raise ValueError(f"Bound type {bound} could not be recognised.")
 
-            # approx: ReluApproximation
+        return Equation(matrix, const, node.config)
 
-        # Returns:
 
-            # vector of the slopes.
-        # """
+    @staticmethod
+    def _interval_conv_forward(
+            node: Node,
+            bound: str,
+            lower_eq: Equation,
+            upper_eq: Equation
+    ):
+        shape = (lower_eq.coeffs_size,) + node.input_shape_no_batch()
 
-        # slope = np.zeros(self.size)
-        # l, u = l.flatten(), u.flatten()
+        if  bound == 'lower':
+            matrix = node.forward(
+                lower_eq.matrix.T.reshape(shape), clip='+', add_bias=False
+            ) + node.forward(
+                upper_eq.matrix.T.reshape(shape), clip='-', add_bias=False
+            )
+            const = node.forward(
+                lower_eq.const.reshape(node.input_shape), clip='+', add_bias=False
+            ).flatten()
+            const += node.forward(
+                upper_eq.const.reshape(node.input_shape), clip='-', add_bias=True
+            ).flatten()
 
-        # for i in range(self.size):
-            # if  l[i] >= 0:
-                # slope[i] = 1
-            # elif u[i] <= 0: 
-                # pass
-            # else:
-                # if approx == ReluApproximation.ZERO:
-                    # pass
-                # elif approx == ReluApproximation.IDENTITY:
-                    # slope[i] = 1
-                # elif approx == ReluApproximation.PARALLEL:
-                    # slope[i] = u[i] / (u[i] - l[i])
-                # elif approx == ReluApproximation.MIN_AREA:
-                    # if abs(l[i]) < u[i]: slope[i] = 1
-                # elif approx == ReluApproximation.VENUS_HEURISTIC:
-                    # if abs(l[i]) < u[i]: slope[i] = u[i] / (u[i] - l[i])
-                # else:
-                    # pass
+        elif bound == 'upper':
+            matrix = node.forward(
+                lower_eq.matrix.T.reshape(shape), clip='-', add_bias=False
+            ) + node.forward(
+                upper_eq.matrix.T.reshape(shape), clip='+', add_bias=False
+            )
+            const = node.forward(
+                lower_eq.const.reshape(node.input_shape), clip='-', add_bias=False
+            ).flatten()
+            const += node.forward(
+                upper_eq.const.reshape(node.input_shape), clip='+', add_bias=True
+            ).flatten()
 
-        # return slope 
+        else:
+            raise ValueError(f"Bound type {bound} could not be recognised.")
+
+        matrix = matrix.reshape(lower_eq.coeffs_size, -1).T
+
+        return Equation(matrix, const, node.config)
+
