@@ -143,7 +143,7 @@ class SIP:
                 saw_non_linear is True:
                     # print('symb')
                     # input()
-                    self.set_symb_concr_bounds(j, slopes=slopes) 
+                    self.set_symb_concr_bounds(j, slopes=slopes, concretisations=False)
 
                     # print('£', j.to_node[0].get_unstable_count())
                     # input()
@@ -159,7 +159,9 @@ class SIP:
             # torch.ones(self.prob.nn.tail.output_shape) * math.inf,
         # )
         if self.config.SIP.SYMBOLIC is True:
-            self.set_symb_concr_bounds(self.prob.nn.tail, slopes)
+            self.set_symb_concr_bounds(
+                self.prob.nn.tail, slopes=slopes, concretisations=False
+            )
 
         # print(
             # self.prob.nn.tail.id,
@@ -332,10 +334,11 @@ class SIP:
         bounds = Bounds(lower, upper)
         node.update_bounds(bounds)
 
-    def set_symb_concr_bounds(self, node: Node, slopes: tuple) -> Bounds:
+    def set_symb_concr_bounds(
+        self, node: Node, slopes: tuple=None, concretisations: bool=True
+    ) -> Bounds:
         in_flag = self._get_stability_flag(node.from_node[0])
         out_flag = self._get_out_prop_flag(node)
-
         symb_eq = Equation.derive(
             node, 
             self.config,
@@ -343,23 +346,46 @@ class SIP:
             None if in_flag is None else in_flag.flatten(),
         )
 
-        lower_bounds = self.back_substitution(
-            symb_eq,
-            node.from_node[0],
-            'lower',
-            None if slopes is None else slopes[0]
+        concr = None if concretisations is not True else out_flag
+        lower_slope = None if slopes is None else slopes[0]
+        lower_bounds, lower_flag = self.back_substitution(
+            symb_eq, node, 'lower', concr, lower_slope
         )
-        lower_bounds = torch.max(node.bounds.lower[out_flag], lower_bounds)
-        upper_bounds = self.back_substitution(
-            symb_eq,
-            node.from_node[0],
-            'upper', 
-            None if slopes is None else slopes[1]
-        )
-        upper_bounds = torch.min(node.bounds.upper[out_flag], upper_bounds)
 
-        symb_concr_bounds = Bounds(lower_bounds, upper_bounds)
-        self._update_node_symb_concrete_bounds(node, symb_concr_bounds, slopes, out_flag)
+        if len(lower_bounds) == 0:
+            return
+
+        # reduce symbolic equation if instability was reduced by back_substitution.
+        if concretisations is True:
+            flag = lower_flag if out_flag is None else lower_flag[out_flag]
+            symb_eq = Equation(
+                symb_eq.matrix[flag, :], symb_eq.const[flag], self.config,
+            )
+            concr = lower_flag
+            lower_bounds = torch.max(node.bounds.lower[lower_flag], lower_bounds)
+        else:
+            lower_bounds = torch.max(node.bounds.lower[out_flag], lower_bounds)
+
+
+        upper_slope = None if slopes is None else slopes[1]
+        upper_bounds, upper_flag = self.back_substitution(
+            symb_eq, node, 'upper', concr, upper_slope 
+        )
+
+        if len(upper_bounds) == 0:
+            return
+        
+        if concretisations is True:
+            upper_bounds = torch.min(node.bounds.upper[upper_flag], upper_bounds)
+            lower_bounds = lower_bounds[upper_flag[lower_flag]]
+        else:
+            upper_bounds = torch.min(node.bounds.upper[out_flag], upper_bounds)
+            upper_flag = out_flag 
+        
+        self._update_node_symb_concrete_bounds(
+            node, Bounds(lower_bounds, upper_bounds), slopes, upper_flag
+        )
+
 
 
     def _update_node_symb_concrete_bounds(
@@ -398,7 +424,12 @@ class SIP:
         return node.get_propagation_flag()
 
     def back_substitution(
-            self, eq: Equation, node: None, bound: str, slopes: dict=None
+        self,
+        eq: Equation,
+        node: None,
+        bound: str, 
+        instability_flag: torch.Tensor=None,
+        slopes: dict=None,
     ):
         """
         Substitutes the variables in an equation with input variables.
@@ -410,6 +441,8 @@ class SIP:
                 The input node to the node corresponding to the equation.
             bound:
                 Bound the equation expresses - either lower or upper.
+            instability_flag:
+                Flag of unstable nodes from IA.
             slopes:
                 Relu slopes to use. If none then the default of minimum area
                 approximation are used.
@@ -421,51 +454,140 @@ class SIP:
         if bound not in ['lower', 'upper']:
             raise ValueError("Bound type {bound} not recognised.")
 
-        eqs = self._back_substitution(eq, node, bound, slopes=slopes)
+        eqs, instability_flag = self._back_substitution(
+            eq, node, node.from_node[0], bound, instability_flag, slopes
+        )
+
+        if eqs is None:
+            return torch.empty(0), instability_flag
 
         sum_eq = eqs[0]
         for i in eqs[1:]:
             sum_eq = sum_eq.add(i)
 
-        return sum_eq.concrete_values(
+        concr_values = sum_eq.concrete_values(
             self.prob.spec.input_node.bounds.lower.flatten(),
             self.prob.spec.input_node.bounds.upper.flatten(),
             bound
         )
 
-    def _back_substitution(self, eq, node, bound, slopes=None):
+        return concr_values, instability_flag
+
+
+    def _back_substitution(
+        self,
+        eq: Equation,
+        base_node: Node,
+        cur_node: Node,
+        bound: str,
+        instability_flag: torch.Tensor=None,
+        slopes: torch.Tensor=None
+    ):
         """
         Helper function for back_substitution
         """
-        if isinstance(node, Input):
-            return  [eq]
+        if isinstance(cur_node, Input):
+            return  [eq], instability_flag
 
-        elif node.has_relu_activation() or isinstance(node, MaxPool):
-            if slopes is not None and node.to_node[0].id in slopes:
-                node_slopes = slopes[node.to_node[0].id]
+        _tranposed = False
+
+        if cur_node.has_relu_activation() or isinstance(cur_node, MaxPool):
+            if slopes is not None and cur_node.to_cur_node[0].id in slopes:
+                cur_node_slopes = slopes[cur_node.to_cur_node[0].id]
             else:
-                node_slopes = None
+                cur_node_slopes = None
                 
-            in_flag = self._get_stability_flag(node.from_node[0])
-            out_flag = self._get_stability_flag(node)
-            eq = eq.interval_transpose(node, bound, out_flag, in_flag, node_slopes)
+            in_flag = self._get_stability_flag(cur_node.from_node[0])
+            out_flag = self._get_stability_flag(cur_node)
+            eq = eq.interval_transpose(
+                cur_node, bound, out_flag, in_flag, cur_node_slopes
+            )
+            _tranposed = True
 
-        elif type(node) in [Relu, Flatten, Unsqueeze, Reshape]:
+        elif type(cur_node) in [Relu, Flatten, Unsqueeze, Reshape]:
             eq = [eq]
 
         else:
-            in_flag = self._get_stability_flag(node.from_node[0])
-            out_flag = self._get_stability_flag(node)
-            eq = eq.transpose(node, out_flag, in_flag)
+            in_flag = self._get_stability_flag(cur_node.from_node[0])
+            out_flag = self._get_stability_flag(cur_node)
+            eq = eq.transpose(cur_node, out_flag, in_flag)
+            _tranposed = True
 
         eqs = []
 
-        for i in eq:
-            eqs.extend(
-                self._back_substitution(i, node.from_node[0], bound, slopes=slopes)
-            )
+        for i, j in enumerate(eq):
+            if instability_flag is not None and _tranposed is True:
+                j, instability_flag = self._update_back_subs_eqs(
+                    j,
+                    base_node,
+                    cur_node,
+                    cur_node.from_node[i],
+                    bound,
+                    instability_flag
+                )
+                if torch.sum(instability_flag) == 0:
+                    return None, instability_flag
 
-        return eqs
+            back_subs_eq, instability_flag = self._back_substitution(
+                j,
+                base_node,
+                cur_node.from_node[0],
+                bound,
+                instability_flag=instability_flag,
+                slopes=slopes
+            )
+            if back_subs_eq is None:
+                return None, instability_flag
+        
+            eqs.extend(back_subs_eq)
+
+        return eqs, instability_flag
+
+    def _update_back_subs_eqs(
+        self,
+        equation: Equation,
+        base_node: Node,
+        cur_node: Node,
+        input_node: Node,
+        bound: str,
+        instability_flag: torch.Tensor
+    ) -> Equation:
+        assert base_node.has_relu_activation() is True, \
+            "Update concerns only nodes with relu activation."
+        if bound == 'lower':
+            concr_bounds = equation.min_values(
+                input_node.bounds.lower.flatten(), input_node.bounds.upper.flatten()
+            )
+            unstable_idxs = concr_bounds < 0
+            stable_idxs = torch.logical_not(unstable_idxs)
+            flag = torch.zeros(base_node.output_shape, dtype=torch.bool)
+            flag[instability_flag] = stable_idxs
+            base_node.bounds.lower[flag] = concr_bounds[stable_idxs] 
+            base_node.to_node[0].reset_state_flags()
+
+        elif bound == 'upper':
+            concr_bounds = equation.max_values(
+                input_node.bounds.lower.flatten(), input_node.bounds.upper.flatten()
+            )
+            unstable_idxs = concr_bounds > 0
+            stable_idxs = torch.logical_not(unstable_idxs)
+            flag = torch.zeros(base_node.output_shape, dtype=torch.bool)
+            flag[instability_flag] = stable_idxs
+            base_node.bounds.upper[flag] = concr_bounds[stable_idxs]
+            base_node.to_node[0].reset_state_flags()
+
+        else:
+            raise Exception(f"Bound type {bound} not recognised.")
+  
+        flag = torch.zeros(base_node.output_shape, dtype=torch.bool)
+        flag[instability_flag] = unstable_idxs
+        reduced_eq = Equation(
+            equation.matrix[unstable_idxs, :],
+            equation.const[unstable_idxs],
+            self.config
+        )
+
+        return reduced_eq, flag
 
     # def back_substitution(self, eq, node):
         # return Bounds(
