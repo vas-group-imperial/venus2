@@ -122,7 +122,7 @@ class SIP():
         # symbolic bounds using back-substitution
         self.SYMBOLIC = True
         # relu approximation
-        self.RELU_APPROXIMATION = ReluApproximation.MIN_AREA
+        self.RELU_APPROXIMATION = ReluApproximation.VENUS
         # formula simplificaton
         self.SIMPLIFY_FORMULA: bool = False
         # whether to use gradient descent optimisation of slopes
@@ -132,7 +132,7 @@ class SIP():
         # gradient descent steps
         self.GD_STEPS: int = 100
         # STABILITY FLAG THRESHOLD
-        self.STABILITY_FLAG_THRESHOLD = 0
+        self.STABILITY_FLAG_THRESHOLD = 0.0
 
     def copy(self):
         sip_cf = SIP()
@@ -229,7 +229,7 @@ class Config:
             elif value == 'identity':
                 self.SIP.RELU_APPROXIMATION = ReluApproximation.IDENTITY
             elif value == 'venus':
-                self.SIP.RELU_APPROXIMATION = ReluApproximation.VENUS_HEURISTIC
+                self.SIP.RELU_APPROXIMATION = ReluApproximation.VENUS
             elif value == 'parallel':
                 self.SIP.RELU_APPROXIMATION = ReluApproximation.PARALLEL
             elif value == 'zero':

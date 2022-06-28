@@ -115,16 +115,12 @@ class VNNParser(Parser):
         self.X_SZ = X_SZ
         self.config = config
         self.i_b = [
-            torch.ones(
-                self.X_SZ,
-                dtype=config.PRECISION,
-                device=config.DEVICE
-            ) * -math.inf, 
-            torch.ones(
-                self.X_SZ,
-                dtype=config.PRECISION,
-                device=config.DEVICE
-            ) * math.inf
+            torch.full(
+                (self.X_SZ,), -math.inf, dtype=config.PRECISION, device=config.DEVICE
+            ),
+            torch.full(
+                (self.X_SZ,), math.inf, dtype=config.PRECISION, device=config.DEVICE
+            )
         ]
         self.o_f = None
         self.i_cl = []

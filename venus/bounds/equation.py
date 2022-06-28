@@ -460,7 +460,7 @@ class Equation():
                 if slopes is None:
                     idxs = lower < 0 
                     slopes = node.to_node[0].get_lower_relaxation_slope()
-                    sl[idxs] = slopes[0] if bound_type == 'lower' else slopes[1]
+                    sl[idxs] = slopes[0] if bound == 'lower' else slopes[1]
                 else:
                     idxs = abs(lower) >=  upper
                     sl[idxs] = 0.0
@@ -506,7 +506,7 @@ class Equation():
                 relu_const = const * relu_slope
             
             elif const_type == 'upper':
-                lower = node.bounds.lower[out_flag].flatten()
+                lower = node.bounds.lower.flatten()[out_flag]
                 idxs = lower < 0
                 relu_const = const * relu_slope
                 relu_const[idxs]  -= relu_slope[idxs] *  lower[idxs]

@@ -69,7 +69,7 @@ class Venus:
             # load model
             nn = NeuralNetwork(query[0], self.config)
             nn.load()
-            self.config.set_nn_defaults(nn)
+            # self.config.set_nn_defaults(nn)
 
             # import numpy as np
             # from venus.bounds.bounds import Bounds

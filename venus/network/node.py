@@ -16,7 +16,7 @@ import torch
 
 from venus.bounds.bounds import Bounds
 from venus.common.configuration import Config
-from venus.common.utils import ReluState
+from venus.common.utils import ReluState, ReluApproximation
 from venus.split.split_strategy import SplitStrategy
 
 torch.set_num_threads(1)
@@ -572,7 +572,7 @@ class Gemm(Node):
 
         else:
             raise ValueError(f'Kernel clip value {clip} not recognised')
-      
+     
         output = weights @ inp
 
         if add_bias is True:
@@ -1364,8 +1364,10 @@ class Conv(ConvBase):
         result = torch.empty((0, inp_stretch.shape[-1]), dtype=self.config.PRECISION)
 
         for i in range(self.in_ch):
-            partial_result =  torch.Tensordot(
-                kernel_stretch[i, :], inp_stretch[:, pad_flag[i, :], :][:, flag[i, :], :], dims=([0], [0])
+            partial_result =  torch.tensordot(
+                kernel_stretch[i, :],
+                inp_stretch[:, pad_flag[i, :], :][:, flag[i, :], :], 
+                dims=([0], [0])
             )
             result = torch.cat( (result, partial_result), 0)
 
@@ -2403,16 +2405,22 @@ class Relu(Node):
         """
         Returns the lower bound relaxation slopes.
         """
+
         if self.bounds.size() == 0:
             return None, None
         
         elif self._lower_relaxation_slope == (None, None):
-            self.set_lower_relaxation_slope()
+            self.set_lower_relaxation_slope(
+                approx = self.config.SIP.RELU_APPROXIMATION
+            )
             
         return self._lower_relaxation_slope
 
     def set_lower_relaxation_slope(
-        self, lower: torch.Tensor=None, upper: torch.Tensor=None
+        self,
+        lower: torch.Tensor=None,
+        upper: torch.Tensor=None,
+        approx = ReluApproximation.MIN_AREA
     ) -> torch.Tensor:
         """
         Derives the lower bound relaxation slopes.
@@ -2430,7 +2438,10 @@ class Relu(Node):
             upper = self.from_node[0].bounds.upper[self.get_unstable_flag()]
             idxs = abs(lower) >= upper
             slope[idxs] = 0.0
-    
+            if approx == ReluApproximation.VENUS:
+                idxs = torch.logical_not(idxs)
+                slope[idxs] = upper[idxs] / (upper[idxs] - lower[idxs])
+ 
             self._lower_relaxation_slope = (slope, slope)
 
 

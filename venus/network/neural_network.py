@@ -299,3 +299,11 @@ class NeuralNetwork:
                 return True
 
         return False
+
+    def get_non_linear_starting_depth(self):
+        for i in range(self.tail.depth):
+            nodes = self.get_node_by_depth(i)
+            for j in nodes:
+                if j.has_relu_activation() or j.has_max_pool():
+                    return i
+        return i

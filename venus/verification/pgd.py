@@ -95,7 +95,7 @@ class ProjectedGradientDescent:
         Returns: 
             A tensor for the adversarial example.
         """
-        x = x.clone().detach().to(torch.float).requires_grad_(True)
+        x = x.clone().detach().to(self.config.PRECISION).requires_grad_(True)
 
         true_label = prob.spec.is_adversarial_robustness()
 
