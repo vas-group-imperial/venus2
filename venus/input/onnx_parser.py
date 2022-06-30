@@ -348,7 +348,7 @@ class ONNXParser:
         const =  torch.tensor(
             onnx.numpy_helper.to_array(attr.t),
             dtype=self.config.PRECISION,
-            device=self.config.DEVICE
+            device='cpu'
         )
 
         return Constant([], const, self.config)
@@ -365,7 +365,7 @@ class ONNXParser:
             end = attr.i
       
         shape = torch.tensor(
-            input_shape[start: end], dtype=torch.int32, device=self.config.DEVICE
+            input_shape[start: end], dtype=torch.int32, device='cpu'
         )
 
         return Constant([], shape, self.config)
@@ -444,7 +444,7 @@ class ONNXParser:
                     )
                 ],
                 dtype=torch.int32,
-                device=self.config.DEVICE
+                device='cpu'
             )
         if node.input[4] in venus_nodes or node.input[4] in init:
             steps = self._to_tensor(node.input[4], venus_nodes, init).int()
@@ -452,7 +452,7 @@ class ONNXParser:
             steps = torch.tensor(
                 [1 for i in range(len(starts))],
                 dtype=torch.int32,
-                device=self.config.DEVICE
+                device='cpu'
             )
 
         slices, cur_axis = [], 0
@@ -547,7 +547,7 @@ class ONNXParser:
             return torch.tensor(
                 onnx.numpy_helper.to_array(init[const_name]),
                 dtype=self.config.PRECISION,
-                device=self.config.DEVICE
+                device='cpu'
             )
 
         elif const_name in venus_nodes:

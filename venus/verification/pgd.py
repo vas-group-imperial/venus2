@@ -15,7 +15,7 @@ class ProjectedGradientDescent:
     def __init__(self, config):
         self.config = config
 
-    def start(self, prob, init_adv: torch.tensor=None):
+    def start(self, prob, init_adv: torch.tensor=None, device=torch.device('cpu')):
         """
         PGD (see Madry et al. 2017): https://arxiv.org/pdf/1706.06083.pdf
         
@@ -45,6 +45,7 @@ class ProjectedGradientDescent:
                 prob,
                 adv,
                 eps_iter,
+                device
             )
 
             adv = torch.clamp(
@@ -78,7 +79,8 @@ class ProjectedGradientDescent:
         self,
         prob,
         x,
-        eps
+        eps,
+        device=torch.device('cpu')
     ):
         """
         Fast Gradient Signed Method.
@@ -107,7 +109,7 @@ class ProjectedGradientDescent:
             output_flag =  prob.spec.get_output_flag(prob.nn.tail.output_shape)
             output = prob.nn.forward(x)[output_flag].flatten()[None, :]
             true_label = torch.sum(output_flag.flatten()[0: true_label])
-            y = torch.tensor([true_label], device=self.config.DEVICE)
+            y = torch.tensor([true_label], device=device)
             loss_fn = torch.nn.CrossEntropyLoss()
             loss = loss_fn(output, y)
 

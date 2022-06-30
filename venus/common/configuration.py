@@ -138,6 +138,8 @@ class SIP():
         self.GD_STEPS: int = 100
         # STABILITY FLAG THRESHOLD
         self.STABILITY_FLAG_THRESHOLD = 0.0
+        # Device for torch operations
+        self.DEVICE = torch.device('cpu')
 
     def copy(self):
         sip_cf = SIP()
@@ -160,7 +162,6 @@ class Config:
         self.VERIFIER = Verifier()
         self.SIP = SIP()
         self.PRECISION = torch.float32
-        self.DEVICE = torch.device('cpu')
         self.MEMORY_OPTIMISATION = True
         self._user_set_params = set()
 

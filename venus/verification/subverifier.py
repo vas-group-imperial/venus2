@@ -207,7 +207,7 @@ class SubVerifier:
                 slv_report.cex, dtype=self.config.PRECISION, device=self.config.DEVICE
             )
             pgd = ProjectedGradientDescent(self.config)
-            cex = pgd.start(prob, init_adv=cex)
+            cex = pgd.start(prob, init_adv=cex, device='cpu')
             if cex is not None:
                 SubVerifier.logger.info(
                     f'Verification problem {prob.id} was solved via PGD on LP'

@@ -52,6 +52,9 @@ class SIP:
         """
         start = timer()
 
+        if self.config.SIP.DEVICE == torch.device('cuda'):
+            self.prob.cuda()
+
         # get relaxation slopes
         if self.prob.nn.has_custom_relaxation_slope() is True:
             slopes = self.get_lower_relaxation_slopes(gradient=False)
@@ -72,6 +75,9 @@ class SIP:
         print('\n*', torch.mean(self.prob.nn.tail.bounds.upper), torch.mean(self.prob.nn.tail.bounds.lower), timer() - start)
         print(self.prob.nn.tail.bounds.lower)
         print(self.prob.nn.tail.bounds.upper)
+
+        if self.config.SIP.DEVICE == torch.device('cuda'):
+            self.prob.cpu()
 
         if self.logger is not None:
             SIP.logger.info(

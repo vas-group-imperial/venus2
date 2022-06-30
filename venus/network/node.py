@@ -35,6 +35,7 @@ class Node:
         depth=0,
         bounds=Bounds(),
         id=None,
+        device=torch.device('cpu')
     ):
         """
         Arguments:
@@ -53,6 +54,8 @@ class Node:
                 the depth of the node.
             bounds:
                 concrete bounds for the node.
+            device:
+                device for torch operations.
         """
         self.id = next(Node.id_iter) if id is None else id
         self.from_node = from_node
@@ -67,6 +70,7 @@ class Node:
         self.delta_vars = np.empty(0)
         self.output = None
         self.bounds = bounds
+        self.device = device
         self._milp_var_indices = None
 
     def get_outputs(self):
@@ -314,7 +318,7 @@ class Node:
             return self.to_node[0].get_propagation_flag()
 
         return torch.ones(
-            self.output_shape, dtype=torch.bool, device=self.config.DEVICE
+            self.output_shape, dtype=torch.bool, device=self.device
         )
  
     def get_propagation_count(self) -> torch.Tensor:
@@ -1320,7 +1324,7 @@ class Conv(ConvBase):
             padded_inp, 
             (self.krn_height, self.krn_width),
             self.strides,
-            device=self.config.DEVICE
+            device=self.device
         )
 
         kernel_strech = self.kernels.reshape(self.out_ch, -1).cpu().numpy()
@@ -1348,7 +1352,7 @@ class Conv(ConvBase):
         else:
             batch = inp.shape[0]
             filled_inp = torch.zeros(
-                (batch, self.output_size), dtype=inp.dtype, device=self.config.DEVICE
+                (batch, self.output_size), dtype=inp.dtype, device=self.device
             ) 
             filled_inp[:, out_flag.flatten()] = inp
             filled_inp = filled_inp.reshape((batch,) + self.output_shape_no_batch())
@@ -1381,7 +1385,7 @@ class Conv(ConvBase):
         padded_inp = torch.zeros(
             (batch, self.out_ch, padded_height, padded_width),
             dtype=inp.dtype,
-            device = self.config.DEVICE
+            device = self.device
         ) 
         slices = tuple(
             [
@@ -1406,7 +1410,7 @@ class Conv(ConvBase):
             padded_inp,
             (self.krn_height, self.krn_width),
             (1, 1),
-            device=self.config.DEVICE
+            device=self.device
         )
 
         kernel_stretch = torch.flip(
@@ -1419,7 +1423,7 @@ class Conv(ConvBase):
         result = torch.empty(
             (0, inp_stretch.shape[-1]),
             dtype=self.config.PRECISION,
-            devide=self.config.DEVICE
+            devide=self.device
         )
 
         for i in range(self.in_ch):
@@ -1478,7 +1482,7 @@ class Conv(ConvBase):
         return ConvBase.get_non_pad_idxs(
             (self.in_ch, self.in_height, self.in_width),
             self.pads,
-            device=self.config.DEVICE
+            device=self.device
         )
 
     def get_non_pad_idx_flag(self) -> torch.Tensor:
@@ -1488,7 +1492,7 @@ class Conv(ConvBase):
         return ConvBase.get_non_pad_idx_flag(
             (self.in_ch, self.in_height, self.in_width),
             self.pads,
-            device=self.config.DEVICE
+            device=self.device
         )
 
     def _compute_output_shape(self) -> tuple:
@@ -1733,7 +1737,7 @@ class ConvTranspose(ConvBase):
             padded_inp,
             (self.krn_height, self.krn_width),
             (1, 1),
-            devide=self.config.DEVICE
+            devide=self.device
         )
 
         kernel_strech = torch.flip(
@@ -1766,7 +1770,7 @@ class ConvTranspose(ConvBase):
             filled_inp = torch.zeros(
                 (batch, self.output_size),
                 dtype=inp.dtype,
-                device=self.config.DEVICE
+                device=self.device
             ) 
             filled_inp[:, out_flag.flatten()] = inp
             filled_inp = filled_inp.reshape((batch,) + self.output_shape_no_batch())
@@ -1852,7 +1856,7 @@ class ConvTranspose(ConvBase):
         return ConvBase.get_non_pad_idxs(
             (self.out_ch, self.out_height, self.out_width),
             self.pads,
-            device=self.config.DEVICE
+            device=self.device
         )
 
     def get_non_pad_idx_flag(self) -> torch.Tensor:
@@ -1862,7 +1866,7 @@ class ConvTranspose(ConvBase):
         return ConvBase.get_non_pad_idx_flag(
             (self.out_ch, self.out_height, self.out_width),
             self.pads,
-            device=self.config.DEVICE
+            device=self.device
         )
 
     def _compute_output_shape(self) -> tuple:
@@ -2030,7 +2034,7 @@ class MaxPool(Node):
         """
         padded_inp = Conv.pad(inp, self.pads).reshape((self.in_ch(), 1) + inp.shape[-2:])
         im2col = Conv.im2col(
-            padded_inp, self.kernel_shape, self.strides, device=self.config.DEVICE
+            padded_inp, self.kernel_shape, self.strides, device=self.device
         )
         
         output = im2col.max(axis=0).reshape(
@@ -2337,7 +2341,7 @@ class Relu(Node):
                     self.active_flag, 
                     torch.Tensor(
                         self.state == ReluState.ACTIVE,
-                        device=self.config.DEVICE
+                        device=self.device
                     )
                 )
 
@@ -2363,7 +2367,7 @@ class Relu(Node):
                     self.inactive_flag, 
                     torch.Tensor(
                         self.state == ReluState.INACTIVE,
-                        device=self.config.DEVICE
+                        device=self.device
                     )
                 )
 
@@ -2392,7 +2396,7 @@ class Relu(Node):
                     self.unstable_flag,
                     torch.Tensor(
                         self.state == ReluState.UNSTABLE,
-                        device=self.config.DEVICE
+                        device=self.device
                     )
                 )
 
@@ -2515,7 +2519,7 @@ class Relu(Node):
             slope = torch.ones(
                 self.get_unstable_count(),
                 dtype=self.config.PRECISION,
-                device=self.config.DEVICE
+                device=self.device
             )
             lower = self.from_node[0].bounds.lower[self.get_unstable_flag()]
             upper = self.from_node[0].bounds.upper[self.get_unstable_flag()]
@@ -2663,7 +2667,7 @@ class Reshape(Node):
             return self.forward(self.from_node[0].get_propagation_flag())
 
         return torch.ones(
-            self.output_shape, dtype=torch.bool, device=self.config.DEVICE
+            self.output_shape, dtype=torch.bool, device=self.device
         )
 
     def get_propagation_count(self) -> torch.Tensor:
@@ -2807,7 +2811,7 @@ class Flatten(Node):
             return self.forward(self.from_node[0].get_propagation_flag())
 
         return torch.ones(
-            self.output_shape, dtype=torch.bool, device=self.config.DEVICE
+            self.output_shape, dtype=torch.bool, device=self.device
         )
     
     def get_propagation_count(self) -> torch.Tensor:

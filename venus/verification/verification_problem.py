@@ -209,6 +209,20 @@ class VerificationProblem(object):
         """
         self.nn.clean_vars()
         self.spec.clean_vars()
+        
+    def cuda(self):
+        """
+        Moves all data to gpu memory
+        """
+        self.nn.cuda()
+        self.spec.cuda()
+
+    def cpu(self):
+        """
+        Moves all data to cpu memory
+        """
+        self.nn.cpu()
+        self.spec.cpu()
 
     def to_string(self):
         return self.nn.model_path  + ' against ' + self.spec.to_string()

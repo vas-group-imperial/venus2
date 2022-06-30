@@ -565,7 +565,9 @@ class Specification:
         else:
             raise Exception("Unexpected type of formula", type(formula))
 
-    def get_output_flag(self, output_shape: tuple, formula: Formula=None):
+    def get_output_flag(
+            self, output_shape: tuple, formula: Formula=None, device=torch.device('cpu')
+    ):
         """
         Creates a boolean flag of the outputs units that the specification refers to.
 
@@ -583,7 +585,7 @@ class Specification:
             torch.zeros(
                 np.prod(output_shape),
                 dtype=torch.bool,
-                device=self.config.DEVICE
+                device=device
             )
         )
 
@@ -617,6 +619,18 @@ class Specification:
         Detaches and clones the bound tensors.
         """
         self.input_node.bounds.detach()
+
+    def cuda(self):
+        """
+        Moves all data to gpu memory
+        """
+        self.input_node.bounds = self.input_node.bounds.cuda()
+
+    def cpu(self):
+        """
+        Moves all data to cpu memory
+        """
+        self.input_node.bounds = self.input_node.bounds.cpu()
 
     def clean_vars(self):
         """

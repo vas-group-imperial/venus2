@@ -89,7 +89,11 @@ class NeuralNetwork:
         nn.tail = nn.node[self.tail.id]
 
         for i in self.node:
-            nn.node[i].from_node = [nn.node[j.id] for j in self.node[i].from_node if isinstance(j, Input) is not True]
+            nn.node[i].from_node = [
+                nn.node[j.id] 
+                for j in self.node[i].from_node 
+                if isinstance(j, Input) is not True
+            ]
             nn.node[i].to_node = [nn.node[j.id] for j in self.node[i].to_node]
  
         return nn
@@ -131,6 +135,24 @@ class NeuralNetwork:
         """
         for _, i in self.node.items():
             i.bounds.detach()
+
+    def cuda(self):
+        """
+        Moves all data to gpu memory
+        """
+        for _, i in self.node.items():
+            i.bounds = i.bounds.cuda()
+            if isinstance(i, Relu):
+                i.reset_state_flags()
+
+    def cpu(self):
+        """
+        Moves all data to cpu memory
+        """
+        for _, i in self.node.items():
+            i.bounds = i.bounds.cpu()
+            if isinstance(i, Relu):
+                i.reset_state_flags()
 
     def predict(self, inp: np.array, mean: float=0, std: float=1):
         """

@@ -130,7 +130,9 @@ class BSSIP:
             return node.to_node[0].get_unstable_flag()
 
         elif len(node.to_node) == 0:
-            return self.prob.spec.get_output_flag(node.output_shape)
+            return self.prob.spec.get_output_flag(
+                node.output_shape, device = self.config.SIP.DEVICE
+            )
         
         return None 
 
@@ -305,7 +307,7 @@ class BSSIP:
             unstable_idxs = concr_bounds < 0
             stable_idxs = torch.logical_not(unstable_idxs)
             flag = torch.zeros(
-                base_node.output_shape, dtype=torch.bool, device=self.config.DEVICE
+                base_node.output_shape, dtype=torch.bool, device=self.config.SIP.DEVICE
             )
             flag[instability_flag] = stable_idxs
             base_node.bounds.lower[flag] = torch.max(
@@ -326,7 +328,7 @@ class BSSIP:
             unstable_idxs = concr_bounds > 0
             stable_idxs = torch.logical_not(unstable_idxs)
             flag = torch.zeros(
-                base_node.output_shape, dtype=torch.bool, device=self.config.DEVICE
+                base_node.output_shape, dtype=torch.bool, device=self.config.SIP.DEVICE
             )
             flag[instability_flag] = stable_idxs
             base_node.bounds.upper[flag] = torch.min(
@@ -337,7 +339,7 @@ class BSSIP:
             raise Exception(f"Bound type {bound} not recognised.")
   
         flag = torch.zeros(
-            base_node.output_shape, dtype=torch.bool, device=self.config.DEVICE
+            base_node.output_shape, dtype=torch.bool, device=self.config.SIP.DEVICE
         )
         flag[instability_flag] = unstable_idxs
         reduced_eq = Equation(
@@ -367,7 +369,7 @@ class BSSIP:
             unstable_idxs = concr_bounds < 0
             stable_idxs = torch.logical_not(unstable_idxs)
             flag = torch.zeros(
-                base_node.output_shape, dtype=torch.bool, device=self.config.DEVICE
+                base_node.output_shape, dtype=torch.bool, device=self.config.SIP.DEVICE
             )
             flag[instability_flag] = stable_idxs
             base_node.bounds.lower[flag] = concr_bounds[stable_idxs] 
@@ -383,7 +385,7 @@ class BSSIP:
             unstable_idxs = concr_bounds > 0
             stable_idxs = torch.logical_not(unstable_idxs)
             flag = torch.zeros(
-                base_node.output_shape, dtype=torch.bool, device=self.config.DEVICE
+                base_node.output_shape, dtype=torch.bool, device=self.config.SIP.DEVICE
             )
             flag[instability_flag] = stable_idxs
             base_node.bounds.upper[flag] = concr_bounds[stable_idxs]
@@ -395,7 +397,7 @@ class BSSIP:
             raise Exception(f"Bound type {bound} not recognised.")
   
         flag = torch.zeros(
-            base_node.output_shape, dtype=torch.bool, device=self.config.DEVICE
+            base_node.output_shape, dtype=torch.bool, device=self.config.SIP.DEVICE
         )
         flag[instability_flag] = unstable_idxs
         reduced_eq = Equation(

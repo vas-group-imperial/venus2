@@ -317,7 +317,7 @@ class Equation():
         matrix = torch.zeros(
             (self.size,) + node.input_shape,
             dtype=node.config.PRECISION,
-            device=self.config.DEVICE
+            device=self.config.SIP.DEVICE
         )
         slices = slice(0, self.size) + node.slices
         matrix[slices] = self.matrix
@@ -448,7 +448,7 @@ class Equation():
                 sl = torch.ones(
                     node.output_size,
                     dtype=self.config.PRECISION,
-                    device=self.config.DEVICE
+                    device=self.config.SIP.DEVICE
                 )
                 sl[node.to_node[0].get_inactive_flag().flatten()] = 0.0
                 idxs = node.to_node[0].get_unstable_flag().flatten()
@@ -462,7 +462,7 @@ class Equation():
                 sl = torch.zeros(
                     node.output_size,
                     dtype=self.config.PRECISION,
-                    device=self.config.DEVICE
+                    device=self.config.SIP.DEVICE
                 )
                 idxs = node.to_node[0].get_unstable_flag().flatten()
                 lower = node.bounds.lower.flatten()[idxs] 
@@ -478,7 +478,7 @@ class Equation():
                 sl = torch.ones(
                     node.to_node[0].get_propagation_count(),
                     dtype=self.config.PRECISION,
-                    device=self.config.DEVICE
+                    device=self.config.SIP.DEVICE
                 ) 
                 upper = node.bounds.upper[out_flag].flatten()
                 lower = node.bounds.lower[out_flag].flatten()
@@ -497,7 +497,7 @@ class Equation():
                 sl = torch.ones(
                     node.to_node[0].get_propagation_count(),
                     dtype=self.config.PRECISION,
-                    device=self.config.DEVICE
+                    device=self.config.SIP.DEVICE
                 )
                 idxs = lower < 0
                 sl[idxs] = upper[idxs] /  (upper[idxs] - lower[idxs])
@@ -546,7 +546,7 @@ class Equation():
             lower_slope = torch.ones(
                 node.output_size,
                 dtype=self.config.PRECISION,
-                device=self.config.DEVICE
+                device=self.config.SIP.DEVICE
             )
 
             lower, upper = node.bounds.lower.flatten(), node.bounds.upper.flatten()
@@ -563,7 +563,7 @@ class Equation():
             upper_slope = torch.zeros(
                 node.output_size,
                 dtype=self.config.PRECISION,
-                device=self.config.DEVICE
+                device=self.config.SIP.DEVICE
             )
             idxs = node.to_node[0].get_unstable_flag().flatten()
             lower, upper = lower[idxs], upper[idxs]
@@ -582,7 +582,7 @@ class Equation():
             lower_slope = torch.ones(
                 node.to_node[0].get_propagation_count(),
                 dtype=self.config.PRECISION,
-                device=self.config.DEVICE
+                device=self.config.SIP.DEVICE
             )
        
             upper = node.bounds.upper[out_flag].flatten()
@@ -598,7 +598,7 @@ class Equation():
             upper_slope = torch.ones(
                 node.to_node[0].get_propagation_count(),
                 dtype=self.config.PRECISION,
-                device=self.config.DEVICE
+                device=self.config.SIP.DEVICE
             )
             idxs = lower < 0
             upper_slope[idxs] = upper[idxs] /  (upper[idxs] - lower[idxs])
@@ -652,7 +652,7 @@ class Equation():
                 for i in range(node.from_node[0].in_ch())
             ],
             dtype=torch.long,
-            device=self.config.DEVICE    
+            device=self.config.SIP.DEVICE    
         ).reshape((node.from_node[0].in_ch(), 1, 1))
         if node.has_batch_dimension():
             idx_correction = idx_correction[None, :]
@@ -667,7 +667,7 @@ class Equation():
         _minus = self._get_minus_matrix()
 
         upper_const = torch.zeros(
-            node.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
+            node.output_size, dtype=self.config.PRECISION, device=self.config.SIP.DEVICE
         )
         upper_const[not_lower_max] = node.from_node[0].bounds.upper.flatten()[indices][not_lower_max]
 
@@ -675,13 +675,13 @@ class Equation():
             plus_lower = torch.zeros(
                 (self.size, node.input_size),
                 dtype=self.config.PRECISION,
-                device=self.config.DEVICE
+                device=self.config.SIP.DEVICE
             )
             plus_lower[:, indices] = _plus
             minus_upper = torch.zeros(
                 (self.size, node.input_size),
                 dtype=self.config.PRECISION,
-                device=self.config.DEVICE
+                device=self.config.SIP.DEVICE
             )
             temp = minus_upper[:, indices]
             temp[:, lower_max] = _minus[:, lower_max]
@@ -695,13 +695,13 @@ class Equation():
             minus_lower = torch.zeros(
                 (self.size, node.input_size),
                 dtype=self.config.PRECISION,  
-                device=self.config.DEVICE
+                device=self.config.SIP.DEVICE
             )
             minus_lower[:, indices] = _minus
             plus_upper = torch.zeros(
                 (self.size, node.input_size),
                 dtype=self.config.PRECISION,
-                device=self.config.DEVICE
+                device=self.config.SIP.DEVICE
             )
             temp =  plus_upper[:, indices]
             temp[:, lower_max] = _plus[:, lower_max]
@@ -722,7 +722,7 @@ class Equation():
         idx_correction = torch.tensor(
             [i * node.in_ch_sz() for i in range(node.in_ch())],
             dtype=torch.long, 
-            device=self.config.DEVICE
+            device=self.config.SIP.DEVICE
         ).reshape((node.in_ch(), 1, 1))
         if node.has_batch_dimension():
             idx_correction = idx_correction[None, :]
@@ -734,20 +734,20 @@ class Equation():
         not_lower_max = torch.logical_not(lower_max)
 
         lower_slope = torch.zeros(
-            node.input_size, dtype=self.config.PRECISION, device=self.config.DEVICE
+            node.input_size, dtype=self.config.PRECISION, device=self.config.SIP.DEVICE
         )
         lower_slope[indices] = 1.0
         lower_const = torch.zeros(
-            node.input_size, dtype=self.config.PRECISION, device=self.config.DEVICE
+            node.input_size, dtype=self.config.PRECISION, device=self.config.SIP.DEVICE
         )
         lower_const[indices] = Equation._derive_const(node)[indices]
 
         upper_slope = torch.zeros(
-            node.input_size, dtype=self.config.PRECISION, device=self.config.DEVICE
+            node.input_size, dtype=self.config.PRECISION, device=self.config.SIP.DEVICE
         )
         upper_slope[indices][lower_max] = 1.0
         upper_const = torch.zeros(
-            node.input_size, dtype=self.config.PRECISION, device=self.config.DEVICE
+            node.input_size, dtype=self.config.PRECISION, device=self.config.SIP.DEVICE
         )
         upper_const[indices][lower_max] = Equation._derive_const(node)[indices][lower_max]
         upper_const[indices][not_lower_max] = node.bounds.upper.flatten()[indices][not_lower_max]
@@ -784,7 +784,7 @@ class Equation():
                 torch.zeros(
                     (torch.sum(flag), 0),
                     dtype=node.config.PRECISION,
-                    device=node.config.DEVICE
+                    device=node.config.SIP.DEVICE
                 ),
                 Equation._derive_const(node, flag),
                 node.config
@@ -801,7 +801,7 @@ class Equation():
     ):
         if out_flag is None:
             out_flag = torch.ones(
-                node.output_size, dtype=torch.bool, device=node.config.DEVICE
+                node.output_size, dtype=torch.bool, device=node.config.SIP.DEVICE
             )
         
         if isinstance(node, Conv):
@@ -856,7 +856,7 @@ class Equation():
         flag_size = torch.sum(out_flag).item()
 
         prop_flag = torch.zeros(
-            node.get_input_padded_size(), dtype=torch.bool, device=node.config.DEVICE
+            node.get_input_padded_size(), dtype=torch.bool, device=node.config.SIP.DEVICE
         )
         if in_flag is None:
             prop_flag[node.get_non_pad_idxs()] = True
@@ -868,24 +868,24 @@ class Equation():
         pad = torch.ones(
             node.get_input_padded_size(),
             dtype=torch.long,
-            device=node.config.DEVICE
+            device=node.config.SIP.DEVICE
         ) * max_index
-        pad[prop_flag] = torch.arange(max_index, device=node.config.DEVICE)
+        pad[prop_flag] = torch.arange(max_index, device=node.config.SIP.DEVICE)
 
         im2col = Conv.im2col(
             pad.reshape(node.get_input_padded_shape()),
             (node.krn_height, node.krn_width),
             node.strides,
-            device=node.config.DEVICE
+            device=node.config.SIP.DEVICE
         )
         indices = torch.arange(
             node.out_ch_sz,
-            device=node.config.DEVICE
+            device=node.config.SIP.DEVICE
         ).repeat(node.out_ch)[out_flag]
         conv_indices = im2col[:, indices]
 
         indices = torch.repeat_interleave(
-            torch.arange(node.out_ch, device=node.config.DEVICE), node.out_ch_sz, dim=0
+            torch.arange(node.out_ch, device=node.config.SIP.DEVICE), node.out_ch_sz, dim=0
         )[out_flag]
         conv_weights = node.kernels.permute(1, 2, 3, 0).reshape(-1, node.out_ch)[:, indices]
        
@@ -903,7 +903,7 @@ class Equation():
             matrix = torch.zeros(
                 (flag_size, max_index + 1),
                 dtype=node.config.PRECISION,
-                device=node.config.DEVICE
+                device=node.config.SIP.DEVICE
             )
             matrix[torch.arange(flag_size), conv_indices] = conv_weights
             matrix = matrix[:, :max_index]
@@ -949,11 +949,11 @@ class Equation():
     def _derive_matmul_const(node: Node, flag: torch.Tensor):
         if flag is None:
             return torch.zeros(
-                node.output_size, dtype=node.weights.dtype, device=node.config.DEVICE
+                node.output_size, dtype=node.weights.dtype, device=node.config.SIP.DEVICE
             )
 
         return torch.zeros(
-            torch.sum(flag), dtype=node.weights.dtype, device=node.config.DEVICE
+            torch.sum(flag), dtype=node.weights.dtype, device=node.config.SIP.DEVICE
         )
 
     @staticmethod 
@@ -962,13 +962,13 @@ class Equation():
             matrix =  torch.identity(
                 node.input_size,
                 dtype=node.config.PRECISION,
-                device=node.config.DEVICE
+                device=node.config.SIP.DEVICE
             )[flag, :]
         else:
             matrix = torch.zeros(
                 (node.output_size, 2 * node.output_size),
                 dtype=node.config.PRECISION,
-                device=node.config.DEVICE
+                device=node.config.SIP.DEVICE
             )
             matrix[range(node.output_size), range(node.output_size)] = 1
             matrix[range(node.output_size), range(node.output_size, 2 * node.output_size)] = 1
@@ -981,13 +981,13 @@ class Equation():
             return torch.zeros(
                 node.output_size,
                 dtype=node.config.PRECISION,
-                device=node.config.DEVICE
+                device=node.config.SIP.DEVICE
             )
 
         return torch.zeros(
             torch.sum(flag).item(),
             dtype=node.config.PRECISION,
-            device=node.config.DEVICE
+            device=node.config.SIP.DEVICE
         )
 
     @staticmethod 
@@ -998,14 +998,14 @@ class Equation():
             return torch.eye(
                 node.output_size,
                 dtype=node.config.PRECISION,
-                device=node.config.DEVICE
+                device=node.config.SIP.DEVICE
             ).squeeze()[out_flag, :]
 
         
         return torch.eye(
             node.output_size,
             dtype=node.config.PRECISION,
-            device=node.config.DEVICE
+            device=node.config.SIP.DEVICE
         ).squeeze()[out_flag, :][:, in_flag]
 
     @staticmethod
@@ -1014,13 +1014,13 @@ class Equation():
             return torch.zeros(
                 node.output_size,
                 dtype=node.config.PRECISION,
-                device=node.config.DEVICE
+                device=node.config.SIP.DEVICE
             )
 
         return torch.zeros(
             torch.sum(flag).item(),
             dtype=node.config.PRECISION,
-            device=node.config.DEVICE
+            device=node.config.SIP.DEVICE
         )
 
     @staticmethod
@@ -1029,13 +1029,13 @@ class Equation():
             return torch.zeros(
                 node.output_size,
                 dtype=node.config.PRECISION,
-                device=node.config.DEVICE
+                device=node.config.SIP.DEVICE
             )
 
         return torch.zeros(
             torch.sum(flag).item(),
             dtype=node.config.PRECISION,
-            device=node.config.DEVICE
+            device=node.config.SIP.DEVICE
         )
 
     @staticmethod

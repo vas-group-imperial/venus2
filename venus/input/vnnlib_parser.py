@@ -118,10 +118,10 @@ class VNNParser(Parser):
         self.config = config
         self.i_b = [
             torch.full(
-                (self.X_SZ,), -math.inf, dtype=config.PRECISION, device=config.DEVICE
+                (self.X_SZ,), -math.inf, dtype=config.PRECISION, device='cpu'
             ),
             torch.full(
-                (self.X_SZ,), math.inf, dtype=config.PRECISION, device=config.DEVICE
+                (self.X_SZ,), math.inf, dtype=config.PRECISION, device='cpu'
             )
         ]
         self.o_f = None
@@ -178,12 +178,12 @@ class VNNParser(Parser):
             torch.ones(
                 self.X_SZ,
                 dtype=self.config.PRECISION,
-                device=self.config.DEVICE
+                device='cpu'
             ) * -math.inf,  
             torch.ones(
                 self.X_SZ,
                 dtype=self.config.PRECISION,
-                device=self.config.DEVICE
+                device='cpu'
             ) * math.inf
         ]
         o_f_terms =  []
