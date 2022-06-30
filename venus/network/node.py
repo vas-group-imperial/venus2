@@ -244,10 +244,10 @@ class Node:
                 be for all units.
         """
         if flag is None:
-            self.bounds = bounds
+            self.bounds = bounds.cpu()
         else:
-            self.bounds.lower[flag] = bounds.lower
-            self.bounds.upper[flag] = bounds.upper
+            self.bounds.lower[flag] = bounds.lower.cpu()
+            self.bounds.upper[flag] = bounds.upper.cpu()
 
         if self.has_relu_activation():
             self.to_node[0].reset_state_flags()
@@ -597,7 +597,7 @@ class Gemm(Node):
         Returns: 
             the output of the node.
         """
-        output = self.weights.numpy() @ inp + self.bias.numpy()
+        output = self.weights.cpu().numpy() @ inp + self.bias.cpu().numpy()
 
         if save_output is True:
             self.output = output
@@ -699,7 +699,7 @@ class MatMul(Node):
             self.to_node,
             self.input_shape,
             self.output_shape,
-            self.weights.numpy(),
+            self.weights.cpu().numpy(),
             self.config,
             depth=self.depth,
             bounds=self.bounds,
@@ -810,7 +810,7 @@ class MatMul(Node):
         Returns: 
             the output of the node.
         """
-        output = self.weights.numpy() @ inp 
+        output = self.weights.cpu().numpy() @ inp 
 
         if save_output is True:
             self.output = output
@@ -1172,8 +1172,8 @@ class Conv(ConvBase):
             self.to_node,
             self.input_shape,
             self.output_shape,
-            self.kernels.numpy(),
-            self.bias.numpy(),
+            self.kernels.cpu().numpy(),
+            self.bias.cpu().numpy(),
             self.pads,
             self.strides,
             self.config,
@@ -1323,10 +1323,12 @@ class Conv(ConvBase):
             device=self.config.DEVICE
         )
 
-        kernel_strech = self.kernels.reshape(self.out_ch, -1).numpy()
+        kernel_strech = self.kernels.reshape(self.out_ch, -1).cpu().numpy()
 
         output = np.tensordot(kernel_strech, inp_strech, axes=([1], [0]))
-        output = output.flatten() + np.tile(self.bias.numpy(), (self.out_ch_sz, 1)).T.flatten()
+        output = output.flatten() + np.tile(
+            self.bias.cpu().numpy(), (self.out_ch_sz, 1)
+        ).T.flatten()
         output = output.reshape(self.output_shape)
 
         if save_output is True:
@@ -1595,8 +1597,8 @@ class ConvTranspose(ConvBase):
             self.from_node,
             self.to_node,
             self.input_shape,
-            self.kernels.numpy(),
-            self.bias.numpy(),
+            self.kernels.cpu().cpu().numpy(),
+            self.bias.cpu().cpu().numpy(),
             self.pads,
             self.output_pads,
             self.strides,
@@ -1736,12 +1738,14 @@ class ConvTranspose(ConvBase):
 
         kernel_strech = torch.flip(
             self.kernels.permute(1, 0, 2, 3), dims=[2, 3]
-        ).reshape(self.out_ch, -1).numpy()
+        ).reshape(self.out_ch, -1).cpu().numpy()
 
         output = np.tensordot(kernel_strech, inp_strech, axes = ([1], [0]))
         pad_flag = self.get_non_pad_idx_flag().flatten()
         output = output.flatten()[pad_flag]
-        output = output + np.tile(self.bias.numpy(), (self.out_ch_sz, 1)).T.flatten()
+        output = output + np.tile(
+            self.bias.cpu().numpy(), (self.out_ch_sz, 1)
+        ).T.flatten()
         output = output.reshape(self.output_shape)
 
         if save_output is True:
@@ -2879,7 +2883,7 @@ class Sub(Node):
             self.to_node,
             self.input_shape,
             self.config,
-            const=None if self.const is None else self.const.numpy(),
+            const=None if self.const is None else self.const.cpu().numpy(),
             depth=self.depth,
             bounds=self.bounds,
             id=self.id
@@ -3053,7 +3057,7 @@ class Add(Node):
             self.to_node,
             self.input_shape,
             self.config,
-            const = None if self.const is None else self.const.numpy(),
+            const = None if self.const is None else self.const.cpu().numpy(),
             depth=self.depth,
             bounds=self.bounds,
             id=self.id
@@ -3155,7 +3159,7 @@ class Add(Node):
         assert inp1 is not None or self.from_node[0].output is not None
         assert inp2 is not None or self.const is not None
 
-        inp2 = self.const.numpy() if inp2 is None else inp2
+        inp2 = self.const.cpu().numpy() if inp2 is None else inp2
 
         output = inp1 + inp2
 
@@ -3332,10 +3336,10 @@ class BatchNormalization(Node):
         """
         in_ch_sz = self.in_ch_sz()
         
-        scale = np.tile(self.scale.numpy(), (in_ch_sz, 1)).T.flatten()
-        bias = np.tile(self.bias.numpy(), (in_ch_sz, 1)).T.flatten()
-        input_mean = np.tile(self.input_mean.numpy(), (in_ch_sz, 1)).T.flatten()
-        var = np.sqrt(self.input_var.numpy() + self.epsilon)
+        scale = np.tile(self.scale.cpu().numpy(), (in_ch_sz, 1)).T.flatten()
+        bias = np.tile(self.bias.cpu().numpy(), (in_ch_sz, 1)).T.flatten()
+        input_mean = np.tile(self.input_mean.cpu().numpy(), (in_ch_sz, 1)).T.flatten()
+        var = np.sqrt(self.input_var.cpu().numpy() + self.epsilon)
         var = np.tile(var, (in_ch_sz, 1)).T.flatten()
 
         output = (inp.flatten() - input_mean) / var * scale + bias

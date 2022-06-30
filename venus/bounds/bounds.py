@@ -78,4 +78,15 @@ class Bounds:
         if self.upper is not None:
             self.upper = self.upper.detach().clone()
 
+    def cpu(self):
+        """ 
+        Moves bounds to cpu memory.
+        """
+        lower = self.lower.cpu() if self.lower is not None else None
+        upper = self.upper.cpu() if self.upper is not None else None
 
+        return Bounds(lower, upper)
+        if self.lower is not None:
+            self.lower = self.lower.cpu()
+        if self.upper is not None:
+            self.upper = self.upper.cpu()
