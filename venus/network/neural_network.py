@@ -141,18 +141,14 @@ class NeuralNetwork:
         Moves all data to gpu memory
         """
         for _, i in self.node.items():
-            i.bounds = i.bounds.cuda()
-            if isinstance(i, Relu):
-                i.reset_state_flags()
+            i.cuda()
 
     def cpu(self):
         """
         Moves all data to cpu memory
         """
         for _, i in self.node.items():
-            i.bounds = i.bounds.cpu()
-            if isinstance(i, Relu):
-                i.reset_state_flags()
+            i.cpu()
 
     def predict(self, inp: np.array, mean: float=0, std: float=1):
         """
