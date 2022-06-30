@@ -997,7 +997,7 @@ class ConvBase(Node):
 
             return np.pad(inp, pad_par, 'constant', constant_values=values)
 
-        elif isinstance(inp, torch.Tensor):, device=self.config.DEVICE
+        elif isinstance(inp, torch.Tensor):
             pad_par = (pads[1], pads[1], pads[0], pads[0])
 
             return torch.nn.functional.pad(inp, pad_par, 'constant', 0)
@@ -1008,7 +1008,7 @@ class ConvBase(Node):
 
     @staticmethod
     def im2col(
-        matrix: torch.Tensor, kernel_shape: tuple, strides: tuple, device=device
+        matrix: torch.Tensor, kernel_shape: tuple, strides: tuple, device: str='cpu'
     ) -> torch.Tensor:
         """
         im2col function.
@@ -1038,29 +1038,34 @@ class ConvBase(Node):
         if isinstance(matrix, torch.Tensor):
             start_idx = torch.arange(
                 kernel_shape[0], device=device
-            )[:, None] * width
-            start_idx += toch.arange(kernel_shape[1], device=device)
+            )[:, None] * width + torch.arange(kernel_shape[1], device=device)
+            offset_filter = torch.arange(
+                0, filters * height * width, height * width, device=device
+            ).reshape(-1, 1)
         else:
-            start_idx = np.arange(kernel_shape[0])[:, None] * width
-            start_idx += np.arange(kernel_shape[1])
+            start_idx = np.arange(
+                kernel_shape[0]
+            )[:, None] * width + np.arange(kernel_shape[1])
+            offset_filter = np.arange(
+                0, filters * height * width, height * width
+            ).reshape(-1, 1)
 
         start_idx = start_idx.flatten()[None, :]
-        offset_filter = np.arange(
-            0, filters * height * width, height * width
-        ).reshape(-1, 1)
         start_idx = start_idx + offset_filter
 
         # offsetted indices across the height and width of A
         if isinstance(matrix, torch.Tensor):
             offset_idx = torch.arange(
                 row_extent, device=device
-            )[:, None][::strides[0]] * width 
-            offset_idx = torch.arange(
+            )[:, None][::strides[0]] * width + torch.arange(
                 0, col_extent, strides[1], device=device
             )
         else: 
-            offset_idx = np.arange(row_extent)[:, None][::strides[0]] * width
-            offset_idx += no.arange(0, col_extent, strides[1])
+            offset_idx = np.arange(
+                row_extent
+            )[:, None][::strides[0]] * width + np.arange(
+                0, col_extent, strides[1]
+            )
 
         index = start_idx.ravel()[:, None] + offset_idx.ravel()
 

@@ -14,19 +14,23 @@ import numpy as np
 import torch
 
 from venus.specification.formula import *
+from venus.common.configuration import Config
 
 class Specification:
 
-    def __init__(self, input_node, output_formula, name=None):
+    def __init__(self, input_node, output_formula, config: Config, name=None):
         """
         Arguments:
             input_node:
                 The input node.
             output_formula:
                 The formula encoding output constraints.
+            config:
+                Configuration.
         """
         self.input_node = input_node
         self.output_formula = output_formula
+        self.config = config
         self.name = name
 
     def get_output_constrs(self, gmodel, output_vars):

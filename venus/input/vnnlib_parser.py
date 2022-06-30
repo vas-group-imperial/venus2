@@ -47,6 +47,7 @@ class VNNLIBParser:
                 Specification(
                     Input(bounds, self.config),
                     NegationFormula(o_f).to_NNF(),
+                    self.config,
                     os.path.basename(self.pf)[1]
                 )
             )
@@ -65,6 +66,7 @@ class VNNLIBParser:
                     Specification(
                         Input(clause[0][0], clause[0][1]),
                         NegationFormula(f).to_NNF(),
+                        self.config,
                         os.path.basename(self.pf)[1]
                     )
                 )

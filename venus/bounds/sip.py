@@ -105,7 +105,6 @@ class SIP:
                 # check eligibility for symbolic equations
                 symb_elg = self.is_symb_eq_eligible(j)
 
-
                 # set one step symbolic bounds
                 if self.config.SIP.ONE_STEP_SYMBOLIC is True:
                     os_sip.forward(j, lower_slopes, upper_slopes)
@@ -121,7 +120,7 @@ class SIP:
                     if self.config.SIP.ONE_STEP_SYMBOLIC is True and \
                     self.config.SIP.EQ_CONCRETISATION is True and \
                     i > 2:
-                        if os_count * 4 > ia_count:
+                        if os_count * 5 > ia_count:
                             concretisations = os_sip
                         else:
                             os_sip.clear_equations()
