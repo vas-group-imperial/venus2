@@ -575,7 +575,12 @@ class Specification:
         """
         output_formula = self.output_formula if formula is None else formula
         flag = self._get_output_flag(
-            output_formula, torch.zeros(np.prod(output_shape), dtype=torch.bool)
+            output_formula,
+            torch.zeros(
+                np.prod(output_shape),
+                dtype=torch.bool,
+                device=self.config.DEVICE
+            )
         )
 
         return flag.reshape(output_shape)

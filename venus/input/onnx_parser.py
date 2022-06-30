@@ -364,7 +364,9 @@ class ONNXParser:
         if attr is not None:
             end = attr.i
       
-        shape = torch.tensor(input_shape[start: end], dtype=torch.int32)
+        shape = torch.tensor(
+            input_shape[start: end], dtype=torch.int32, device=self.config.DEVICE
+        )
 
         return Constant([], shape, self.config)
 
@@ -435,15 +437,23 @@ class ONNXParser:
         if node.input[3] in venus_nodes or node.input[3] in init:
             axes = self._to_tensor(node.input[3], venus_nodes, init).int()
         else:
-            axes = torch.tensor([
-                i for i in range(
-                    len(input_shape) - 1, len(input_shape) - len(starts) - 1, -1
-                )
-            ])
+            axes = torch.tensor(
+                [
+                    i for i in range(
+                        len(input_shape) - 1, len(input_shape) - len(starts) - 1, -1
+                    )
+                ],
+                dtype=torch.int32,
+                device=self.config.DEVICE
+            )
         if node.input[4] in venus_nodes or node.input[4] in init:
             steps = self._to_tensor(node.input[4], venus_nodes, init).int()
         else:
-            steps = torch.tensor([1 for i in range(len(starts))])
+            steps = torch.tensor(
+                [1 for i in range(len(starts))],
+                dtype=torch.int32,
+                device=self.config.DEVICE
+            )
 
         slices, cur_axis = [], 0
         for i in range(len(input_shape)):

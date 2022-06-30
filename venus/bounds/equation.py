@@ -136,6 +136,43 @@ class Equation():
         """
         Computes the interval dot product with either a matrix or an Equation.
         """
+        if isinstance(lower, Equation) and isinstance(upper, Equation):
+            return self._interval_dot_eq(bound, lower, upper)
+
+        elif isinstance(lower, torch.Tensor) and isinstance(upper, torch.Tensor):
+            return self._interval_dot_tensor(bound, lower, upper)
+
+        else: 
+            raise TypeError(f'Got {type(lower)} and {type(upper)} but expected either trensor or Equation')
+
+    def _interval_dot_eq(
+        self, bound: str, lower: torch.Tensor, upper: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Computes the interval dot product with an Equation.
+        """
+        plus, minus = self._get_plus_matrix(), self._get_minus_matrix()
+
+        if bound == 'upper':
+            matrix =  plus @ upper.matrix + minus @ lower.matrix
+            const = plus @ upper.const + minus @ lower.const + self.const
+
+        elif bound == 'lower':
+            matrix = plus @ lower.matrix + minus @ upper.matrix
+            const = plus @ lower.const + minus @ upper.const + self.const
+
+        else: 
+            raise ValueError(f'Bound {bound} is not recognised.')
+
+        return Equation(matrix, const, self.config)
+
+
+    def _interval_dot_tensor(
+        self, bound: str, lower: torch.Tensor, upper: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Computes the interval dot product with either a tensor
+        """
         if bound == 'upper':
             return self._get_plus_matrix() @ upper + \
                 self._get_minus_matrix() @ lower + \
@@ -148,30 +185,6 @@ class Equation():
 
         else: 
             raise ValueError(f'Bound {bound} is not recognised.')
-
-
-    def split_dot(self, a, b):
-        size = a.shape[0] 
-        c = np.empty(shape=(size, b.shape[1]))
-        # est = sys.getsizeof(m) + sys.getsizeof(o) + 2*sys.getsizeof(self.matrix) + sys.getsizeof(eqlow.matrix)
-        # est *= 1.2
-        # avl = psutil.virtual_memory().available 
-        # dec  =  max(int(math.ceil(est/avl)),1)
-        # dec = 256
-        # if X < dec:
-            # ch = X
-        # else:
-            # ch = int(X / dec)
-            
-        ch = int(size / 16)
-
-        for i in range(0, size - (size % ch), ch):
-            c[range(i, i+ch), :] = np.dot(a[range(i, i+ch), :], b)
-
-        left = size - (size % ch)
-        c[range(left, size), :] = np.dot(a[range(left, size), :], b)
-
-        return c
 
     def forward(self, node: Node, bound=None, slopes=None):
         if type(node) in [Gemm]:
@@ -302,7 +315,9 @@ class Equation():
         
     def _transpose_slice(self, node: Node):
         matrix = torch.zeros(
-            (self.size,) + node.input_shape, dtype=node.config.PRECISION
+            (self.size,) + node.input_shape,
+            dtype=node.config.PRECISION,
+            device=self.config.DEVICE
         )
         slices = slice(0, self.size) + node.slices
         matrix[slices] = self.matrix
@@ -430,7 +445,11 @@ class Equation():
     ) -> torch.Tensor:
         if out_flag is None:
             if slope_type  == 'lower':
-                sl = torch.ones(node.output_size, dtype=self.config.PRECISION)
+                sl = torch.ones(
+                    node.output_size,
+                    dtype=self.config.PRECISION,
+                    device=self.config.DEVICE
+                )
                 sl[node.to_node[0].get_inactive_flag().flatten()] = 0.0
                 idxs = node.to_node[0].get_unstable_flag().flatten()
                 if slopes is None:
@@ -440,7 +459,11 @@ class Equation():
                     sl[idxs] = slopes
 
             elif slope_type == 'upper':
-                sl = torch.zeros(node.output_size, dtype=self.config.PRECISION)
+                sl = torch.zeros(
+                    node.output_size,
+                    dtype=self.config.PRECISION,
+                    device=self.config.DEVICE
+                )
                 idxs = node.to_node[0].get_unstable_flag().flatten()
                 lower = node.bounds.lower.flatten()[idxs] 
                 upper = node.bounds.upper.flatten()[idxs]
@@ -453,7 +476,9 @@ class Equation():
         else:
             if slope_type == 'lower':
                 sl = torch.ones(
-                    node.to_node[0].get_propagation_count(), dtype=self.config.PRECISION
+                    node.to_node[0].get_propagation_count(),
+                    dtype=self.config.PRECISION,
+                    device=self.config.DEVICE
                 ) 
                 upper = node.bounds.upper[out_flag].flatten()
                 lower = node.bounds.lower[out_flag].flatten()
@@ -470,7 +495,9 @@ class Equation():
                 upper = node.bounds.upper[out_flag].flatten()
                 
                 sl = torch.ones(
-                    node.to_node[0].get_propagation_count(), dtype=self.config.PRECISION
+                    node.to_node[0].get_propagation_count(),
+                    dtype=self.config.PRECISION,
+                    device=self.config.DEVICE
                 )
                 idxs = lower < 0
                 sl[idxs] = upper[idxs] /  (upper[idxs] - lower[idxs])
@@ -517,7 +544,9 @@ class Equation():
     def get_relu_relaxation(self, node: Node, bound:str, out_flag: torch.tensor, slopes: torch.tensor) -> tuple:
         if out_flag is None:
             lower_slope = torch.ones(
-                node.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
+                node.output_size,
+                dtype=self.config.PRECISION,
+                device=self.config.DEVICE
             )
 
             lower, upper = node.bounds.lower.flatten(), node.bounds.upper.flatten()
@@ -532,7 +561,9 @@ class Equation():
                 lower_slope[idxs] = slopes
 
             upper_slope = torch.zeros(
-                node.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
+                node.output_size,
+                dtype=self.config.PRECISION,
+                device=self.config.DEVICE
             )
             idxs = node.to_node[0].get_unstable_flag().flatten()
             lower, upper = lower[idxs], upper[idxs]
@@ -616,7 +647,12 @@ class Equation():
         lower, indices = node.forward(node.from_node[0].bounds.lower, return_indices=True)
         
         idx_correction = torch.tensor(
-            [i * node.from_node[0].in_ch_sz() for i in range(node.from_node[0].in_ch())]
+            [
+                i * node.from_node[0].in_ch_sz() 
+                for i in range(node.from_node[0].in_ch())
+            ],
+            dtype=torch.long,
+            device=self.config.DEVICE    
         ).reshape((node.from_node[0].in_ch(), 1, 1))
         if node.has_batch_dimension():
             idx_correction = idx_correction[None, :]
@@ -631,17 +667,21 @@ class Equation():
         _minus = self._get_minus_matrix()
 
         upper_const = torch.zeros(
-            node.output_size, dtype=self.config.PRECISION
+            node.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
         )
         upper_const[not_lower_max] = node.from_node[0].bounds.upper.flatten()[indices][not_lower_max]
 
         if bound == 'lower':
             plus_lower = torch.zeros(
-                (self.size, node.input_size), dtype=self.config.PRECISION
+                (self.size, node.input_size),
+                dtype=self.config.PRECISION,
+                device=self.config.DEVICE
             )
             plus_lower[:, indices] = _plus
             minus_upper = torch.zeros(
-                (self.size, node.input_size), dtype=self.config.PRECISION
+                (self.size, node.input_size),
+                dtype=self.config.PRECISION,
+                device=self.config.DEVICE
             )
             temp = minus_upper[:, indices]
             temp[:, lower_max] = _minus[:, lower_max]
@@ -653,11 +693,15 @@ class Equation():
 
         elif bound == 'upper':
             minus_lower = torch.zeros(
-                (self.size, node.input_size), dtype=self.config.PRECISION
+                (self.size, node.input_size),
+                dtype=self.config.PRECISION,  
+                device=self.config.DEVICE
             )
             minus_lower[:, indices] = _minus
             plus_upper = torch.zeros(
-                (self.size, node.input_size), dtype=self.config.PRECISION
+                (self.size, node.input_size),
+                dtype=self.config.PRECISION,
+                device=self.config.DEVICE
             )
             temp =  plus_upper[:, indices]
             temp[:, lower_max] = _plus[:, lower_max]
@@ -676,7 +720,9 @@ class Equation():
         lower, indices = node.to_node[0].forward(node.bounds.lower, return_indices=True)
         
         idx_correction = torch.tensor(
-            [i * node.in_ch_sz() for i in range(node.in_ch())]
+            [i * node.in_ch_sz() for i in range(node.in_ch())],
+            dtype=torch.long, 
+            device=self.config.DEVICE
         ).reshape((node.in_ch(), 1, 1))
         if node.has_batch_dimension():
             idx_correction = idx_correction[None, :]
@@ -735,7 +781,11 @@ class Equation():
         if isinstance(node.from_node[0], Relu) and \
         node.from_node[0].get_propagation_count() == 0:
             return Equation(
-                np.zeros((torch.sum(flag), 0)),
+                torch.zeros(
+                    (torch.sum(flag), 0),
+                    dtype=node.config.PRECISION,
+                    device=node.config.DEVICE
+                ),
                 Equation._derive_const(node, flag),
                 node.config
             )
@@ -749,7 +799,10 @@ class Equation():
             in_flag: torch.Tensor=None,
             sparse: bool=False
     ):
-        out_flag = torch.ones(node.output_size, dtype=torch.bool) if out_flag is None else out_flag
+        if out_flag is None:
+            out_flag = torch.ones(
+                node.output_size, dtype=torch.bool, device=node.config.DEVICE
+            )
         
         if isinstance(node, Conv):
             return Equation._derive_conv_matrix(node, out_flag, in_flag, sparse)
@@ -802,7 +855,9 @@ class Equation():
     ):
         flag_size = torch.sum(out_flag).item()
 
-        prop_flag = torch.zeros(node.get_input_padded_size(), dtype=torch.bool)
+        prop_flag = torch.zeros(
+            node.get_input_padded_size(), dtype=torch.bool, device=node.config.DEVICE
+        )
         if in_flag is None:
             prop_flag[node.get_non_pad_idxs()] = True
             max_index = node.input_size
@@ -812,20 +867,24 @@ class Equation():
 
         pad = torch.ones(
             node.get_input_padded_size(),
-            dtype=torch.long
+            dtype=torch.long,
+            device=node.config.DEVICE
         ) * max_index
-        pad[prop_flag] = torch.arange(max_index)
+        pad[prop_flag] = torch.arange(max_index, device=node.config.DEVICE)
 
         im2col = Conv.im2col(
             pad.reshape(node.get_input_padded_shape()),
             (node.krn_height, node.krn_width),
             node.strides
         )
-        indices = torch.arange(node.out_ch_sz).repeat(node.out_ch)[out_flag]
+        indices = torch.arange(
+            node.out_ch_sz,
+            device=node.config.DEVICE
+        ).repeat(node.out_ch)[out_flag]
         conv_indices = im2col[:, indices]
 
         indices = torch.repeat_interleave(
-            torch.arange(node.out_ch), node.out_ch_sz, dim=0
+            torch.arange(node.out_ch, device=node.config.DEVICE), node.out_ch_sz, dim=0
         )[out_flag]
         conv_weights = node.kernels.permute(1, 2, 3, 0).reshape(-1, node.out_ch)[:, indices]
        
@@ -841,7 +900,9 @@ class Equation():
         
         else:
             matrix = torch.zeros(
-                (flag_size, max_index + 1), dtype=node.config.PRECISION
+                (flag_size, max_index + 1),
+                dtype=node.config.PRECISION,
+                device=node.config.DEVICE
             )
             matrix[torch.arange(flag_size), conv_indices] = conv_weights
             matrix = matrix[:, :max_index]
@@ -886,16 +947,28 @@ class Equation():
     @staticmethod 
     def _derive_matmul_const(node: Node, flag: torch.Tensor):
         if flag is None:
-            return torch.zeros(node.output_size, dtype=node.weights.dtype)
+            return torch.zeros(
+                node.output_size, dtype=node.weights.dtype, device=node.config.DEVICE
+            )
 
-        return torch.zeros(torch.sum(flag), dtype=node.weights.dtype )
+        return torch.zeros(
+            torch.sum(flag), dtype=node.weights.dtype, device=node.config.DEVICE
+        )
 
     @staticmethod 
     def _derive_add_matrix(node: Node, flag: torch.Tensor):
         if node.const is not None:
-            matrix =  torch.identity(node.input_size, dtype=node.config.PRECISION)[flag, :]
+            matrix =  torch.identity(
+                node.input_size,
+                dtype=node.config.PRECISION,
+                device=node.config.DEVICE
+            )[flag, :]
         else:
-            matrix = torch.zeros((node.output_size, 2 * node.output_size), dtype=node.config.PRECISION)
+            matrix = torch.zeros(
+                (node.output_size, 2 * node.output_size),
+                dtype=node.config.PRECISION,
+                device=node.config.DEVICE
+            )
             matrix[range(node.output_size), range(node.output_size)] = 1
             matrix[range(node.output_size), range(node.output_size, 2 * node.output_size)] = 1
 
@@ -905,11 +978,15 @@ class Equation():
     def _derive_add_const(node: Node, flag: torch.Tensor):
         if flag is None:
             return torch.zeros(
-                node.output_size, dtype=node.config.PRECISION, device=node.config.DEVICE
+                node.output_size,
+                dtype=node.config.PRECISION,
+                device=node.config.DEVICE
             )
 
         return torch.zeros(
-            torch.sum(flag).item(), dtype=node.config.PRECISION, device=node.config.DEVICE
+            torch.sum(flag).item(),
+            dtype=node.config.PRECISION,
+            device=node.config.DEVICE
         )
 
     @staticmethod 
@@ -918,32 +995,46 @@ class Equation():
     ):
         if in_flag is None:
             return torch.eye(
-                node.output_size, dtype=node.config.PRECISION
+                node.output_size,
+                dtype=node.config.PRECISION,
+                device=node.config.DEVICE
             ).squeeze()[out_flag, :]
 
         
         return torch.eye(
-            node.output_size, dtype=node.config.PRECISION
+            node.output_size,
+            dtype=node.config.PRECISION,
+            device=node.config.DEVICE
         ).squeeze()[out_flag, :][:, in_flag]
 
     @staticmethod
     def _derive_flatten_const(node: Node, flag: torch.Tensor):
         if flag is None:
-            return torch.zeros(node.output_size, dtype=node.config.PRECISION)
+            return torch.zeros(
+                node.output_size,
+                dtype=node.config.PRECISION,
+                device=node.config.DEVICE
+            )
 
         return torch.zeros(
-            torch.sum(flag).item(), dtype=node.config.PRECISION, device=node.config.DEVICE
+            torch.sum(flag).item(),
+            dtype=node.config.PRECISION,
+            device=node.config.DEVICE
         )
 
     @staticmethod
     def _derive_batchnormalization_const(node: Node, flag: torch.Tensor):
         if flag is None:
             return torch.zeros(
-                node.output_size, dtype=node.config.PRECISION, device=node.config.DEVICE
+                node.output_size,
+                dtype=node.config.PRECISION,
+                device=node.config.DEVICE
             )
 
         return torch.zeros(
-            torch.sum(flag).item(), dtype=node.config.PRECISION, device=node.config.DEVICE
+            torch.sum(flag).item(),
+            dtype=node.config.PRECISION,
+            device=node.config.DEVICE
         )
 
     @staticmethod

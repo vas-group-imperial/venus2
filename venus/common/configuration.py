@@ -121,8 +121,13 @@ class SIP():
         self.ONE_STEP_SYMBOLIC = True
         # symbolic bounds using back-substitution
         self.SYMBOLIC = True
+        # whether to concretise bounds during back substitution
+        self.CONCRETISATION = False
+        # whether to concretise bounds during back substitution using one step
+        # equations - for this to work ONE_STEP_SYMBOLIC needs to be true.
+        self.EQ_CONCRETISATION = True
         # relu approximation
-        self.RELU_APPROXIMATION = ReluApproximation.VENUS
+        self.RELU_APPROXIMATION = ReluApproximation.MIN_AREA
         # formula simplificaton
         self.SIMPLIFY_FORMULA: bool = False
         # whether to use gradient descent optimisation of slopes

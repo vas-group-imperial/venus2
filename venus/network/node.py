@@ -313,7 +313,9 @@ class Node:
         if self.has_relu_activation():
             return self.to_node[0].get_propagation_flag()
 
-        return torch.ones(self.output_shape, dtype=torch.bool)
+        return torch.ones(
+            self.output_shape, dtype=torch.bool, device=self.config.DEVICE
+        )
  
     def get_propagation_count(self) -> torch.Tensor:
         if self.has_relu_activation():
@@ -729,7 +731,9 @@ class MatMul(Node):
         """
         return self.weights[index1, index2]
     
-    def forward(self, inp: torch.Tensor=None, clip: str=None, save_output=False) -> torch.Tensor:
+    def forward(
+        self, inp: torch.Tensor=None, clip: str=None, save_output=False
+    ) -> torch.Tensor:
         """
         Computes the output of the node given an input.
 
@@ -757,7 +761,9 @@ class MatMul(Node):
             raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
 
 
-    def _forward_torch(self, inp: torch.Tensor=None, clip: str=None, save_output=False) -> torch.Tensor:
+    def _forward_torch(
+        self, inp: torch.Tensor=None, clip: str=None, save_output=False
+    ) -> torch.Tensor:
         """
         Torch implementation of forward.
 
@@ -924,29 +930,41 @@ class ConvBase(Node):
         )
 
     @staticmethod
-    def get_non_pad_idxs(input_shape: tuple, pads: tuple) -> torch.Tensor:
+    def get_non_pad_idxs(
+        input_shape: tuple, pads: tuple, device: str='cpu'
+    ) -> torch.Tensor:
         """
         Computes the indices of the original input whithin the padded one.
         """
         in_ch, in_height, in_width = input_shape
         pad_height, pad_width = pads
         size = ConvBase.get_padded_size(input_shape, pads)
-        non_pad_idxs = torch.arange(size, dtype=torch.long).reshape(
+        non_pad_idxs = torch.arange(
+            size, dtype=torch.long, device=device
+        ).reshape(
             in_ch,
             in_height + 2 * pad_height,
             in_width + 2 * pad_width
-        )[:, pad_height:in_height + pad_height, pad_width :in_width + pad_width].flatten()
+        )[
+            :, pad_height:in_height + pad_height, pad_width :in_width + pad_width
+        ].flatten()
 
         return non_pad_idxs
 
 
     @staticmethod
-    def get_non_pad_idx_flag(input_shape: tuple, pads: tuple) -> torch.Tensor:
+    def get_non_pad_idx_flag(
+        input_shape: tuple, pads: tuple, device: str='cpu'
+    ) -> torch.Tensor:
         """
         Computes the index flag of the original input whithin the padded one.
         """
         non_pad_idxs = ConvBase.get_non_pad_idxs(input_shape, pads)
-        flag = torch.zeros(Conv.get_padded_size(input_shape, pads), dtype=torch.bool)
+        flag = torch.zeros(
+            Conv.get_padded_size(input_shape, pads),
+            device=device,
+            dtype=torch.bool
+        )
         flag[non_pad_idxs] = True
 
         return flag
@@ -979,7 +997,7 @@ class ConvBase(Node):
 
             return np.pad(inp, pad_par, 'constant', constant_values=values)
 
-        elif isinstance(inp, torch.Tensor):
+        elif isinstance(inp, torch.Tensor):, device=self.config.DEVICE
             pad_par = (pads[1], pads[1], pads[0], pads[0])
 
             return torch.nn.functional.pad(inp, pad_par, 'constant', 0)
@@ -989,7 +1007,9 @@ class ConvBase(Node):
 
 
     @staticmethod
-    def im2col(matrix: torch.Tensor, kernel_shape: tuple, strides: tuple) -> torch.Tensor:
+    def im2col(
+        matrix: torch.Tensor, kernel_shape: tuple, strides: tuple, device=device
+    ) -> torch.Tensor:
         """
         im2col function.
 
@@ -1008,14 +1028,22 @@ class ConvBase(Node):
         assert len(matrix.shape) in [3, 4], f"{len(matrix.shape)}-D is not supported."
         assert type(matrix) in [torch.Tensor, np.ndarray], f"{type(matrix)} matrices are not supported."
 
-        opr = torch if isinstance(matrix, torch.Tensor) else np
+        assert type(matrix in [np.ndarray, torch.Tensor])
 
         filters, height, width = matrix.shape[-3:]
         row_extent = height - kernel_shape[0] + 1
         col_extent = width - kernel_shape[1] + 1
 
         # starting block indices
-        start_idx = opr.arange(kernel_shape[0])[:, None] * width + np.arange(kernel_shape[1])
+        if isinstance(matrix, torch.Tensor):
+            start_idx = torch.arange(
+                kernel_shape[0], device=device
+            )[:, None] * width
+            start_idx += toch.arange(kernel_shape[1], device=device)
+        else:
+            start_idx = np.arange(kernel_shape[0])[:, None] * width
+            start_idx += np.arange(kernel_shape[1])
+
         start_idx = start_idx.flatten()[None, :]
         offset_filter = np.arange(
             0, filters * height * width, height * width
@@ -1023,7 +1051,16 @@ class ConvBase(Node):
         start_idx = start_idx + offset_filter
 
         # offsetted indices across the height and width of A
-        offset_idx = opr.arange(row_extent)[:, None][::strides[0]] * width +  opr.arange(0, col_extent, strides[1])
+        if isinstance(matrix, torch.Tensor):
+            offset_idx = torch.arange(
+                row_extent, device=device
+            )[:, None][::strides[0]] * width 
+            offset_idx = torch.arange(
+                0, col_extent, strides[1], device=device
+            )
+        else: 
+            offset_idx = np.arange(row_extent)[:, None][::strides[0]] * width
+            offset_idx += no.arange(0, col_extent, strides[1])
 
         index = start_idx.ravel()[:, None] + offset_idx.ravel()
 
@@ -1039,7 +1076,10 @@ class ConvBase(Node):
                 ).reshape((matrix.shape[0],) + index.shape).permute(1, 2, 0)
 
         else:  
-            return opr.take(matrix, index)
+            if isinstance(matrix, np.ndarray):
+                return np.take(matrix, index)
+            else:
+                return torch.take(matrix, index)
 
 
 class Conv(ConvBase):
@@ -1298,7 +1338,7 @@ class Conv(ConvBase):
         else:
             batch = inp.shape[0]
             filled_inp = torch.zeros(
-                (batch, self.output_size), dtype=inp.dtype
+                (batch, self.output_size), dtype=inp.dtype, device=self.config.DEVICE
             ) 
             filled_inp[:, out_flag.flatten()] = inp
             filled_inp = filled_inp.reshape((batch,) + self.output_shape_no_batch())
@@ -1329,7 +1369,9 @@ class Conv(ConvBase):
         padded_height = self.in_height + 2 * self.pads[0] + self.krn_height - 1
         padded_width = self.in_width + 2 * self.pads[1] + self.krn_width - 1
         padded_inp = torch.zeros(
-            (batch, self.out_ch, padded_height, padded_width), dtype=inp.dtype
+            (batch, self.out_ch, padded_height, padded_width),
+            dtype=inp.dtype,
+            device = self.config.DEVICE
         ) 
         slices = tuple(
             [
@@ -1361,7 +1403,11 @@ class Conv(ConvBase):
         flag = in_flag.reshape(self.in_ch, -1)
         pad_flag = self.get_non_pad_idx_flag().reshape(self.in_ch, -1)
  
-        result = torch.empty((0, inp_stretch.shape[-1]), dtype=self.config.PRECISION)
+        result = torch.empty(
+            (0, inp_stretch.shape[-1]),
+            dtype=self.config.PRECISION,
+            devide=self.config.DEVICE
+        )
 
         for i in range(self.in_ch):
             partial_result =  torch.tensordot(
@@ -1369,7 +1415,7 @@ class Conv(ConvBase):
                 inp_stretch[:, pad_flag[i, :], :][:, flag[i, :], :], 
                 dims=([0], [0])
             )
-            result = torch.cat( (result, partial_result), 0)
+            result = torch.cat((result, partial_result), 0)
 
         return result.T
 
@@ -1696,7 +1742,9 @@ class ConvTranspose(ConvBase):
         else:
             batch = inp.shape[0]
             filled_inp = torch.zeros(
-                (batch, self.output_size), dtype=inp.dtype
+                (batch, self.output_size),
+                dtype=inp.dtype,
+                device=self.config.DEVICE
             ) 
             filled_inp[:, out_flag.flatten()] = inp
             filled_inp = filled_inp.reshape((batch,) + self.output_shape_no_batch())
@@ -2261,7 +2309,10 @@ class Relu(Node):
             if self.forced_states > 0:
                 self.active_flag = torch.logical_or(
                     self.active_flag, 
-                    torch.Tensor(self.state == ReluState.ACTIVE)
+                    torch.Tensor(
+                        self.state == ReluState.ACTIVE,
+                        device=self.config.DEVICE
+                    )
                 )
 
         return self.active_flag
@@ -2284,7 +2335,10 @@ class Relu(Node):
             if self.forced_states > 0:
                 self.inactive_flag = torch.logical_or(
                     self.inactive_flag, 
-                    torch.Tensor(self.state == ReluState.INACTIVE)
+                    torch.Tensor(
+                        self.state == ReluState.INACTIVE,
+                        device=self.config.DEVICE
+                    )
                 )
 
         return self.inactive_flag
@@ -2310,7 +2364,10 @@ class Relu(Node):
             if self.forced_states > 0:
                 self.unstable_flag = torch.logical_or(
                     self.unstable_flag,
-                    torch.Tensor(self.state == ReluState.UNSTABLE)
+                    torch.Tensor(
+                        self.state == ReluState.UNSTABLE,
+                        device=self.config.DEVICE
+                    )
                 )
 
         return self.unstable_flag
@@ -2579,7 +2636,9 @@ class Reshape(Node):
         if isinstance(self.from_node[0], Relu):
             return self.forward(self.from_node[0].get_propagation_flag())
 
-        return torch.ones(self.output_shape, dtype=torch.bool)
+        return torch.ones(
+            self.output_shape, dtype=torch.bool, device=self.config.DEVICE
+        )
 
     def get_propagation_count(self) -> torch.Tensor:
         if isinstance(self.from_node[0], Relu):
@@ -2721,7 +2780,9 @@ class Flatten(Node):
         if isinstance(self.from_node[0], Relu):
             return self.forward(self.from_node[0].get_propagation_flag())
 
-        return torch.ones(self.output_shape, dtype=torch.bool)
+        return torch.ones(
+            self.output_shape, dtype=torch.bool, device=self.config.DEVICE
+        )
     
     def get_propagation_count(self) -> torch.Tensor:
         if isinstance(self.from_node[0], Relu):

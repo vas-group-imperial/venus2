@@ -204,7 +204,7 @@ class SubVerifier:
 
         elif slv_report.result == SolveResult.UNSAFE and self.config.VERIFIER.PGD_ON_LP is True:
             cex = torch.tensor(
-                slv_report.cex, dtype=self.config.PRECISION
+                slv_report.cex, dtype=self.config.PRECISION, device=self.config.DEVICE
             )
             pgd = ProjectedGradientDescent(self.config)
             cex = pgd.start(prob, init_adv=cex)

@@ -107,7 +107,7 @@ class ProjectedGradientDescent:
             output_flag =  prob.spec.get_output_flag(prob.nn.tail.output_shape)
             output = prob.nn.forward(x)[output_flag].flatten()[None, :]
             true_label = torch.sum(output_flag.flatten()[0: true_label])
-            y = torch.tensor([true_label])
+            y = torch.tensor([true_label], device=self.config.DEVICE)
             loss_fn = torch.nn.CrossEntropyLoss()
             loss = loss_fn(output, y)
 
