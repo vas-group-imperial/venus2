@@ -875,7 +875,8 @@ class Equation():
         im2col = Conv.im2col(
             pad.reshape(node.get_input_padded_shape()),
             (node.krn_height, node.krn_width),
-            node.strides
+            node.strides,
+            device=node.config.DEVICE
         )
         indices = torch.arange(
             node.out_ch_sz,

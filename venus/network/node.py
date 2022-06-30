@@ -959,7 +959,7 @@ class ConvBase(Node):
         """
         Computes the index flag of the original input whithin the padded one.
         """
-        non_pad_idxs = ConvBase.get_non_pad_idxs(input_shape, pads)
+        non_pad_idxs = ConvBase.get_non_pad_idxs(input_shape, pads, device=device)
         flag = torch.zeros(
             Conv.get_padded_size(input_shape, pads),
             device=device,
@@ -1317,7 +1317,10 @@ class Conv(ConvBase):
         padded_inp = Conv.pad(inp, self.pads)
 
         inp_strech = Conv.im2col(
-            padded_inp, (self.krn_height, self.krn_width), self.strides
+            padded_inp, 
+            (self.krn_height, self.krn_width),
+            self.strides,
+            device=self.config.DEVICE
         )
 
         kernel_strech = self.kernels.reshape(self.out_ch, -1).numpy()
@@ -1398,7 +1401,10 @@ class Conv(ConvBase):
         padded_inp[slices] = inp
 
         inp_stretch = Conv.im2col(
-            padded_inp, (self.krn_height, self.krn_width), (1, 1)
+            padded_inp,
+            (self.krn_height, self.krn_width),
+            (1, 1),
+            device=self.config.DEVICE
         )
 
         kernel_stretch = torch.flip(
@@ -1468,7 +1474,9 @@ class Conv(ConvBase):
         Computes the indices of the original input within the padded one.
         """
         return ConvBase.get_non_pad_idxs(
-            (self.in_ch, self.in_height, self.in_width), self.pads
+            (self.in_ch, self.in_height, self.in_width),
+            self.pads,
+            device=self.config.DEVICE
         )
 
     def get_non_pad_idx_flag(self) -> torch.Tensor:
@@ -1476,7 +1484,9 @@ class Conv(ConvBase):
         Computes the index flag of the original input whithin the padded one.
         """
         return ConvBase.get_non_pad_idx_flag(
-            (self.in_ch, self.in_height, self.in_width), self.pads
+            (self.in_ch, self.in_height, self.in_width),
+            self.pads,
+            device=self.config.DEVICE
         )
 
     def _compute_output_shape(self) -> tuple:
@@ -1718,7 +1728,10 @@ class ConvTranspose(ConvBase):
             padded_inp = padded_inp[np.newaxis, ...]
 
         inp_strech = Conv.im2col(
-            padded_inp, (self.krn_height, self.krn_width), (1, 1)
+            padded_inp,
+            (self.krn_height, self.krn_width),
+            (1, 1),
+            devide=self.config.DEVICE
         )
 
         kernel_strech = torch.flip(
@@ -1833,7 +1846,9 @@ class ConvTranspose(ConvBase):
         Computes the indices of the original input whithin the padded one.
         """
         return ConvBase.get_non_pad_idxs(
-            (self.out_ch, self.out_height, self.out_width), self.pads
+            (self.out_ch, self.out_height, self.out_width),
+            self.pads,
+            device=self.config.DEVICE
         )
 
     def get_non_pad_idx_flag(self) -> torch.Tensor:
@@ -1841,7 +1856,9 @@ class ConvTranspose(ConvBase):
         Computes the index flag of the original input whithin the padded one.
         """
         return ConvBase.get_non_pad_idx_flag(
-            (self.out_ch, self.out_height, self.out_width), self.pads
+            (self.out_ch, self.out_height, self.out_width),
+            self.pads,
+            device=self.config.DEVICE
         )
 
     def _compute_output_shape(self) -> tuple:
@@ -2009,7 +2026,7 @@ class MaxPool(Node):
         """
         padded_inp = Conv.pad(inp, self.pads).reshape((self.in_ch(), 1) + inp.shape[-2:])
         im2col = Conv.im2col(
-            padded_inp, self.kernel_shape, self.strides
+            padded_inp, self.kernel_shape, self.strides, device=self.config.DEVICE
         )
         
         output = im2col.max(axis=0).reshape(
