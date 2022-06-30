@@ -624,13 +624,13 @@ class Specification:
         """
         Moves all data to gpu memory
         """
-        self.input_node.bounds = self.input_node.bounds.cuda()
+        self.input_node.cuda()
 
     def cpu(self):
         """
         Moves all data to cpu memory
         """
-        self.input_node.bounds = self.input_node.bounds.cpu()
+        self.input_node.cpu()
 
     def clean_vars(self):
         """

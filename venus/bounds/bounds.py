@@ -86,7 +86,12 @@ class Bounds:
         upper = self.upper.cpu() if self.upper is not None else None
 
         return Bounds(lower, upper)
-        if self.lower is not None:
-            self.lower = self.lower.cpu()
-        if self.upper is not None:
-            self.upper = self.upper.cpu()
+
+    def cuda(self):
+        """ 
+        Moves bounds to gpu memory.
+        """
+        lower = self.lower.cuda() if self.lower is not None else None
+        upper = self.upper.cuda() if self.upper is not None else None
+
+        return Bounds(lower, upper)

@@ -73,6 +73,20 @@ class Node:
         self.device = device
         self._milp_var_indices = None
 
+    def cuda(self):
+        """
+        Moves all data to gpu memory
+        """
+        self.bounds = self.bounds.cuda()
+        self.device = torch.device('cuda')
+
+    def cpu(self):
+        """
+        Moves all data to cpu memory
+        """
+        self.bounds = self.bounds.cpu()
+        self.device = torch.device('cpu')
+
     def get_outputs(self):
         """
         Constructs a list of the indices of the units in the node.
@@ -247,10 +261,10 @@ class Node:
                 be for all units.
         """
         if flag is None:
-            self.bounds = bounds.cpu()
+            self.bounds = bounds
         else:
-            self.bounds.lower[flag] = bounds.lower.cpu()
-            self.bounds.upper[flag] = bounds.upper.cpu()
+            self.bounds.lower[flag] = bounds.lower
+            self.bounds.upper[flag] = bounds.upper
 
         if self.has_relu_activation():
             self.to_node[0].reset_state_flags()
@@ -376,14 +390,14 @@ class Constant(Node):
         """
         Moves all data to gpu memory
         """
-        self.bounds = self.bounds.cuda()
+        super().cuda()
         self.const = self.const.cuda()
 
     def cpu(self):
         """
         Moves all data to cpu memory
         """
-        self.bounds = self.bounds.cpu()
+        super().cpu()
         self.const = self.const.cpu()
 
 class Input(Node):
@@ -421,18 +435,6 @@ class Input(Node):
         the node.
         """
         return self.output_size
-
-    def cuda(self):
-        """
-        Moves all data to gpu memory
-        """
-        self.bounds = self.bounds.cuda()
-
-    def cpu(self):
-        """
-        Moves all data to cpu memory
-        """
-        self.bounds = self.bounds.cpu()
 
 class Gemm(Node):
     def __init__(
@@ -504,7 +506,7 @@ class Gemm(Node):
         """
         Moves all data to gpu memory
         """
-        self.bounds = self.bounds.cuda()
+        super().cuda()
         self.weights = self.weights.cuda()
         self.bias = self.bias.cuda()
 
@@ -512,7 +514,7 @@ class Gemm(Node):
         """
         Moves all data to cpu memory
         """
-        self.bounds = self.bounds.cpu()
+        super().cpu()
         self.weights = self.weights.cpu()
         self.bias = self.bias.cpu()
 
@@ -739,7 +741,7 @@ class MatMul(Node):
         """
         Moves all data to gpu memory
         """
-        self.bounds = self.bounds.cuda()
+        super().cuda()
         self.weights = self.weights.cuda()
         self.bias = self.bias.cuda()
 
@@ -747,7 +749,7 @@ class MatMul(Node):
         """
         Moves all data to cpu memory
         """
-        self.bounds = self.bounds.cpu()
+        super().cpu()
         self.weights = self.weights.cpu()
         self.bias = self.bias.cpu()
 
@@ -768,6 +770,7 @@ class MatMul(Node):
         )
 
     def get_milp_var_size(self):
+        self.bounds = self.bounds.cpu()
         """
         Returns the number of milp variables required for the milp encoding of
         the node.
@@ -962,17 +965,17 @@ class ConvBase(Node):
         """
         Moves all data to gpu memory
         """
-        self.bounds = self.bounds.cuda()
-        self.weights = self.weights.cuda()
+        super().cuda()
+        self.kernels = self.kernels.cuda()
         self.bias = self.bias.cuda()
 
     def cpu(self):
         """
         Moves all data to cpu memory
         """
-        self.bounds = self.bounds.cpu()
-        self.weights = self.weights.cpu()
-        self.bias = self.bias.cpu()
+        super.cpu()
+        self.kernels = self.kernels.cuda()
+        self.bias = self.bias.cuda()
 
     def get_milp_var_size(self):
         """
@@ -2030,12 +2033,13 @@ class MaxPool(Node):
         """
         Moves all data to gpu memory
         """
-        self.bounds = self.bounds.cuda()
+        super().cuda()
 
     def cpu(self):
         """
         Moves all data to cpu memory
         """
+        super().cpu()
         self.bounds = self.bounds.cpu()
 
     def get_milp_var_size(self):
@@ -2251,14 +2255,14 @@ class Relu(Node):
         """
         Moves all data to gpu memory
         """
-        self.bounds = self.bounds.cuda()
+        super().cuda()
         self.reset_state_flags()
 
     def cpu(self):
         """
         Moves all data to cpu memory
         """
-        self.bounds = self.bounds.cpu()
+        super().cpu()
         self.reset_state_flags()
 
     def set_state(self, unit: tuple, state: ReluState):
@@ -2727,18 +2731,6 @@ class Reshape(Node):
             id=self.id
         )
 
-    def cuda(self):
-        """
-        Moves all data to gpu memory
-        """
-        self.bounds = self.bounds.cuda()
-
-    def cpu(self):
-        """
-        Moves all data to cpu memory
-        """
-        self.bounds = self.bounds.cpu()
-
     def forward(self, inp: torch.Tensor=None, save_output=None) -> torch.Tensor:
         """
         Computes the output of the node given an input.
@@ -2840,18 +2832,6 @@ class Flatten(Node):
             id=self.id
         )
 
-    def cuda(self):
-        """
-        Moves all data to gpu memory
-        """
-        self.bounds = self.bounds.cuda()
-
-    def cpu(self):
-        """
-        Moves all data to cpu memory
-        """
-        self.bounds = self.bounds.cpu()
-
     def get_milp_var_indices(self, var_type: str='out'):
         """
         Returns the starting and ending indices of the milp variables encoding
@@ -2920,7 +2900,7 @@ class Flatten(Node):
             the output of the node.
         """
         assert inp is not None or self.from_node[0].output is not None
-        inp = self.from_node[0].output if inp is None else inp
+        inp = self.from_node[1].output if inp is None else inp
 
         output = inp.flatten()
 
@@ -3005,7 +2985,7 @@ class Sub(Node):
         """
         Moves all data to gpu memory
         """
-        self.bounds = self.bounds.cuda()
+        super().cuda()
         if self.const is not None:
             self.const = self.const.cuda()
 
@@ -3013,7 +2993,7 @@ class Sub(Node):
         """
         Moves all data to cpu memory
         """
-        self.bounds = self.bounds.cpu()
+        super().cpu()
         if self.const is not None:
             self.const = self.const.cpu()
 
@@ -3195,7 +3175,7 @@ class Add(Node):
         """
         Moves all data to gpu memory
         """
-        self.bounds = self.bounds.cuda()
+        super().cuda()
         if self.const is not None:
             self.const = self.const.cuda()
 
@@ -3203,7 +3183,7 @@ class Add(Node):
         """
         Moves all data to cpu memory
         """
-        self.bounds = self.bounds.cpu()
+        super().cpu()
         if self.const is not None:
             self.const = self.const.cpu()
 
@@ -3427,7 +3407,7 @@ class BatchNormalization(Node):
         """
         Moves all data to gpu memory
         """
-        self.bounds = self.bounds.cuda()
+        super().cuda()
         self.scale = self.scale.cuda()
         self.bias = self.bias.cuda()
         self.input_mean = self.input_mean.cuda()
@@ -3437,7 +3417,7 @@ class BatchNormalization(Node):
         """
         Moves all data to cpu memory
         """
-        self.bounds = self.bounds.cpu()
+        super().cpu()
         self.scale = self.scale.cpu()
         self.bias = self.bias.cpu()
         self.input_mean = self.input_mean.cpu()
@@ -3599,18 +3579,6 @@ class Slice(Node):
             id=self.id
         )
 
-    def cuda(self):
-        """
-        Moves all data to gpu memory
-        """
-        self.bounds = self.bounds.cuda()
-        
-    def cpu(self):
-        """
-        Moves all data to cpu memory
-        """
-        self.bounds = self.bounds.cpu()
-
     def get_milp_var_indices(self, var_type: str):
         """
         Returns the starting and ending indices of the milp variables encoding
@@ -3761,18 +3729,6 @@ class Unsqueeze(Node):
             bounds=self.bounds.copy(),
             id=self.id
         )
-
-    def cuda(self):
-        """
-        Moves all data to gpu memory
-        """
-        self.bounds = self.bounds.cuda()
-        
-    def cpu(self):
-        """
-        Moves all data to cpu memory
-        """
-        self.bounds = self.bounds.cpu()
 
     def get_milp_var_indices(self, var_type: str):
         """
@@ -3940,18 +3896,6 @@ class Concat(Node):
             bounds=self.bounds.copy(),
             id=self.id
         )
-
-    def cuda(self):
-        """
-        Moves all data to gpu memory
-        """
-        self.bounds = self.bounds.cuda()
-        
-    def cpu(self):
-        """
-        Moves all data to cpu memory
-        """
-        self.bounds = self.bounds.cpu()
 
     def get_milp_var_indices(self, var_type: str):
         """

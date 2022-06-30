@@ -72,7 +72,6 @@ class SIP:
             starting_depth = self.prob.nn.get_non_linear_starting_depth()
             self._set_bounds(slopes, depth=starting_depth)
 
-        print('\n*', torch.mean(self.prob.nn.tail.bounds.upper), torch.mean(self.prob.nn.tail.bounds.lower), timer() - start)
         print(self.prob.nn.tail.bounds.lower)
         print(self.prob.nn.tail.bounds.upper)
 
@@ -98,7 +97,7 @@ class SIP:
         ibp = IBP(self.prob, self.config)
         os_sip = OSSIP(self.prob, self.config)
         bs_sip = BSSIP(self.prob, self.config)
-        print(self.prob.spec.input_node.bounds.lower)
+
         for i in range(depth, self.prob.nn.tail.depth + 1):
             nodes = self.prob.nn.get_node_by_depth(i)
             for j in nodes:
