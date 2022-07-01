@@ -3897,6 +3897,12 @@ class Concat(Node):
             id=self.id
         )
 
+    def cpu(self):
+        """
+        Moves all data to cpu memory
+        """
+        self.bounds = self.bounds.cpu()
+
     def get_milp_var_indices(self, var_type: str):
         """
         Returns the starting and ending indices of the milp variables encoding

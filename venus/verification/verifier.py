@@ -293,8 +293,8 @@ class Verifier:
         """
         # self.reporting_queue.cancel_join_thread()
         # self.jobs_queue.cancel_join_thread()
-        self.terminate_split_procs()
         self.terminate_ver_procs()
+        self.terminate_split_procs()
 
     def terminate_split_procs(self):
         """
@@ -303,6 +303,8 @@ class Verifier:
         try:
             for proc in self.split_procs:
                 proc.terminate()
+            for proc in self.split_procs:
+                proc.join()
         except:
             raise Exception("Could not terminate splitting processes.")
 
@@ -313,5 +315,7 @@ class Verifier:
         try:
             for proc in self.ver_procs:
                 proc.terminate()
+            for proc in self.ver_procs:
+                proc.join()
         except:
             raise Exception("Could not terminate verification processes.")

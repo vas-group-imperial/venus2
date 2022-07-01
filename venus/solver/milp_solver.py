@@ -53,6 +53,10 @@ class MILPSolver:
             SolveReport
         """
         start = timer()
+
+        # make sure everything is on cpu
+        MILPSolver.prob.cpu()
+
         # encode into milp
         me = MILPEncoder(MILPSolver.prob, MILPSolver.config)
 

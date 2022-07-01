@@ -204,10 +204,10 @@ class SubVerifier:
 
         elif slv_report.result == SolveResult.UNSAFE and self.config.VERIFIER.PGD_ON_LP is True:
             cex = torch.tensor(
-                slv_report.cex, dtype=self.config.PRECISION, device='cpu'
+                slv_report.cex, dtype=self.config.PRECISION, device=prob.device
             )
             pgd = ProjectedGradientDescent(self.config)
-            cex = pgd.start(prob, init_adv=cex, device='cpu')
+            cex = pgd.start(prob, init_adv=cex, device=prob.device)
             if cex is not None:
                 SubVerifier.logger.info(
                     f'Verification problem {prob.id} was solved via PGD on LP'

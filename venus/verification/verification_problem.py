@@ -9,6 +9,7 @@
 # Description: Verification problem class.
 # ************
 
+import torch
 
 from venus.bounds.sip import SIP
 
@@ -216,6 +217,7 @@ class VerificationProblem(object):
         """
         self.nn.cuda()
         self.spec.cuda()
+        self.device = torch.device('cuda')
 
     def cpu(self):
         """
@@ -223,6 +225,7 @@ class VerificationProblem(object):
         """
         self.nn.cpu()
         self.spec.cpu()
+        self.device = torch.device('cpu')
 
     def to_string(self):
         return self.nn.model_path  + ' against ' + self.spec.to_string()
