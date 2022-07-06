@@ -44,7 +44,9 @@ class SIP:
         if SIP.logger is None and config.LOGGER.LOGFILE is not None:
             SIP.logger = get_logger(__name__, config.LOGGER.LOGFILE)
 
-        self._lower_eq, self._upper_eq = None, None
+        self.ibp = IBP(self.prob, self.config)
+        self.os_sip = OSSIP(self.prob, self.config)
+        self.bs_sip = BSSIP(self.prob, self.config)
         
     def set_bounds(self):
         """
@@ -52,12 +54,12 @@ class SIP:
         """
         start = timer()
 
-        if self.config.SIP.DEVICE == torch.device('cuda'):
+        if self.config.DEVICE == torch.device('cuda'):
             self.prob.cuda()
 
         # get relaxation slopes
         if self.prob.nn.has_custom_relaxation_slope() is True:
-            slopes = self.get_lower_relaxation_slopes(gradient=False)
+            slopes = self.prob.nn.get_lower_relaxation_slopes(gradient=False)
         else:
             slopes = None
 
@@ -67,16 +69,17 @@ class SIP:
         # optimise the relaxation slopes using pgd
         if self.config.SIP.SLOPE_OPTIMISATION is True and \
         self.prob.nn.has_custom_relaxation_slope() is not True:
-            slopes = self.optimise_slopes(self.prob.nn.tail)
+            bs_sip = BSSIP(self.prob, self.config)
+            slopes = bs_sip.optimise(self.prob.nn.tail)
             self.prob.nn.relu_relaxation_slopes = slopes
             starting_depth = self.prob.nn.get_non_linear_starting_depth()
             self._set_bounds(slopes, depth=starting_depth)
 
         print(self.prob.nn.tail.bounds.lower)
         print(self.prob.nn.tail.bounds.upper)
-
-        if self.config.SIP.DEVICE == torch.device('cuda'):
-            self.prob.cpu()
+        print('done')
+        import sys
+        sys.exit()
 
         if self.logger is not None:
             SIP.logger.info(
@@ -89,54 +92,59 @@ class SIP:
             )
 
     def _set_bounds(
-        self, slopes: dict=None, delta_flags: torch.Tensor=None, depth=1
+        self, slopes: tuple[dict]=None, delta_flags: torch.Tensor=None, depth=1
     ):
         """
         Sets the bounds.
         """
-        ibp = IBP(self.prob, self.config)
-        os_sip = OSSIP(self.prob, self.config)
-        bs_sip = BSSIP(self.prob, self.config)
-
         for i in range(depth, self.prob.nn.tail.depth + 1):
             nodes = self.prob.nn.get_node_by_depth(i)
             for j in nodes:
+                print(j, j.id, j.input_shape, j.output_shape, j.output_size)
                 delta = self._get_delta_for_node(j, delta_flags)
                 lower_slopes, upper_slopes = self._get_slopes_for_node(j, slopes)
-
-                # set interval propagation bounds
-                ia_count = ibp.set_bounds(j, lower_slopes, upper_slopes, delta)
-
-                # check eligibility for symbolic equations
-                symb_elg = self.is_symb_eq_eligible(j)
-
-                # set one step symbolic bounds
-                if self.config.SIP.ONE_STEP_SYMBOLIC is True:
-                    os_sip.forward(j, lower_slopes, upper_slopes)
-
-                    if symb_elg is True:
-                        os_count = os_sip.set_bounds(j)
+                self._set_bounds_for_node(j, lower_slopes, upper_slopes, delta_flags)
  
-                # recheck eligibility for symbolic equations
-                symb_elg = self.is_symb_eq_eligible(j)
+    def _set_bounds_for_node(
+        self,
+        node: Node,
+        lower_slopes: dict=None,
+        upper_slopes: dict=None,
+        delta_flag: torch.Tensor=None
+    ):
+
+        # set interval propagation bounds
+        ia_count = self.ibp.set_bounds(node, lower_slopes, upper_slopes, delta_flag)
+
+        # check eligibility for symbolic equations
+        symb_elg = self.is_symb_eq_eligible(node)
+
+        # set one step symbolic bounds
+        if self.config.SIP.ONE_STEP_SYMBOLIC is True:
+            self.os_sip.forward(node, lower_slopes, upper_slopes)
+            if symb_elg is True:
+                os_count = self.os_sip.set_bounds(node)
  
-                # set back substitution symbolic bounds
-                if self.config.SIP.SYMBOLIC is True and symb_elg is True:
-                    if self.config.SIP.ONE_STEP_SYMBOLIC is True and \
-                    self.config.SIP.EQ_CONCRETISATION is True and \
-                    i > 2:
-                        if os_count * 5 > ia_count:
-                            concretisations = os_sip
-                        else:
-                            os_sip.clear_equations()
-                            concretisations = None
-                    else:
-                        concretisations = None
+        # recheck eligibility for symbolic equations
+        non_linear_depth = self.prob.nn.get_non_linear_starting_depth()
+        symb_elg = self.is_symb_eq_eligible(node) and node.depth >= non_linear_depth
+ 
+        # set back substitution symbolic bounds
+        if self.config.SIP.SYMBOLIC is True and symb_elg is True:
+            if self.config.SIP.ONE_STEP_SYMBOLIC is True and \
+            self.config.SIP.EQ_CONCRETISATION is True and \
+            node.depth > 2:
+                if os_count * 5 > ia_count:
+                    concretisations = self.os_sip
+                else:
+                    self.os_sip.clear_equations()
+                    concretisations = None
+            else:
+                concretisations = None
 
-                    bs_count = bs_sip.set_bounds(
-                        j, lower_slopes, upper_slopes, concretisations
-                    )
-
+            bs = self.bs_sip.set_bounds(
+                node, lower_slopes, upper_slopes, concretisations
+            )
 
     def _get_delta_for_node(self, node: Node, delta_flags: torch.Tensor) -> torch.Tensor:
         if delta_flags is not None and node.has_relu_activation() is True:
@@ -155,16 +163,16 @@ class SIP:
         Determines whether the node implements function requiring a symbolic
         equation for bound calculation.
         """ 
+        if node.depth <= 1:
+            return False
+
         if node is self.prob.nn.tail:
             return True
 
-        if node is self.prob.nn.head:
-            return False
-
         non_eligible = [
-            BatchNormalization, Input, Relu, MaxPool, Reshape, Flatten, Slice, Concat
+            Input, Relu, Reshape, Flatten, Slice
         ]
-        if type(node) in non_eligible:
+        if type(node) in non_eligible or node is self.prob.nn.head:
             return False
 
         if node.has_relu_activation() and node.to_node[0].get_unstable_count() > 0:
@@ -291,84 +299,4 @@ class SIP:
 
             return NAryConjFormula(clauses)
 
-        return formula
-    
-    def optimise_slopes(self, node: Node):
-        lower_slopes, upper_slopes = self.get_lower_relaxation_slopes(gradient=True)
-        lower_slopes =  self._optimise_slopes(node, 'lower', lower_slopes)
-        upper_slopes =  self._optimise_slopes(node, 'upper', upper_slopes)
-
-        return (lower_slopes, upper_slopes)
-
-
-    def _optimise_slopes(self, node: Node, bound: str, slopes: torch.tensor):
-        in_flag = self._get_stability_flag(node.from_node[0])
-        in_flag = None if in_flag is None else in_flag.flatten()
-        out_flag = self._get_out_prop_flag(node)
-        if out_flag is None:
-            out_flag = torch.ones(
-                node.output_size, dtype=torch.bool, device=self.config.DEVICE
-            )
-        else:
-            out_flag = out_flag.flatten(),
-        equation = Equation.derive(
-            node, self.config, out_flag, in_flag
-        )
-
-        best_slopes = slopes
-        if bound == 'lower':
-            lr = -self.config.SIP.GD_LR
-            current_mean, best_mean = -math.inf, torch.mean(node.bounds.lower)
-        else:
-            lr = self.config.SIP.GD_LR
-            current_mean, best_mean = math.inf, torch.mean(node.bounds.upper)
-        
-        for i in range(self.config.SIP.GD_STEPS):
-            bounds = self.back_substitution(
-                equation, node.from_node[0], bound, slopes=slopes
-            ) 
-            bounds = torch.mean(bounds)
-            if bound == 'lower' and bounds.item() > current_mean and bounds.item() - current_mean < 10e-3:
-                return slopes
-            elif bound == 'upper' and bounds.item() < current_mean and current_mean - bounds.item() < 10e-3:
-                return slopes
-            current_mean = bounds.item()
-
-            bounds.backward()
- 
-            if (bound == 'lower' and bounds.item() >= best_mean) or \
-            (bound == 'upper' and bounds.item() <= best_mean):
-                best_mean = bounds.item()
-                best_slopes = {i: slopes[i].detach().clone() for i in slopes}
-
-            for j in slopes:
-                if slopes[j].grad is not None:
-                    step = lr * (slopes[j].grad.data / torch.mean(slopes[j].grad.data))
-
-                    if bound == 'upper':
-                        slopes[j].data -= step + torch.mean(slopes[j].data)
-                    else:
-                        slopes[j].data += step - torch.mean(slopes[j].data)
-
-                    slopes[j].data = torch.clamp(slopes[j].data, 0, 1)
-
-            if (bound == 'lower' and bounds.item() >= best_mean) or \
-            (bound == 'upper' and bounds.item() <= best_mean):
-                best_mean = bounds.item()
-                best_slopes = {i: slopes[i].detach().clone() for i in slopes}
-
-        self.prob.nn.detach()
-                
-        return slopes
-
-    def get_lower_relaxation_slopes(self, gradient=False):
-        lower, upper = {}, {}
-        for _, i in self.prob.nn.node.items():
-            if isinstance(i, Relu):
-                slope = i.get_lower_relaxation_slope()
-                if slope[0] is not None:
-                    lower[i.id] = slope[0].detach().clone().requires_grad_(gradient)
-                if slope[1] is not None:
-                    upper[i.id] = slope[1].detach().clone().requires_grad_(gradient)
-
-        return lower, upper
+        return formula 

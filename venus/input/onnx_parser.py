@@ -22,7 +22,8 @@ class ONNXParser:
     SUPPORTED_NODES = ['Flatten', 'Shape', 'Constant', 'Concat', 'Unsqueeze',
                        'Gather', 'Relu', 'Gemm', 'Conv', 'Transpose', 'MatMul',
                        'Add', 'Div', 'Sub', 'BatchNormalization', 'Slice',
-                       'MaxPool','ConvTranspose', 'Cast', 'Reshape']
+                       'MaxPool','ConvTranspose', 'Cast', 'Reshape', 'Dropout']
+    SKIP_NODES = [Dropout]
 
     def __init__(self, config: Config):
         self.config = config
@@ -138,8 +139,9 @@ class ONNXParser:
                 vnode = self.parse_div(node, input_shape, venus_nodes, init)
                 
             elif node.op_type == 'BatchNormalization':
-                vnode = self.parse_batchnormalization(node, input_shape, venus_nodes, init)
-
+                vnode = self.parse_batchnormalization(
+                    node, input_shape, venus_nodes, init
+                )
             elif node.op_type == 'Shape':
                 vnode = self.parse_shape(node, input_shape)
 
@@ -160,6 +162,9 @@ class ONNXParser:
 
             elif node.op_type == 'Concat':
                 vnode = self.parse_concat(node, venus_nodes, init)
+
+            elif node.op_type == 'Dropout':
+                vnode = self.parse_dropout(node, input_shape)
  
         # update inputs and outputs
         for i in node.input:
@@ -169,14 +174,19 @@ class ONNXParser:
 
         return vnode
 
-    def parse_gemm(self, node: NodeProto, input_shape:tuple, venus_nodes: list, init: list) -> Node:
+    def parse_gemm(
+        self, node: NodeProto, input_shape:tuple, venus_nodes: list, init: list
+    ) -> Node:
         weights = self._to_tensor(node.input[1], venus_nodes, init)
 
         attr = self._get_attribute(node, 'transB')
         if attr is not None and attr.i == 0:
             weights = torch.transpose(weights, 0, 1)
         
-        bias = self._to_tensor(node.input[2], venus_nodes, init)
+        if len(node.input) > 2:
+            bias = self._to_tensor(node.input[2], venus_nodes, init)
+        else:
+            bias = None
         
         output_shape = (weights.shape[0],)
 
@@ -190,7 +200,9 @@ class ONNXParser:
             self.config
         )
 
-    def parse_matmul(self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list) -> Node:
+    def parse_matmul(
+        self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list
+    ) -> Node:
         weights = self._to_tensor(node.input[1], venus_nodes, init)
         weights = torch.transpose(weights, 0, 1)
         
@@ -205,9 +217,14 @@ class ONNXParser:
             self.config
         )
 
-    def parse_conv(self, node: NodeProto, input_shape: tuple, venus_nodes:list, init: list) -> Node:
+    def parse_conv(
+        self, node: NodeProto, input_shape: tuple, venus_nodes:list, init: list
+    ) -> Node:
         weights = self._to_tensor(node.input[1], venus_nodes, init)
-        bias = self._to_tensor(node.input[2], venus_nodes, init)
+        if len(node.input) > 2:
+            bias = self._to_tensor(node.input[2], venus_nodes, init)
+        else:
+            bias = None
         pads, strides = (0, 0), (1, 1)
 
         attr = self._get_attribute(node, "pads")
@@ -229,9 +246,14 @@ class ONNXParser:
             self.config
         )
 
-    def parse_conv_transpose(self, node: NodeProto, input_shape: tuple, venus_nodes:list, init: list) -> Node:
+    def parse_conv_transpose(
+        self, node: NodeProto, input_shape: tuple, venus_nodes:list, init: list
+    ) -> Node:
         weights = self._to_tensor(node.input[1], venus_nodes, init)
-        bias = self._to_tensor(node.input[2], venus_nodes, init)
+        if len(node.input) > 2:
+            bias = self._to_tensor(node.input[2], venus_nodes, init)
+        else:
+            bias = None
         pads, strides, output_padding = (0, 0), (1, 1), (0, 0)
 
         attr = self._get_attribute(node, "pads")
@@ -282,7 +304,9 @@ class ONNXParser:
             self.config
         )
 
-    def parse_sub(self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list) -> Node:
+    def parse_sub(
+        self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list
+    ) -> Node:
         if node.input[0] in init or \
         (node.input[0] in venus_nodes and \
         isinstance(venus_nodes[node.input[0]], Constant)):
@@ -299,7 +323,9 @@ class ONNXParser:
 
             return Sub([], [], input_shape, self.config, const=const)
 
-    def parse_add(self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list) -> Node:
+    def parse_add(
+        self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list
+    ) -> Node:
         if node.input[0] in init or \
         (node.input[0] in venus_nodes and \
         isinstance(venus_nodes[node.input[0]], Constant)):
@@ -316,13 +342,17 @@ class ONNXParser:
 
             return Add([], [], input_shape, self.config, const=const)
 
-    def parse_div(self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list) -> Node:
+    def parse_div(
+        self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list
+    ) -> Node:
         const0 = self._to_tensor(node.input[0], venus_nodes, init)
         const1 = self._to_tensor(node.input[1], venus_nodes, init)
 
         return Constant([], const0 / const1, self.config)
 
-    def parse_batchnormalization(self, node: NodeProto, input_shape: tuple, venus_nodes:list, init: list) -> Node:
+    def parse_batchnormalization(
+        self, node: NodeProto, input_shape: tuple, venus_nodes:list, init: list
+    ) -> Node:
         scale = self._to_tensor(node.input[1], venus_nodes, init)
         bias = self._to_tensor(node.input[2], venus_nodes, init)
         input_mean = self._to_tensor(node.input[3], venus_nodes, init)
@@ -370,9 +400,14 @@ class ONNXParser:
 
         return Constant([], shape, self.config)
 
-    def parse_reshape(self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list):
+    def parse_reshape(
+            self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list
+    ) -> Node:
         new_shape = self._to_tensor(node.input[1], venus_nodes, init)
-        new_shape = tuple(i.int().item() for i in new_shape)
+        new_shape = tuple(i.int().item() for i in new_shape if i != 1)
+        if np.any([i == -1 for i in new_shape]):
+            new_shape = np.empty(input_shape, dtype=bool).reshape(new_shape).shape
+
 
         return Reshape([], [], input_shape, new_shape, self.config)
 
@@ -414,8 +449,9 @@ class ONNXParser:
 
         return Constant([], data.type(dtype), self.config)
 
-
-    def parse_unsqueeze(self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list) -> Node:
+    def parse_unsqueeze(
+        self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list
+    ) -> Node:
         axes = [0]
         attr = self._get_attribute(node, "axes")
         if attr is not None:
@@ -431,7 +467,9 @@ class ONNXParser:
 
         return Constant([], data, self.config)
         
-    def parse_slice(self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list) -> Node:    
+    def parse_slice(
+        self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list
+    ) -> Node:    
         starts = self._to_tensor(node.input[1], venus_nodes, init).int()
         ends = self._to_tensor(node.input[2], venus_nodes, init).int()
         if node.input[3] in venus_nodes or node.input[3] in init:
@@ -475,13 +513,26 @@ class ONNXParser:
 
         return Concat([], [], input_shapes, output_shape, axis, self.config)
 
+    def parse_dropout(self, node: NodeProto, input_shape: tuple) -> Node:
+        return Dropout([], [], input_shape, input_shape, self.config)
+
     def simplify(self, node: Node):
         return self._simplify(node, {}, [])
 
     def _simplify(self, node: None, dic: dict, visited: list):
         if node in dic or node in visited:
             return {}
-        
+       
+        elif type(node) in self.SKIP_NODES:
+            node.from_node[0].remove_to_node(node)
+            node.from_node[0].add_to_node(node.to_node[0])
+            node.to_node[0].remove_from_node(node)
+            node.to_node[0].add_from_node(node.from_node[0])
+
+            dic = dic | self._simplify(node.to_node[0], dic, visited)
+
+            return dic
+
         elif isinstance(node, Constant):
             for i in node.from_node:
                 i.remove_to_node(node)

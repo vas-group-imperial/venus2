@@ -124,10 +124,10 @@ class NeuralNetwork:
         """
         Nulls out all outputs of the nodes of the network.
         """
-        del self.head.from_node[0].output 
+        self.head.from_node[0].output = None
 
         for _, i in self.node.items():
-            del i.output
+            i.output = None
 
     def detach(self):
         """
@@ -263,7 +263,7 @@ class NeuralNetwork:
         Arguments:
             p_node:
                 the preceding node.
-            n_node:
+            s_node:
                 the subsequent node.
             index: 
                 the index of the node.
@@ -274,17 +274,20 @@ class NeuralNetwork:
             return p_node.get_outputs()
 
         elif isinstance(s_node, Conv):
-            height_start = index[0] * s_node.strides[0] - s_node.pads[0]
+            height_start = index[-2] * s_node.strides[-2] - s_node.pads[0]
             height_rng = range(height_start, height_start + s_node.krn_height)
             height = [i for i in height_rng if i >= 0 and i < s_node.krn_height]
-            width_start = index[1] * s_node.strides[1] - s_node.pads[1]
+            width_start = index[-1] * s_node.strides[-1] - s_node.pads[1]
             width_rng = range(width_start, width_start + s_node.krn_width)
             width = [i for i in width_rng if i >= 0 and i < s_node.krn_width]
-            ch = [i for i in range(s_node.in_ch)]
+            channel = list(range(s_node.in_ch))
 
-            shape = [ch, height, width] if len(p_node.output_shape) == 3 else [[0], ch, height, width]
+            if len(p_node.output_shape) == 3:
+                shape = [channel, height, width]
+            else:
+                shape = [[0], channel, height, width]
 
-            return [i for i in itertools.product(*shape)]
+            return list(itertools.product(*shape))
 
     def forward(self, inp):
         """
@@ -319,9 +322,33 @@ class NeuralNetwork:
         return False
 
     def get_non_linear_starting_depth(self):
+        """
+        Returns the shallowest depth with a non linear activation function.
+        """
         for i in range(self.tail.depth):
             nodes = self.get_node_by_depth(i)
             for j in nodes:
                 if j.has_relu_activation() or j.has_max_pool():
                     return i
         return i
+
+
+    def get_lower_relaxation_slopes(self, gradient=False):
+        """
+        Builds a dictionary of the lower relaxation slopes of the relu nodes.
+
+        Arguments:
+        
+            gradient:
+                Whether the slopes require gradient.
+        """
+        lower, upper = {}, {}
+        for _, i in self.node.items():
+            if isinstance(i, Relu):
+                slope = i.get_lower_relaxation_slope()
+                if slope[0] is not None:
+                    lower[i.id] = slope[0].detach().clone().requires_grad_(gradient)
+                if slope[1] is not None:
+                    upper[i.id] = slope[1].detach().clone().requires_grad_(gradient)
+
+        return lower, upper

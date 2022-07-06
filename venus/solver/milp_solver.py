@@ -54,7 +54,7 @@ class MILPSolver:
         """
         start = timer()
 
-        # make sure everything is on cpu
+        # need to convert network to numpy for the milp encoding 
         MILPSolver.prob.cpu()
 
         # encode into milp

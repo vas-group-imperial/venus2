@@ -146,8 +146,11 @@ class IdealFormulation(Cuts):
                 s1 += node.edge_weight(unit, p_unit) * (_in[p_unit] - l * (1 - _delta[unit]))
             else:
                 s2 += node.edge_weight(unit, p_unit) * u * _delta[unit]
-            
-            p = node.get_bias(unit) * _delta[unit]
+           
+            if node.has_bias() is True:
+                p = node.get_bias(unit) * _delta[unit]
+            else:
+                p = 0
         
         return bool(_out[unit] > p + s1 + s2)
 
@@ -187,8 +190,11 @@ class IdealFormulation(Cuts):
                 le.addTerms(l * node.edge_weight(unit, p_unit), delta[unit])
             else:
                 s += node.edge_weight(unit, p_unit) * u
-        
-        le.addTerms(s + node.get_bias(unit), delta[unit])
+       
+        if node.has_bias() is True:
+            le.addTerms(s + node.get_bias(unit), delta[unit])
+        else:
+            le.addTerms(s, delta[unit])
 
         return out_vars[unit], le
 

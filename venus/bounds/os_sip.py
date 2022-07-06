@@ -37,49 +37,7 @@ class OSSIP:
 
         self.lower_eq, self.upper_eq = {}, {}
         self.current_lower_eq, self.current_upper_eq = None, None
-        
-    def forward(
-        self, node: Node,
-        lower_slopes: torch.Tensor=None,
-        upper_slopes: torch.Tensor=None
-    ) -> None:
-        non_linear_starting_depth = self.prob.nn.get_non_linear_starting_depth()
-
-        if node.depth == 1:
-            new_lower_eq = Equation.derive(node, self.config)
-            new_upper_eq = new_lower_eq
-
-        elif node.depth < non_linear_starting_depth:
-            new_lower_eq = self.current_lower_eq.forward(node)
-            new_upper_eq = new_lower_eq
-
-        else:
-            if node.depth == non_linear_starting_depth + 1:
-                self.current_upper_eq = self.current_lower_eq.copy()
-                
-            if isinstance(node, Relu):
-                new_lower_eq = self.current_lower_eq.forward(
-                    node, 'lower', lower_slopes
-                )
-                new_upper_eq = self.current_upper_eq.forward(
-                    node, 'upper', upper_slopes
-                )
-
-            elif type(node) in [Reshape, Flatten, Sub, Add, Slice, Unsqueeze, Concat]:
-                new_lower_eq  = self.current_lower_eq.forward(node)
-                new_upper_eq  = self.current_upper_eq.forward(node)
- 
-            else:
-                new_lower_eq  = Equation.interval_forward(
-                    node, 'lower', self.current_lower_eq, self.current_upper_eq
-                )
-                new_upper_eq  = Equation.interval_forward(
-                    node, 'upper', self.current_lower_eq, self.current_upper_eq
-                )
-
-        self.current_lower_eq, self.current_upper_eq = new_lower_eq, new_upper_eq
-        self.lower_eq[node.id], self.upper_eq[node.id] = new_lower_eq, new_upper_eq
- 
+    
     def set_bounds(self, node: Node) -> int:
         input_lower = self.prob.spec.input_node.bounds.lower.flatten()
         input_upper = self.prob.spec.input_node.bounds.upper.flatten()
@@ -103,4 +61,356 @@ class OSSIP:
         return 0
 
     def clear_equations(self):
-        self.lower_eq, self.upper_eq = {}, {}
+        max_depth = max([
+            self.prob.nn.node[i].depth for i in self.lower_eq
+        ])
+        idxs = [
+            i for i in self.lower_eq if self.prob.nn.node[i].depth >= max_depth - 1
+        ]
+        self.lower_eq = {
+            i: self.lower_eq[i] for i in idxs
+        }
+        self.upper_eq = {
+            i: self.upper_eq[i] for i in idxs
+        }
+
+    def forward(
+        self, node: Node,
+        lower_slopes: torch.Tensor=None,
+        upper_slopes: torch.Tensor=None
+    ) -> None:
+        non_linear_starting_depth = self.prob.nn.get_non_linear_starting_depth()
+
+        if node.depth == 1:
+            lower_eq = Equation.derive(node, self.config)
+            upper_eq = lower_eq
+
+        elif node.depth < non_linear_starting_depth:
+            lower_eq = self._forward(
+                self.lower_eq[node.from_node[0].id], node
+            )
+            upper_eq = lower_eq
+
+        else:
+            if node.depth == non_linear_starting_depth + 1:
+                for i, j in self.upper_eq.items():
+                    if self.prob.nn.node[i].depth == non_linear_starting_depth \
+                    and self.prob.nn.node[i] in node.from_node:
+                        j = self.lower_eq[i].copy()
+                        self.current_upper_eq = j
+            lower_eq = self._int_forward(node, 'lower', lower_slopes)
+            upper_eq = self._int_forward(node, 'upper', upper_slopes)
+
+
+        self.current_lower_eq, self.current_upper_eq = lower_eq, upper_eq
+        self.lower_eq[node.id], self.upper_eq[node.id] = lower_eq, upper_eq
+
+    def _forward(
+        self, 
+        equation: Equation,
+        node: Node,
+        lower_slopes: torch.Tensor=None,
+        upper_slopes: torch.Tensor=None
+    ):
+        if isinstance(node, Gemm):
+            f_equation =  self._forward_gemm(equation, node)
+
+        elif isinstance(node, Conv):
+            f_equation = self._forward_conv(equation, node)
+
+        elif isinstance(node, MatMul):
+            f_equation = self._forward_matmul(equation, node)
+
+        elif isinstance(node, Slice):
+            f_equation = self._forward_slice(equation, node)
+
+        elif type(node) in [Flatten, Reshape, Unsqueeze]:
+            f_equation = equation
+
+        else:
+            raise NotImplementedError(f'One step equation forward for {type(node)}')
+
+        return f_equation
+    
+    def _forward_gemm(self, equation: Equation, node: Node):
+        matrix = node.forward(equation.matrix, add_bias=False)
+        const = node.forward(equation.const, add_bias=True)
+
+        return Equation(matrix, const, self.config)
+
+    def _forward_conv(self, equation: Equation, node: Node):
+        shape = (equation.coeffs_size,) + node.input_shape_no_batch()
+        matrix = node.forward(equation.matrix.T.reshape(shape), add_bias=False)
+        matrix = matrix.reshape(equation.coeffs_size, -1).T
+        const = node.forward(
+            equation.const.reshape(node.input_shape), add_bias=True
+        ).flatten()
+
+        return Equation(matrix, const, self.config)
+    
+    def _forward_matmul(self, equation: Equation, node: Node):
+        matrix = node.forward(equation.matrix)
+        const = node.forward(equation.const)
+
+        return Equation(matrix, const, self.config)
+
+    def _forward_slice(self, equation: Equation, node: Node):
+        shape = (self.size,) + node.input_shape_no_batch()
+        slices = [slice(0, equation.size)] + node.slices
+        matrix = equation.matrix.reshape(shape)[slices]
+        const = equation.const.reshape(node.input_shape_no_batch())[node.slices]
+
+        return Equation(matrix, const, self.config)
+ 
+    def _int_forward(self,  node: Node, bound: str, slopes: torch.Tensor=None):         
+        lower = self.lower_eq[node.from_node[0].id] 
+        upper = self.upper_eq[node.from_node[0].id]
+        in_equation = lower if bound == 'lower' else upper
+
+        if isinstance(node, Relu): 
+            equation = self._int_forward_relu(
+                in_equation, node, bound, slopes
+            )
+
+        elif isinstance(node, MaxPool):
+            equation = self._int_forward_maxpool(
+                in_equation, node, bound
+            )
+
+        elif isinstance(node, Gemm):
+            equation = self._int_forward_gemm(
+                lower, upper, node, bound
+            )
+
+        elif isinstance(node, Conv):
+            equation = self._int_forward_conv(
+                lower, upper, node, bound
+            )
+
+        elif isinstance(node, BatchNormalization):
+            equation = self._int_forward_batch_normalization(
+                lower, upper, node, bound
+            )
+
+        elif isinstance(node, Add):
+            equation = self._int_forward_add(
+                in_equation, node, bound
+            )
+
+        elif type(node) in [Flatten, Reshape, Unsqueeze]:
+            equation = in_equation
+
+            # new_lower_eq  = self.lower_eq[node.from_node[0].id].forward(node)
+ 
+            # elif type(node) in [BatchNormalization, Conv, Gemm]:
+                # new_lower_eq  = Equation.interval_forward(
+                    # node, 
+                    # 'lower',
+                    # self.lower_eq[node.from_node[0].id],
+                    # self.upper_eq[node.from_node[0].id]
+                # )
+                # new_upper_eq  = Equation.interval_forward(
+                    # node,
+                    # 'upper',
+                    # self.lower_eq[node.from_node[0].id],
+                    # self.upper_eq[node.from_node[0].id]
+                # )
+
+        else:
+            raise NotImplementedError(
+                f'One step bound equation interval forward for node {type(node)}'
+            )
+
+        return equation
+
+    def _int_forward_gemm(
+        self, lower_eq: Equation, upper_eq: Equation, node: Node, bound: str
+    ):
+        if  bound == 'lower':
+            matrix = node.forward(
+                lower_eq.matrix, clip='+', add_bias=False
+            ) + node.forward(
+                upper_eq.matrix, clip='-', add_bias=False
+            )
+            const = node.forward(
+                lower_eq.const, clip='+', add_bias=False
+            ) + node.forward(
+                upper_eq.const, clip='-', add_bias=True
+                
+            )
+
+        elif bound == 'upper':
+            matrix = node.forward(
+                lower_eq.matrix, clip='-', add_bias=False
+            ) + node.forward(
+                upper_eq.matrix, clip='+', add_bias=False
+            )
+            const = node.forward(
+                lower_eq.const, clip='-', add_bias=False
+            ) + node.forward(
+                upper_eq.const, clip='+', add_bias=True
+            )
+
+        else:
+            raise ValueError(f"Bound type {bound} could not be recognised.")
+
+        return Equation(matrix, const, node.config)
+
+    def _int_forward_conv(
+        self, lower_eq: Equation, upper_eq: Equation, node: Node, bound: str
+    ):
+        shape = (lower_eq.coeffs_size,) + node.input_shape_no_batch()
+
+        if  bound == 'lower':
+            matrix = node.forward(
+                lower_eq.matrix.T.reshape(shape), clip='+', add_bias=False
+            ) + node.forward(
+                upper_eq.matrix.T.reshape(shape), clip='-', add_bias=False
+            )
+            const = node.forward(
+                lower_eq.const.reshape(node.input_shape), clip='+', add_bias=False
+            ).flatten()
+            const += node.forward(
+                upper_eq.const.reshape(node.input_shape), clip='-', add_bias=True
+            ).flatten()
+
+        elif bound == 'upper':
+            matrix = node.forward(
+                lower_eq.matrix.T.reshape(shape), clip='-', add_bias=False
+            ) + node.forward(
+                upper_eq.matrix.T.reshape(shape), clip='+', add_bias=False
+            )
+            const = node.forward(
+                lower_eq.const.reshape(node.input_shape), clip='-', add_bias=False
+            ).flatten()
+            const += node.forward(
+                upper_eq.const.reshape(node.input_shape), clip='+', add_bias=True
+            ).flatten()
+
+        else:
+            raise ValueError(f"Bound type {bound} could not be recognised.")
+
+        matrix = matrix.reshape(lower_eq.coeffs_size, -1).T
+
+        return Equation(matrix, const, node.config)
+
+    def _int_forward_batch_normalization(
+        self, lower_eq: Equation, upper_eq, node: Node, bound: str
+    ):
+        in_ch_sz = node.in_ch_sz()
+        
+        scale = torch.tile(node.scale, (in_ch_sz, 1)).T.flatten()
+        bias = torch.tile(node.bias, (in_ch_sz, 1)).T.flatten()
+        input_mean = torch.tile(node.input_mean, (in_ch_sz, 1)).T.flatten()
+        var = torch.sqrt(node.input_var + node.epsilon)
+        var = torch.tile(var, (in_ch_sz, 1)).T.flatten()
+        scale_var = scale / var
+
+        matrix = torch.zeros(
+            lower_eq.matrix.shape,
+            dtype=lower_eq.config.PRECISION,
+            device=node.config.DEVICE
+        )
+        const = torch.zeros(
+            lower_eq.const.shape,
+            dtype=lower_eq.config.PRECISION,
+            device=node.config.DEVICE
+        )
+
+        if bound == 'lower':
+            idxs = scale_var < 0
+            matrix[idxs, :] = (upper_eq.matrix[idxs, :].T * scale_var[idxs]).T
+            const[idxs] = upper_eq.const[idxs] * scale_var[idxs]
+            idxs = scale_var >= 0
+            matrix[idxs, :] = (lower_eq.matrix[idxs, :].T * scale_var[idxs]).T
+            const[idxs] = lower_eq.const[idxs] * scale_var[idxs]
+            
+        elif bound == 'upper':
+            idxs = scale_var < 0
+            matrix[idxs, :] = (lower_eq.matrix[idxs, :].T * scale_var[idxs]).T
+            const[idxs] = lower_eq.const[idxs] * scale_var[idxs]
+            idxs = scale_var >= 0
+            matrix[idxs, :] = (upper_eq.matrix[idxs, :].T * scale_var[idxs]).T
+            const[idxs] = upper_eq.const[idxs] * scale_var[idxs]
+
+        else:
+            raise ValueError(f"Bound type {bound} could not be recognised.")
+
+        batch_const = - input_mean / var * scale + bias
+        const += batch_const 
+
+        return Equation(matrix, const, node.config)
+ 
+    def _int_forward_relu(
+            self, equation: Equation, node: Node, bound: str, slopes: torch.Tensor=None
+    ):
+        slope = equation.get_relu_slope(node.from_node[0], bound, bound, None, slopes)
+        matrix = (equation.matrix.T * slope).T
+        const = equation.get_relu_const(
+            node.from_node[0], equation.const, bound, slope
+        )
+
+        return Equation(matrix, const, self.config)
+    
+    def _int_forward_maxpool(self, equation: Equation, node: Node, bound: str):
+        lower, indices = node.forward(
+            node.from_node[0].bounds.lower, return_indices=True
+        )
+        idx_correction = torch.tensor(
+            [
+                i * node.from_node[0].in_ch_sz() 
+                for i in range(node.from_node[0].in_ch())
+            ],
+            dtype=torch.long,
+            device=self.config.DEVICE    
+        ).reshape((node.from_node[0].in_ch(), 1, 1))
+        if node.has_batch_dimension():
+            idx_correction = idx_correction[None, :]
+        indices = indices + idx_correction
+
+        lower, indices = lower.flatten(), indices.flatten()
+        upper = node.forward(node.from_node[0].bounds.upper).flatten()
+        lower_max  = lower > upper
+        not_lower_max = torch.logical_not(lower_max)
+
+        matrix = torch.zeros(
+            (node.output_size, node.input_size),
+            dtype=node.config.PRECISION, 
+            device=node.config.DEVICE
+        )
+        const = torch.zeros(
+            node.output_size, dtype=node.config.PRECISION, device=node.config.DEVICE
+        )
+
+        if bound == 'lower':
+            matrix = equation.matrix[indices, :]
+            const = equation.const[indices]
+
+        elif bound == 'upper':
+            matrix[lower_max, :] = equation.matrix[indices, :][lower_max, :]
+            const[lower_max] = equation.const[indices][lower_max]
+            const[not_lower_max] = \
+                node.from_node[0].bounds.upper.flatten()[indices][not_lower_max]
+
+        else:
+            raise ValueError(f"Bound type {bound} could not be recognised.")
+
+        return Equation(matrix, const, self.config)
+
+    def _int_forward_add(self, equation: Equation, node: Node, bound: str):
+        if node.const is None:
+            if bound == 'lower':
+                summand = self.lower_eq[node.from_node[1].id]
+            elif bound == 'upper':
+                summand = self.upper_eq[node.from_node[1].id]
+            else:
+                raise ValueError(f"Bound type {bound} could not be recognised.")
+
+            matrix = equation.matrix + summand.matrix
+            const = equation.const + summand.const
+
+        else:
+            matrix = equation.matrix.clone()  
+            const = equation.const + node.const
+
+        return equation

@@ -79,6 +79,8 @@ class Node:
         """
         self.bounds = self.bounds.cuda()
         self.device = torch.device('cuda')
+        if self.output is not None:
+            self.output = self.output.cuda()
 
     def cpu(self):
         """
@@ -86,6 +88,8 @@ class Node:
         """
         self.bounds = self.bounds.cpu()
         self.device = torch.device('cpu')
+        if self.output is not None:
+            self.output = self.output.cpu()
 
     def get_outputs(self):
         """
@@ -138,13 +142,44 @@ class Node:
         """
         return self.has_relu_activation() or self.has_max_pool()
 
+    def is_sip_branching_node(self) -> bool:
+        """
+        Determines whether the node branches the SIP computation.
+        """
+        cond1 = type(self) in [Add, Sub] and self.const is None
+        cond2 = isinstance(self, Concat)
+
+        return cond1 or cond2
+
+    def has_sip_branching_node(self) -> bool:
+        """
+        Determines whether the next node branches the SIP computation.
+        """
+        if len(self.to_node) > 0:
+            return self.to_node[0].is_sip_branching_node()
+
+        return False
 
     def has_relu_activation(self) -> bool:
         """
         Determines whether the output of the node is fed to a relu node.
         """
         for i in self.to_node:
-            if isinstance(i, Relu):
+            if isinstance(i, Relu) is True:
+                return True
+
+        return False
+
+    def has_fwd_relu_activation(self) -> bool:
+        """
+        Determines whether the output of the node is fed to a relu node,
+        possibly throuth branching nodes.
+        """
+        for i in self.to_node:
+            cond1 = isinstance(i, Relu)
+            cond2 = i.is_sip_branching_node() and i.has_fwd_relu_activation() is True
+
+            if cond1 is True or cond2 is True:
                 return True
 
         return False
@@ -279,15 +314,22 @@ class Node:
         else:
             self.bounds = Bounds()
 
-    def has_batch_dimension(self) -> int:
+    def has_batch_dimension(self, tensor: torch.Tensor = None) -> int:
         """
         Determines whether the node has batch dimension.
         """
-        if len(self.input_shape) in [1, 3]:
-            return False
+        if tensor is None:
+            flag = False if len(list(self.input_shape)) in [1, 3] else True
 
-        return True
+        else:
+            if len(tensor.shape) > 1 and \
+            tensor.shape[0] > 1 and \
+            np.prod(tensor.shape[1:]) == self.input_size:
+                flag = True
+            else:
+                flag = False
 
+        return flag
 
     def input_shape_no_batch(self) -> int:
         """
@@ -302,10 +344,10 @@ class Node:
         """
         Returns the output shape without the batch dimension. 
         """
-        if self.has_batch_dimension():
-            return self.output_shape[1:]
-
-        return self.output_shape
+        if len(self.output_shape) in [1, 3]:
+            return self.output_shape
+            
+        return self.output_shape[1:]
 
     def in_ch_sz(self) -> int:
         """
@@ -333,12 +375,40 @@ class Node:
         return torch.ones(
             self.output_shape, dtype=torch.bool, device=self.device
         )
- 
+
+    def get_next_relu(self) -> torch.Tensor:
+        """
+        Returns the first relu node forward.
+        """
+        if len(self.to_node) > 0:
+            if isinstance(self.to_node[0], Relu):
+                node = self.to_node[0]
+            else:
+                node = self.to_node[0].get_next_relu()
+        else:
+            node = None
+
+        return node
+
+    def get_prv_non_relu(self) -> torch.Tensor:
+        """
+        Returns the first relu node backward, including the current.
+        """
+        if isinstance(self, Relu) is not True:
+            node = self
+        elif len(self.from_node) > 0:
+            node = self.from_node[0].get_prv_non_relu()
+        else:
+            node = None
+
+        return node
+
     def get_propagation_count(self) -> torch.Tensor:
         if self.has_relu_activation():
             return self.to_node[0].get_propagation_count()
 
         return self.output_size    
+
 
 class Constant(Node):
     def __init__(self, to_node: list, const: torch.Tensor, config: Config, id: int=None):
@@ -502,13 +572,20 @@ class Gemm(Node):
             id=self.id
         )
 
+    def has_bias(self):
+        """
+        Returns whether the node has bias.
+        """
+        return self.bias is not None
+
     def cuda(self):
         """
         Moves all data to gpu memory
         """
         super().cuda()
         self.weights = self.weights.cuda()
-        self.bias = self.bias.cuda()
+        if self.has_bias() is True:
+            self.bias = self.bias.cuda()
 
     def cpu(self):
         """
@@ -516,7 +593,8 @@ class Gemm(Node):
         """
         super().cpu()
         self.weights = self.weights.cpu()
-        self.bias = self.bias.cpu()
+        if self.has_bias() is True:
+            self.bias = self.bias.cpu()
 
     def get_bias(self, index: int) -> float:
         """
@@ -531,6 +609,7 @@ class Gemm(Node):
             
             the bias.
         """
+        assert self.has_bias() is True
         return self.bias[index].item()
 
     def edge_weight(self, index1: int, index2: int) -> float:
@@ -621,10 +700,16 @@ class Gemm(Node):
 
         else:
             raise ValueError(f'Kernel clip value {clip} not recognised')
-     
+    
+        # if self.has_batch_dimension(inp) is True:
+            # output = torch.tensordot(weights, inp, dims=([1], [1])).T
+        # else:  
         output = weights @ inp
 
-        if add_bias is True:
+        if add_bias is True and self.has_bias() is True:
+            # if self.has_batch_dimension(inp) is True:
+                # output += torch.tile(self.bias, (self.input_shape[0], 1)) 
+            # else:
             output += self.bias
 
         if save_output:
@@ -644,7 +729,16 @@ class Gemm(Node):
         Returns: 
             the output of the node.
         """
-        output = self.weights.cpu().numpy() @ inp + self.bias.cpu().numpy()
+        # if has_batch_dimension(inp) is True:
+            # output = np.tensordot(self.weights.numpy(), inp, axes=([1], [1])).T
+        # else:   
+        output = self.weights.numpy() @ inp
+
+        if self.has_bias() is True:
+            # if self.has_batch_dimension(inp) is True:
+                # output += np.tile(self.bias.numpy(), (self.input_shape[0], 1)) 
+            # else:
+            output += self.bias.numpy()
 
         if save_output is True:
             self.output = output
@@ -654,8 +748,8 @@ class Gemm(Node):
     def transpose(
         self,
         inp: torch.Tensor,
-        in_flag: torch.Tensor=True,
-        out_flag: torch.Tensor=True
+        out_flag: torch.Tensor=None,
+        in_flag: torch.Tensor=None
     ) -> torch.Tensor:
         """
         Computes the input to the node given an output.
@@ -743,7 +837,6 @@ class MatMul(Node):
         """
         super().cuda()
         self.weights = self.weights.cuda()
-        self.bias = self.bias.cuda()
 
     def cpu(self):
         """
@@ -751,23 +844,6 @@ class MatMul(Node):
         """
         super().cpu()
         self.weights = self.weights.cpu()
-        self.bias = self.bias.cpu()
-
-    def numpy(self):
-        """
-        Copies the node with with numpy data.
-        """
-        return MatMul(
-            self.from_node,
-            self.to_node,
-            self.input_shape,
-            self.output_shape,
-            self.weights.cpu().numpy(),
-            self.config,
-            depth=self.depth,
-            bounds=self.bounds,
-            id=self.id
-        )
 
     def get_milp_var_size(self):
         self.bounds = self.bounds.cpu()
@@ -793,7 +869,7 @@ class MatMul(Node):
          
             the weight.
         """
-        return self.weights[index1, index2]
+        return self.weights[index1, index2].item()
     
     def forward(
         self, inp: torch.Tensor=None, clip: str=None, save_output=False
@@ -883,9 +959,9 @@ class MatMul(Node):
 
     def transpose(
         self,
-        inp: torch.Tensor,
-        in_flag: torch.Tensor=True,
-        out_flag: torch.Tensor=True
+        inp: torch.Tensor,  
+        out_flag: torch.Tensor=True,
+        in_flag: torch.Tensor=True
     ) -> torch.Tensor:
         """
         Computes the input to the node given an output.
@@ -961,21 +1037,30 @@ class ConvBase(Node):
         self.strides = strides
         self.in_height, self.in_width = input_shape[-2:]
 
+
+    def has_bias(self):
+        """
+        Returns whether the node has bias.
+        """
+        return self.bias is not None
+
     def cuda(self):
         """
         Moves all data to gpu memory
         """
         super().cuda()
         self.kernels = self.kernels.cuda()
-        self.bias = self.bias.cuda()
+        if self.has_bias() is True:
+            self.bias = self.bias.cuda()
 
     def cpu(self):
         """
         Moves all data to cpu memory
         """
-        super.cpu()
-        self.kernels = self.kernels.cuda()
-        self.bias = self.bias.cuda()
+        super().cpu()
+        self.kernels = self.kernels.cpu()
+        if self.has_bias() is True:
+            self.bias = self.bias.cpu()
 
     def get_milp_var_size(self):
         """
@@ -1243,25 +1328,18 @@ class Conv(ConvBase):
             id=self.id
         )
 
-    def numpy(self):
+    def cuda(self):
         """
-        Copies the node with numpy data.
+        Moves all data to gpu memory
         """
-        return Conv(
-            self.from_node,
-            self.to_node,
-            self.input_shape,
-            self.output_shape,
-            self.kernels.cpu().numpy(),
-            self.bias.cpu().numpy(),
-            self.pads,
-            self.strides,
-            self.config,
-            depth=self.depth,
-            bounds=self.bounds,
-            id=self.id
-        )
-         
+        super().cuda()
+
+    def cpu(self):
+        """
+        Moves all data to cpu memory
+        """
+        super().cpu()
+     
     def get_bias(self, index: tuple):
         """
         Returns the bias of the given output.
@@ -1275,6 +1353,8 @@ class Conv(ConvBase):
             
             the bias.
         """
+        assert self.has_bias() is True
+
         return self.bias[index[-1]]
 
     def edge_weight(self, index1: tuple, index2: tuple):
@@ -1290,12 +1370,12 @@ class Conv(ConvBase):
         Returns:
             the weight.
         """
-        height_start = index1[0] * self.strides[0] - self.pads[0]
-        height = index2[0] - height_start
-        width_start = index1[1] * self.strides[1] - self.pads[1]
-        width = index2[1] - width_start
+        height_start = index1[-2] * self.strides[0] - self.pads[0]
+        height = index2[-2] - height_start
+        width_start = index1[-1] * self.strides[1] - self.pads[1]
+        width = index2[-1] - width_start
 
-        return self.kernels[index1[0]][index2[0]][height][width]
+        return self.kernels[index1[0]][index2[0]][height][width].item()
 
 
     def forward(
@@ -1368,7 +1448,7 @@ class Conv(ConvBase):
 
         else:
             raise ValueError(f'Kernel clip value {kernel_clip} not recognised')
-
+        
         output = torch.nn.functional.conv2d(
             inp,
             kernels,
@@ -1406,9 +1486,10 @@ class Conv(ConvBase):
         kernel_strech = self.kernels.reshape(self.out_ch, -1).cpu().numpy()
 
         output = np.tensordot(kernel_strech, inp_strech, axes=([1], [0]))
-        output = output.flatten() + np.tile(
-            self.bias.cpu().numpy(), (self.out_ch_sz, 1)
-        ).T.flatten()
+        if self.has_bias() is True:
+            output = output.flatten() + np.tile(
+                self.bias.numpy(), (self.out_ch_sz, 1)
+            ).T.flatten()
         output = output.reshape(self.output_shape)
 
         if save_output is True:
@@ -1420,8 +1501,8 @@ class Conv(ConvBase):
     def transpose(
         self,
         inp: torch.Tensor,
-        in_flag: torch.Tensor,
-        out_flag: torch.Tensor
+        out_flag: torch.Tensor,
+        in_flag: torch.Tensor
     ) -> torch.Tensor:
         if out_flag is None:
             filled_inp = inp
@@ -1533,7 +1614,7 @@ class Conv(ConvBase):
             stride=self.strides,
             padding=self.pads,
             output_padding=(out_pad_height, out_pad_width)
-        ).reshape(inp.shape[0], - 1)
+        ).reshape(inp.shape[0], -1)
 
     def get_input_padded_size(self) -> int:
         """
@@ -1813,7 +1894,7 @@ class ConvTranspose(ConvBase):
             padded_inp,
             (self.krn_height, self.krn_width),
             (1, 1),
-            devide=self.device
+            device=self.device
         )
 
         kernel_strech = torch.flip(
@@ -1823,9 +1904,10 @@ class ConvTranspose(ConvBase):
         output = np.tensordot(kernel_strech, inp_strech, axes = ([1], [0]))
         pad_flag = self.get_non_pad_idx_flag().flatten()
         output = output.flatten()[pad_flag]
-        output = output + np.tile(
-            self.bias.cpu().numpy(), (self.out_ch_sz, 1)
-        ).T.flatten()
+        if self.has_bias() is True:
+            output = output + np.tile(
+                self.bias.cpu().numpy(), (self.out_ch_sz, 1)
+            ).T.flatten()
         output = output.reshape(self.output_shape)
 
         if save_output is True:
@@ -1836,8 +1918,8 @@ class ConvTranspose(ConvBase):
     def transpose(
         self,
         inp: torch.Tensor,
-        in_flag: torch.Tensor,
-        out_flag: torch.Tensor
+        out_flag: torch.Tensor,
+        in_flag: torch.Tensor
     ) -> torch.Tensor:
         if out_flag is None:
             filled_inp = inp
@@ -1878,6 +1960,7 @@ class ConvTranspose(ConvBase):
     def _transpose_partial(
         self,
         inp: torch.Tensor,
+        out_flag: torch.Tensor,
         in_flag: torch.Tensor
     ) -> torch.Tensor:
         """
@@ -2248,6 +2331,11 @@ class Relu(Node):
         )
         relu.state = self.state.copy()
         relu.dep_root = self.dep_root.copy()
+        if self._lower_relaxation_slope != (None, None):
+            relu.set_lower_relaxation_slope(
+                self._lower_relaxation_slope[0].detach().clone(),
+                self._lower_relaxation_slope[1].detach().clone()
+            )
 
         return relu
 
@@ -2257,6 +2345,11 @@ class Relu(Node):
         """
         super().cuda()
         self.reset_state_flags()
+        if self._lower_relaxation_slope != (None, None):
+            self._lower_relaxation_slope = (
+                self._lower_relaxation_slope[0].cuda(),
+                self._lower_relaxation_slope[1].cuda()
+            )
 
     def cpu(self):
         """
@@ -2264,6 +2357,11 @@ class Relu(Node):
         """
         super().cpu()
         self.reset_state_flags()
+        if self._lower_relaxation_slope != (None, None):
+            self._lower_relaxation_slope = (
+                self._lower_relaxation_slope[0].cpu(),
+                self._lower_relaxation_slope[1].cpu()
+            )
 
     def set_state(self, unit: tuple, state: ReluState):
         """
@@ -2364,8 +2462,7 @@ class Relu(Node):
         self.inactive_flag = None
         self.stable_flag = None
         self.unstable_flag = None
-        self.propagation_flag = None
-        self.propagation_flag = None
+        self.propagation_flag = None 
         self.unstable_count = None
         self.active_count = None
         self.inactive_count = None
@@ -3897,12 +3994,6 @@ class Concat(Node):
             id=self.id
         )
 
-    def cpu(self):
-        """
-        Moves all data to cpu memory
-        """
-        self.bounds = self.bounds.cpu()
-
     def get_milp_var_indices(self, var_type: str):
         """
         Returns the starting and ending indices of the milp variables encoding
@@ -3976,3 +4067,7 @@ class Concat(Node):
             self.output = output
 
         return output
+
+
+class Dropout(Node):
+    pass

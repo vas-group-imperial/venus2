@@ -93,12 +93,13 @@ class Venus:
                 self.config
             )  
             spec = vnn_parser.parse()
-           
+
+            # spec[0].input_node.bounds.upper = spec[0].input_node.bounds.lower.clone()           
             # import onnx
             # import onnxruntime.backend as rt
-            # m = onnx.load('model.onnx')
+            # m = onnx.load('vnncomp2022_benchmarks-main/benchmarks/collins_rul_cnn/onnx/NN_rul_full_window_20.onnx')
             # runnable = rt.prepare(m, 'CPU')
-            # pred = runnable.run(spec[0].input_node.bounds.lower.numpy())
+            # pred = runnable.run(spec[0].input_node.bounds.lower.numpy().reshape(nn.head.input_shape))
             # print(pred)
             # import sys
             # sys.exit()

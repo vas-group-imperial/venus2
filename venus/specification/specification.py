@@ -348,33 +348,6 @@ class Specification:
 
         return Specification(innode, self.output_formula, self.name)
 
-    def normalise(self, mean, std):
-        """
-        Normalises the input bounds
-
-        Arguments:
-            mean:
-                normalisation mean
-            std:
-                normalisation standard deviation
-        Returns:
-            None
-        """
-        self.input_layer.post_bounds.normalise(mean, std)
-
-    def clip(self, min_value, max_value):
-        """
-        Clips the input bounds
-
-        Arguments:
-
-            min_value:
-                valid lower bound
-            max_value:
-                valid upper bound
-        """
-        self.input_layer.post_bounds.clip(min_value, max_value)
-
     def is_satisfied(self, lower_bounds, upper_bounds):
         """
         Checks whether the specificaton is satisfied given the network's output
@@ -537,7 +510,7 @@ class Specification:
             Whether or not the given formula is satisfied.
         """
         if isinstance(formula, TrueFormula):
-            return -1
+            return 0
         elif isinstance(formula, Constraint):
             if formula.sense == Formula.Sense.LT:
                 return formula.op2.i if isinstance(formula, VarVarConstraint) else -1

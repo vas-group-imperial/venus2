@@ -82,7 +82,7 @@ class Verifier():
     # whether to use lp relaxations
     LP: bool = True
     # whether to try verification via PGD
-    PGD: bool = True
+    PGD: bool = False
     # whether to try verification via PGD on the LP relaxation
     PGD_ON_LP: bool = True
     # pgd step size - The epsilon will be divided by this number.
@@ -125,7 +125,7 @@ class SIP():
         self.CONCRETISATION = False
         # whether to concretise bounds during back substitution using one step
         # equations - for this to work ONE_STEP_SYMBOLIC needs to be true.
-        self.EQ_CONCRETISATION = True
+        self.EQ_CONCRETISATION = False
         # relu approximation
         self.RELU_APPROXIMATION = ReluApproximation.MIN_AREA
         # formula simplificaton
@@ -138,8 +138,6 @@ class SIP():
         self.GD_STEPS: int = 100
         # STABILITY FLAG THRESHOLD
         self.STABILITY_FLAG_THRESHOLD = 0.0
-        # Device for torch operations
-        self.DEVICE = torch.device('cpu')
 
     def copy(self):
         sip_cf = SIP()
@@ -162,7 +160,7 @@ class Config:
         self.VERIFIER = Verifier()
         self.SIP = SIP()
         self.PRECISION = torch.float32
-        self.MEMORY_OPTIMISATION = True
+        self.DEVICE = torch.device('cpu')
         self._user_set_params = set()
 
     def set_param(self, param, value):

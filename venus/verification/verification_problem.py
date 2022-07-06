@@ -44,6 +44,7 @@ class VerificationProblem(object):
         self.pgd_ver_done = False
         self.lp_ver_done = False
         self._sip_bounds_computed = False
+        self.device = torch.device('cpu')
 
 
     def bound_analysis(self, delta_flags=None):
@@ -215,17 +216,19 @@ class VerificationProblem(object):
         """
         Moves all data to gpu memory
         """
-        self.nn.cuda()
-        self.spec.cuda()
-        self.device = torch.device('cuda')
+        if self.device == torch.device('cpu'):
+            self.nn.cuda()
+            self.spec.cuda()
+            self.device = torch.device('cuda')
 
     def cpu(self):
         """
         Moves all data to cpu memory
         """
-        self.nn.cpu()
-        self.spec.cpu()
-        self.device = torch.device('cpu')
+        if self.device == torch.device('cuda'):
+            self.nn.cpu()
+            self.spec.cpu()
+            self.device = torch.device('cpu')
 
     def to_string(self):
         return self.nn.model_path  + ' against ' + self.spec.to_string()
