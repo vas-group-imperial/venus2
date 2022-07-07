@@ -680,7 +680,7 @@ class BSSIP:
             dtype=node.config.PRECISION,
             device=self.config.DEVICE
         )
-        slices = slice(0, equation.size) + node.slices
+        slices = [slice(0, equation.size)] + node.slices
         matrix[slices] = equation.matrix
 
         return Equation(matrix, equation.const, self.config)

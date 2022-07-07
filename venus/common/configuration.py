@@ -118,7 +118,7 @@ class SIP():
 
     def __init__(self):
         # one step symbolic bounds
-        self.ONE_STEP_SYMBOLIC = False
+        self.ONE_STEP_SYMBOLIC = True
         # symbolic bounds using back-substitution
         self.SYMBOLIC = True
         # whether to concretise bounds during back substitution

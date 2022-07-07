@@ -361,6 +361,15 @@ class Specification:
         Returns:
             Whether or not the specification is satisfied.
         """
+        if self.config.BENCHMARK == 'carvana':
+            output = torch.sum(
+                torch.eq(
+                    lower_bounds[:, 1, ...] > upper_bounds[:, 0, ...],
+                    self.carvana_out_vals.bool()
+                )
+            )
+            return self._is_satisfied(self.output_formula, output, output)
+
         return self._is_satisfied(
             self.output_formula, lower_bounds.flatten(), upper_bounds.flatten()
         )

@@ -22,7 +22,8 @@ class ONNXParser:
     SUPPORTED_NODES = ['Flatten', 'Shape', 'Constant', 'Concat', 'Unsqueeze',
                        'Gather', 'Relu', 'Gemm', 'Conv', 'Transpose', 'MatMul',
                        'Add', 'Div', 'Sub', 'BatchNormalization', 'Slice',
-                       'MaxPool','ConvTranspose', 'Cast', 'Reshape', 'Dropout']
+                       'MaxPool','ConvTranspose', 'Cast', 'Reshape', 'Dropout', 
+                       'Transpose', 'OneHot', 'Equal']
 
     SKIP_NODES = [Dropout]
 
@@ -35,12 +36,18 @@ class ONNXParser:
         dictnode = {i.output[0]: i for i in model.graph.node} 
         init = {i.name: i for i in model.graph.initializer}
         [inp] = [i for i in model.graph.input if i.name not in init]
-        [inp_node] = [i for i in model.graph.node if len(i.input) > 0 and i.input[0] == inp.name]
-        queue = [i for i in model.graph.node if len(i.input) == 1] + [inp_node]
+        inp_nodes = [i for i in model.graph.node if len(i.input) > 0 and i.input[0] == inp.name]
+        if self.config.BENCHMARK == 'carvana':
+            inp_nodes = [inp_nodes[0]]
+        # queue = [i for i in model.graph.node if len(i.input) == 1] + inp_nodes
+        queue = model.graph.node
 
         while len(queue) != 0:
             node = queue.pop(0)
-
+            if self.config.BENCHMARK == 'carvana' and \
+            self.carvana_check(node, dictnode) is True: 
+                continue
+        
             if self.are_inputs_parsed(node, venus_nodes, init, inp) is True:
                 venus_nodes[node.output[0]] = self.parse_node(
                     node,
@@ -56,14 +63,30 @@ class ONNXParser:
             else:
                 queue.append(node)
 
-        nodes = self.simplify(venus_nodes[inp_node.output[0]])
+        # inp_outputs =  [venus_nodes[i.output[0]] for i in inp_nodes]
+        inp_outputs =  [venus_nodes[i] for i in venus_nodes if len(venus_nodes[i].from_node) == 0]
+        nodes = self.simplify(inp_outputs)
         [head] = [nodes[i] for i in nodes if len(nodes[i].from_node) == 0]
         [tail] = [nodes[i] for i in nodes if len(nodes[i].to_node) == 0]
         self.update_depth(head)
+        if self.config.BENCHMARK == 'carvana':
+            for _, i in nodes.items():
+                i.depth -= 1
 
 
         return head, tail, nodes
 
+    def carvana_check(self, node, dictnode):
+        if len(node.input) > 0 and node.input[0] == 'out_mask':
+            return True
+        if node.op_type == 'Gather' and node.output[0] in ['35', '27']:
+            return True
+
+        for i in node.input:
+            if i in dictnode and self.carvana_check(dictnode[i], dictnode) is True:
+                return True
+
+        return False
 
     def are_inputs_parsed(
         self,
@@ -168,7 +191,7 @@ class ONNXParser:
                 vnode = self.parse_cast(node, venus_nodes, init)
 
             else:
-                raise NotImplementedType(f'{node.op_type}')
+                raise NotImplementedError(f'{node.op_type}')
 
  
         # update inputs and outputs
@@ -521,8 +544,12 @@ class ONNXParser:
     def parse_dropout(self, node: NodeProto, input_shape: tuple) -> Node:
         return Dropout([], [], input_shape, input_shape, self.config)
 
-    def simplify(self, node: Node):
-        return self._simplify(node, {}, [])
+    def simplify(self, nodes: Node):
+        dic, visited = {}, []
+        for i in nodes:
+            dic = dic | self._simplify(i, dic, visited)
+
+        return dic
 
     def _simplify(self, node: None, dic: dict, visited: list):
         if node in dic or node in visited:

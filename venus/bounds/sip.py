@@ -112,7 +112,7 @@ class SIP:
         upper_slopes: dict=None,
         delta_flag: torch.Tensor=None
     ):
-
+        print(node)
         # set interval propagation bounds
         ia_count = self.ibp.set_bounds(node, lower_slopes, upper_slopes, delta_flag)
 
