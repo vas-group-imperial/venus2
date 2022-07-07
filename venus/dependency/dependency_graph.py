@@ -244,7 +244,7 @@ class DependencyGraph:
         """ 
         bounds = n.from_node[0].bounds
         w = (n.weights[idx1, :].flatten(), n.weights[idx2, :].flatten())
-        if n.has_bias is True():
+        if n.has_bias() is True:
             b = (n.bias[idx1], n.bias[idx2])
         else:
             b = (0, 0)

@@ -118,7 +118,7 @@ class SIP():
 
     def __init__(self):
         # one step symbolic bounds
-        self.ONE_STEP_SYMBOLIC = True
+        self.ONE_STEP_SYMBOLIC = False
         # symbolic bounds using back-substitution
         self.SYMBOLIC = True
         # whether to concretise bounds during back substitution
@@ -162,6 +162,7 @@ class Config:
         self.PRECISION = torch.float32
         self.DEVICE = torch.device('cpu')
         self._user_set_params = set()
+        self.BENCHMARK = 'carvana'
 
     def set_param(self, param, value):
         if value is None: return

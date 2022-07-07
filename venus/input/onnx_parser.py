@@ -23,6 +23,7 @@ class ONNXParser:
                        'Gather', 'Relu', 'Gemm', 'Conv', 'Transpose', 'MatMul',
                        'Add', 'Div', 'Sub', 'BatchNormalization', 'Slice',
                        'MaxPool','ConvTranspose', 'Cast', 'Reshape', 'Dropout']
+
     SKIP_NODES = [Dropout]
 
     def __init__(self, config: Config):
@@ -35,7 +36,7 @@ class ONNXParser:
         init = {i.name: i for i in model.graph.initializer}
         [inp] = [i for i in model.graph.input if i.name not in init]
         [inp_node] = [i for i in model.graph.node if len(i.input) > 0 and i.input[0] == inp.name]
-        queue = [i for i in model.graph.node if len(i.input) == 0] + [inp_node]
+        queue = [i for i in model.graph.node if len(i.input) == 1] + [inp_node]
 
         while len(queue) != 0:
             node = queue.pop(0)
@@ -151,9 +152,6 @@ class ONNXParser:
             elif node.op_type == 'Gather':
                 vnode = self.parse_gather(node, venus_nodes, init)
 
-            elif node.op_type == 'Cast':
-                vnode = self.parse_cast(node, venus_nodes, init)
-
             elif node.op_type == 'Unsqueeze':
                 vnode = self.parse_unsqueeze(node, input_shape, venus_nodes, init)
 
@@ -165,6 +163,13 @@ class ONNXParser:
 
             elif node.op_type == 'Dropout':
                 vnode = self.parse_dropout(node, input_shape)
+
+            elif node.op_type == 'Cast':
+                vnode = self.parse_cast(node, venus_nodes, init)
+
+            else:
+                raise NotImplementedType(f'{node.op_type}')
+
  
         # update inputs and outputs
         for i in node.input:
@@ -419,8 +424,7 @@ class ONNXParser:
         if attr is not None:
             axis = attr.i
 
-        gather = torch.index_select(data, axis, indices.int())
-
+        gather = torch.squeeze(torch.index_select(data, axis, indices))
         return Constant([], gather, self.config)
 
     def parse_cast(self, node: NodeProto, venus_nodes: list, init: list) -> Node:
@@ -493,6 +497,7 @@ class ONNXParser:
                 device='cpu'
             )
 
+        
         slices, cur_axis = [], 0
         for i in range(len(input_shape)):
             if i in axes:

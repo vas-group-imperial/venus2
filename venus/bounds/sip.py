@@ -100,10 +100,10 @@ class SIP:
         for i in range(depth, self.prob.nn.tail.depth + 1):
             nodes = self.prob.nn.get_node_by_depth(i)
             for j in nodes:
-                print(j, j.id, j.input_shape, j.output_shape, j.output_size)
                 delta = self._get_delta_for_node(j, delta_flags)
                 lower_slopes, upper_slopes = self._get_slopes_for_node(j, slopes)
                 self._set_bounds_for_node(j, lower_slopes, upper_slopes, delta_flags)
+                print(j, j.output_size, torch.mean(j.bounds.lower))
  
     def _set_bounds_for_node(
         self,
@@ -176,9 +176,6 @@ class SIP:
             return False
 
         if node.has_relu_activation() and node.to_node[0].get_unstable_count() > 0:
-            return True
-
-        if node.has_max_pool():
             return True
     
         return False

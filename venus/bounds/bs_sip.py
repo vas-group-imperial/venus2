@@ -817,14 +817,11 @@ class BSSIP:
         lower_max  = lower > upper
         not_lower_max = torch.logical_not(lower_max)
 
-        _plus, _minus = equation._get_plus_matrix(), equation._get_minus_matrix()
+        _plus, _minus = equation.get_plus_matrix(), equation.get_minus_matrix()
 
-        lower_const = node.from_node[0].bounds.lower.flatten()[indices]
         upper_const = torch.zeros(
             node.output_size, dtype=self.config.PRECISION, device=self.config.DEVICE
         )
-        upper_const[lower_max] = \
-            node.from_node[0].bounds.lower.flatten()[indices][lower_max]
         upper_const[not_lower_max] = \
             node.from_node[0].bounds.upper.flatten()[indices][not_lower_max]
 
@@ -846,7 +843,7 @@ class BSSIP:
             del temp
             matrix = plus_lower + minus_upper
 
-            const = _plus @ lower_const + _minus @ upper_const + equation.const
+            const = _minus @ upper_const + equation.const
 
         elif bound == 'upper':
             minus_lower = torch.zeros(
@@ -866,7 +863,7 @@ class BSSIP:
             del temp
             matrix = minus_lower + plus_upper
 
-            const = _minus @ lower_const +  _plus @ upper_const + equation.const
+            const =  _plus @ upper_const + equation.const
 
         else:
             raise ValueError(f'Bound {bound} is not recognised.')

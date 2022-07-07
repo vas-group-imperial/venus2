@@ -1193,8 +1193,6 @@ class ConvBase(Node):
         assert len(matrix.shape) in [3, 4], f"{len(matrix.shape)}-D is not supported."
         assert type(matrix) in [torch.Tensor, np.ndarray], f"{type(matrix)} matrices are not supported."
 
-        assert type(matrix in [np.ndarray, torch.Tensor])
-
         filters, height, width = matrix.shape[-3:]
         row_extent = height - kernel_shape[0] + 1
         col_extent = width - kernel_shape[1] + 1
