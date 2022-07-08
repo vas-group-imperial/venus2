@@ -499,7 +499,7 @@ class ONNXParser:
         new_shape = tuple(i.int().item() for i in new_shape if i != 1)
         if np.any([i == -1 for i in new_shape]):
             new_shape = np.empty(input_shape, dtype=bool).reshape(new_shape).shape
-    
+
         if self._is_constant(node.input[0], venus_nodes, init): 
             const = self._to_tensor(node.input[0], venus_nodes, init)
             const = const.reshape(new_shape)
@@ -640,6 +640,7 @@ class ONNXParser:
         self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list
     ) -> Node:
         pads = self._to_tensor(node.input[1], venus_nodes, init)
+
         if torch.sum(pads) == 0:
             node = DummyNode([], [], input_shape, input_shape, self.config)
         
@@ -649,7 +650,13 @@ class ONNXParser:
             node = Constant([], const, self.config)
 
         else:
-            node = Pad([], [], input_shape, pads, self.config)
+            pads = tuple(i.item() for i in pads)
+            mid = int(len(pads)/2)
+            pads_start, pads_end = pads[:mid], pads[mid:]
+            torch_pads = ()
+            for i in range(mid):
+                torch_pads += (pads_start[i], pads_end[i])
+            node = Pad([], [], input_shape, torch_pads, self.config)
 
         return node
 

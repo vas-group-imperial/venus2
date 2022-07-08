@@ -1012,8 +1012,8 @@ class Pad(Node):
                 concrete bounds for the node.
         """
         output_shape = input_shape[:-2] + (
-            input_shape[-2] + 2 * pads[0] - 1,
-            input_shape[-1] + 2 * pads[1] - 1
+            input_shape[-2] + pads[-4] + pads[-3],
+            input_shape[-1] + pads[-2] + pads[-1]
         )
         super().__init__(
             from_node,
@@ -1025,6 +1025,7 @@ class Pad(Node):
             bounds=bounds,
             id=id
         )
+        self.pads = pads
 
     def copy(self):
         """
@@ -1100,7 +1101,7 @@ class Pad(Node):
         Returns: 
             the output of the node.
         """
-        output = torch.pad(inp, self.pads)
+        output = torch.nn.functional.pad(inp, self.pads)
 
         if save_output:
             self.output = output

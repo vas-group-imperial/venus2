@@ -115,7 +115,7 @@ class OSSIP:
         if isinstance(node, Gemm):
             f_equation =  self._forward_gemm(equation, node)
 
-        elif isinstance(node, Conv):
+        elif type(node) in [Conv, ConvTranspose]:
             f_equation = self._forward_conv(equation, node)
 
         elif isinstance(node, MatMul):
@@ -218,7 +218,7 @@ class OSSIP:
                 lower, upper, node, bound
             )
 
-        elif isinstance(node, Conv):
+        elif type(node) in [Conv, ConvTranspose]:
             equation = self._int_forward_conv(
                 lower, upper, node, bound
             )
