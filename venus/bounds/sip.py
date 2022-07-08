@@ -103,7 +103,6 @@ class SIP:
                 delta = self._get_delta_for_node(j, delta_flags)
                 lower_slopes, upper_slopes = self._get_slopes_for_node(j, slopes)
                 self._set_bounds_for_node(j, lower_slopes, upper_slopes, delta_flags)
-                print(j, j.output_size, torch.mean(j.bounds.lower))
  
     def _set_bounds_for_node(
         self,
@@ -112,9 +111,10 @@ class SIP:
         upper_slopes: dict=None,
         delta_flag: torch.Tensor=None
     ):
-        print(node)
+        print(node, node.output_size)
         # set interval propagation bounds
         ia_count = self.ibp.set_bounds(node, lower_slopes, upper_slopes, delta_flag)
+        print('ia', ia_count, torch.mean(node.bounds.lower))
 
         # check eligibility for symbolic equations
         symb_elg = self.is_symb_eq_eligible(node)
@@ -124,6 +124,7 @@ class SIP:
             self.os_sip.forward(node, lower_slopes, upper_slopes)
             if symb_elg is True:
                 os_count = self.os_sip.set_bounds(node)
+                print('os', os_count, torch.mean(node.bounds.lower))
  
         # recheck eligibility for symbolic equations
         non_linear_depth = self.prob.nn.get_non_linear_starting_depth()
@@ -142,9 +143,10 @@ class SIP:
             else:
                 concretisations = None
 
-            bs = self.bs_sip.set_bounds(
+            bs_count = self.bs_sip.set_bounds(
                 node, lower_slopes, upper_slopes, concretisations
             )
+            print('bs', bs_count, torch.mean(node.bounds.lower))
 
     def _get_delta_for_node(self, node: Node, delta_flags: torch.Tensor) -> torch.Tensor:
         if delta_flags is not None and node.has_relu_activation() is True:

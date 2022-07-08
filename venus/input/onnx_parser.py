@@ -23,9 +23,8 @@ class ONNXParser:
                        'Gather', 'Relu', 'Gemm', 'Conv', 'Transpose', 'MatMul',
                        'Add', 'Div', 'Sub', 'BatchNormalization', 'Slice',
                        'MaxPool','ConvTranspose', 'Cast', 'Reshape', 'Dropout', 
-                       'Transpose', 'OneHot', 'Equal']
-
-    SKIP_NODES = [Dropout]
+                       'AveragePool', 'ConstantOfShape', 'Pad', 'Transpose', 
+                       'OneHot', 'Equal']
 
     def __init__(self, config: Config):
         self.config = config
@@ -36,7 +35,12 @@ class ONNXParser:
         dictnode = {i.output[0]: i for i in model.graph.node} 
         init = {i.name: i for i in model.graph.initializer}
         [inp] = [i for i in model.graph.input if i.name not in init]
-        inp_nodes = [i for i in model.graph.node if len(i.input) > 0 and i.input[0] == inp.name]
+        inp_nodes = [
+            i for i in model.graph.node if len(i.input) > 0 and i.input[0] == inp.name
+        ]
+        shape_info = onnx.shape_inference.infer_shapes(model)
+        shape_info = {node.name: node for node in shape_info.graph.value_info}
+
         if self.config.BENCHMARK == 'carvana':
             inp_nodes = [inp_nodes[0]]
         # queue = [i for i in model.graph.node if len(i.input) == 1] + inp_nodes
@@ -52,6 +56,7 @@ class ONNXParser:
                 venus_nodes[node.output[0]] = self.parse_node(
                     node,
                     venus_nodes,
+                    shape_info,
                     init,
                     inp
                 )
@@ -105,13 +110,22 @@ class ONNXParser:
         self,
         node: NodeProto,
         venus_nodes: dict,
+        shape_info: dict,
         init: list,
         inp: ValueInfoProto
     ) -> Node:
+        print(node.op_type, node.output[0])
+
         assert node.op_type in self.SUPPORTED_NODES, \
             f'node {node.op_type} is not supported'    
-        assert node.op_type == 'Constant' or node.input[0] not in init, \
-            "First input to non-constant nodes should not be an initializer."
+        node_check = node.op_type == 'Constant' or node.input[0] not in init 
+        input_check = [
+            i in init or (i in venus_nodes and isinstance(venus_nodes[i], Constant))
+            for i in node.input
+        ]
+        assert node_check or input_check, \
+            "First input to non-constant nodes should not be an initializer or all" + \
+            "inputs should be constants or initializers"
 
         # determine input shape
         if len(node.input) == 0:
@@ -123,8 +137,13 @@ class ONNXParser:
             )
             if len(input_shape) == 2:
                 input_shape = (input_shape[1],)
-        else:
+        elif node.input[0] in venus_nodes:
             input_shape = venus_nodes[node.input[0]].output_shape
+        elif  init[node.input[0]].name in shape_info:
+            input_shape = shape_info[init[node.input[0]].name]
+        else:
+            input_shape = None
+
         # process node
         if node.output[0] in venus_nodes:
             vnode = venus_nodes[node.output[0]]
@@ -142,7 +161,10 @@ class ONNXParser:
                 vnode = self.parse_conv_transpose(node, input_shape, venus_nodes, init)
 
             elif node.op_type == 'MaxPool':
-                vnode = self.parse_maxpool(node, input_shape, init)
+                vnode = self.parse_max_pool(node, input_shape, init)
+
+            elif node.op_type == 'AveragePool':
+                vnode = self.parse_average_pool(node, input_shape, init)
 
             elif node.op_type == 'Relu':
                 vnode =  Relu([], [], input_shape, self.config)
@@ -169,6 +191,9 @@ class ONNXParser:
             elif node.op_type == 'Shape':
                 vnode = self.parse_shape(node, input_shape)
 
+            elif node.op_type == 'ConstantOfShape':
+                vnode = self.parse_constant_of_shape(node, venus_nodes, init)
+
             elif node.op_type == 'Reshape':
                 vnode = self.parse_reshape(node, input_shape, venus_nodes, init)
 
@@ -181,6 +206,9 @@ class ONNXParser:
             elif node.op_type == 'Slice':
                 vnode = self.parse_slice(node, input_shape, venus_nodes, init)
 
+            elif node.op_type == 'Transpose':
+                vnode = self.parse_transpose(node, input_shape, venus_nodes, init)
+
             elif node.op_type == 'Concat':
                 vnode = self.parse_concat(node, venus_nodes, init)
 
@@ -189,6 +217,9 @@ class ONNXParser:
 
             elif node.op_type == 'Cast':
                 vnode = self.parse_cast(node, venus_nodes, init)
+
+            elif node.op_type == 'Pad':
+                vnode = self.parse_pad(node, input_shape, venus_nodes, init)
 
             else:
                 raise NotImplementedError(f'{node.op_type}')
@@ -308,7 +339,7 @@ class ONNXParser:
             self.config
         )
 
-    def parse_maxpool(self, node: NodeProto, input_shape: tuple, init: list) -> Node:
+    def parse_max_pool(self, node: NodeProto, input_shape: tuple, init: list) -> Node:
         pads, strides = (0, 0), (1, 1)
 
         attr = self._get_attribute(node, "kernel_shape")
@@ -332,12 +363,37 @@ class ONNXParser:
             self.config
         )
 
+
+    def parse_average_pool(
+        self, node: NodeProto, input_shape: tuple, init: list
+    ) -> Node:
+        pads, strides = (0, 0), (1, 1)
+
+        attr = self._get_attribute(node, "kernel_shape")
+        kernel_shape = tuple(attr.ints)
+
+        attr = self._get_attribute(node, "pads")
+        if attr is not None:
+            pads = tuple(i for i in attr.ints[0:2])
+
+        attr = self._get_attribute(node, "strides")
+        if attr is not None:
+            strides = tuple(i for i in attr.ints[0:2])
+
+        return AveragePool(
+            [],
+            [],
+            input_shape,
+            kernel_shape,
+            pads,
+            strides,
+            self.config
+        )
+
     def parse_sub(
         self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list
     ) -> Node:
-        if node.input[0] in init or \
-        (node.input[0] in venus_nodes and \
-        isinstance(venus_nodes[node.input[0]], Constant)):
+        if self._is_constant(node.input[0], venus_nodes, init): 
             const0 = self._to_tensor(node.input[0], venus_nodes, init)
             const1 = self._to_tensor(node.input[1], venus_nodes, init)
 
@@ -354,9 +410,7 @@ class ONNXParser:
     def parse_add(
         self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list
     ) -> Node:
-        if node.input[0] in init or \
-        (node.input[0] in venus_nodes and \
-        isinstance(venus_nodes[node.input[0]], Constant)):
+        if self._is_constant(node.input[0], venus_nodes, init): 
             const0 = self._to_tensor(node.input[0], venus_nodes, init)
             const1 = self._to_tensor(node.input[1], venus_nodes, init)
 
@@ -428,6 +482,16 @@ class ONNXParser:
 
         return Constant([], shape, self.config)
 
+    def parse_constant_of_shape(
+        self, node: NodeProto, venus_nodes: dict, init: dict
+    ) -> Node:
+        shape = self._to_tensor(node.input[0], venus_nodes, init)
+        shape = (shape.int(),) if len(shape.shape) == 0 else tuple(shape.int())
+        value = self._get_attribute(node, 'value')
+        value = onnx.numpy_helper.to_array(value.t).item()
+        
+        return Constant([], torch.full(shape, value), self.config)
+
     def parse_reshape(
             self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list
     ) -> Node:
@@ -435,7 +499,11 @@ class ONNXParser:
         new_shape = tuple(i.int().item() for i in new_shape if i != 1)
         if np.any([i == -1 for i in new_shape]):
             new_shape = np.empty(input_shape, dtype=bool).reshape(new_shape).shape
-
+    
+        if self._is_constant(node.input[0], venus_nodes, init): 
+            const = self._to_tensor(node.input[0], venus_nodes, init)
+            const = const.reshape(new_shape)
+            return Constant([], const, self.config)
 
         return Reshape([], [], input_shape, new_shape, self.config)
 
@@ -447,7 +515,7 @@ class ONNXParser:
         if attr is not None:
             axis = attr.i
 
-        gather = torch.squeeze(torch.index_select(data, axis, indices))
+        gather = torch.squeeze(torch.index_select(data, axis, indices.int()))
         return Constant([], gather, self.config)
 
     def parse_cast(self, node: NodeProto, venus_nodes: list, init: list) -> Node:
@@ -529,8 +597,30 @@ class ONNXParser:
             else:
                 slices.append(slice(0, input_shape[i]))
 
+        if self._is_constant(node.input[0], venus_nodes, init):
+            data = self._to_tensor(node.input[0], venus_nodes, init).numpy()
+            const = torch.tensor(data[tuple(slices)].copy())
+
+            return Constant([], const, self.config)
+
         return Slice([], [], input_shape, slices, self.config)
 
+    def parse_transpose(
+        self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list
+    ) -> Node:    
+        attr = self._get_attribute(node, 'perm')
+        if attr is not None: 
+            perm = tuple(i for i in attr.ints)
+        else:
+            perm = tuple(i for i in range(len(input_shape) -1, -1, -1))
+        
+        if self._is_constant(node.input[0], venus_nodes, init):
+            data = self._to_tensor(node.input[0], venus_nodes, init)
+            const = data.permute(perm)
+            return Constant([], const, self.config)
+        
+        else:
+            raise NotImplementedError('Transpose node')
 
     def parse_concat(self, node: NodeProto, venus_nodes: list, init: list) -> Node:
         axis = self._get_attribute(node, "axis").i
@@ -539,10 +629,32 @@ class ONNXParser:
         output_shape[axis] = sum([i[axis] for i in input_shapes])
         output_shape = tuple(output_shape)
 
+        if np.all([self._is_constant(i, venus_nodes, init) for i in node.input]):
+            data = [self._to_tensor(i, venus_nodes, init) for i in node.input]
+            data = torch.cat(data, axis=axis)
+            return Constant([], data, self.config)
+
         return Concat([], [], input_shapes, output_shape, axis, self.config)
 
+    def parse_pad(
+        self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list
+    ) -> Node:
+        pads = self._to_tensor(node.input[1], venus_nodes, init)
+        if torch.sum(pads) == 0:
+            node = DummyNode([], [], input_shape, input_shape, self.config)
+        
+        elif self._is_constant(node.input[0], venus_nodes, init):
+            const = self._to_tensor(node.input[0], venus_nodes, init)
+            const = torch.nn.functional.pad(const, pads)
+            node = Constant([], const, self.config)
+
+        else:
+            node = Pad([], [], input_shape, pads, self.config)
+
+        return node
+
     def parse_dropout(self, node: NodeProto, input_shape: tuple) -> Node:
-        return Dropout([], [], input_shape, input_shape, self.config)
+        return DummyNode([], [], input_shape, input_shape, self.config)
 
     def simplify(self, nodes: Node):
         dic, visited = {}, []
@@ -555,7 +667,7 @@ class ONNXParser:
         if node in dic or node in visited:
             return {}
        
-        elif type(node) in self.SKIP_NODES:
+        elif isinstance(node, DummyNode):
             node.from_node[0].remove_to_node(node)
             node.from_node[0].add_to_node(node.to_node[0])
             node.to_node[0].remove_from_node(node)
@@ -647,7 +759,15 @@ class ONNXParser:
 
         return None
 
+    def _is_constant(self, name: str, venus_nodes: list, init: list):
+        if name in venus_nodes and isinstance(venus_nodes[name], Constant):
 
+            return True
+
+        if name in init:
+            return True
+
+        return False
 
     # def process_transpose(node, input_shape):
         # for att in node.attribute:

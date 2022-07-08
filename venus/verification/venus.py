@@ -102,7 +102,7 @@ class Venus:
                 del nn.node[head_id]
                 spec[0].carvana_out_vals = spec[0].input_node.bounds.lower[:, 3, ...]
                 spec[0].input_node.bounds.lower = spec[0].input_node.bounds.lower[:,0:3,...]
-                spec[0].input_node.bounds.upper = spec[0].input_node.bounds.lower[:,0:3,...]
+                spec[0].input_node.bounds.upper = spec[0].input_node.bounds.upper[:,0:3,...]
                 shape = spec[0].input_node.input_shape
                 shape = (shape[0], 3, shape[2], shape[3])
                 spec[0].input_node.input_shape = shape

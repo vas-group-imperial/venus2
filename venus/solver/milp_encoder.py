@@ -119,7 +119,10 @@ class MILPEncoder:
                 elif isinstance(j, Concat):
                     j.out_vars = j.forward([k.out_vars for k in j.from_node])
 
-                elif type(j) in [Gemm, MatMul, Conv, ConvTranspose, Sub, BatchNormalization, MaxPool]:
+                elif type(j) in [
+                    Gemm, MatMul, Conv, ConvTranspose, Sub, BatchNormalization, MaxPool,
+                    AveragePool
+                ]:
                     self.add_output_vars(j, gmodel)
 
                 else:
@@ -206,7 +209,10 @@ class MILPEncoder:
                 elif type(j) in [Flatten, Concat, Slice, Unsqueeze, Reshape]:
                     pass
 
-                elif type(j) in [Gemm, Conv, ConvTranspose, MatMul, Sub, Add, BatchNormalization]:
+                elif type(j) in [
+                    Gemm, Conv, ConvTranspose, MatMul, Sub, Add, BatchNormalization,
+                    AveragePool
+                ]:
                     self.add_affine_constrs(j, gmodel)
 
                 elif isinstance(j, MaxPool):

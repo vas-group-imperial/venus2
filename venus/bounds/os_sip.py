@@ -121,8 +121,14 @@ class OSSIP:
         elif isinstance(node, MatMul):
             f_equation = self._forward_matmul(equation, node)
 
+        elif isinstance(node, AveragePool):
+            f_equation = self._forward_average_pool(equation, node)
+
         elif isinstance(node, Slice):
             f_equation = self._forward_slice(equation, node)
+
+        elif isinstance(node, Pad):
+            f_equation = self._forward_pad(equation, node)
 
         elif type(node) in [Flatten, Reshape, Unsqueeze]:
             f_equation = equation
@@ -154,16 +160,36 @@ class OSSIP:
 
         return Equation(matrix, const, self.config)
 
+    def _forward_average_pool(self, equation: Equation, node: Node):
+        shape = (equation.coeffs_size,) + node.input_shape_no_batch()
+        matrix = node.forward(equation.matrix.T.reshape(shape))
+        matrix = matrix.reshape(equation.coeffs_size, -1).T
+        const = node.forward(
+            equation.const.reshape(node.input_shape)
+        ).flatten()
+
+        return Equation(matrix, const, self.config)
+
     def _forward_slice(self, equation: Equation, node: Node):
-        shape = (self.size,) + node.input_shape_no_batch()
-        slices = [slice(0, equation.size)] + node.slices
+        shape = (equation.coeffs_size,) + node.input_shape_no_batch()
+        slices = [slice(0, equation.coeffs_size)] + node.slices
         matrix = equation.matrix.reshape(shape)[slices]
         const = equation.const.reshape(node.input_shape_no_batch())[node.slices]
 
         return Equation(matrix, const, self.config)
- 
+
+    def _forward_pad(self, equation: Equation, node: Node):
+        shape = (equation.coeffs_size,) + node.input_shape_no_batch()
+        matrix = node.forward(equation.matrix.T.reshape(shape))
+        matrix = matrix.reshape(equation.coeffs_size, -1).T
+        const = node.forward(
+            equation.const.reshape(node.input_shape)
+        ).flatten()
+
+        return Equation(matrix, const, self.config)
+
     def _int_forward(self,  node: Node, bound: str, slopes: torch.Tensor=None):         
-        lower = self.lower_eq[node.from_node[0].id] 
+        lower = self.lower_eq[node.from_node[0].id]
         upper = self.upper_eq[node.from_node[0].id]
         in_equation = lower if bound == 'lower' else upper
 
@@ -173,8 +199,18 @@ class OSSIP:
             )
 
         elif isinstance(node, MaxPool):
-            equation = self._int_forward_maxpool(
+            equation = self._int_forward_max_pool(
                 in_equation, node, bound
+            )
+
+        elif isinstance(node, AveragePool):
+            equation = self._forward_average_pool(
+                in_equation, node
+            )
+
+        elif isinstance(node, Pad):
+            equation = self._forward_pad(
+                in_equation, node
             )
 
         elif isinstance(node, Gemm):
@@ -352,7 +388,7 @@ class OSSIP:
 
         return Equation(matrix, const, self.config)
     
-    def _int_forward_maxpool(self, equation: Equation, node: Node, bound: str):
+    def _int_forward_max_pool(self, equation: Equation, node: Node, bound: str):
         lower, indices = node.forward(
             node.from_node[0].bounds.lower, return_indices=True
         )
@@ -396,7 +432,7 @@ class OSSIP:
             raise ValueError(f"Bound type {bound} could not be recognised.")
 
         return Equation(matrix, const, self.config)
-
+    
     def _int_forward_add(self, equation: Equation, node: Node, bound: str):
         if node.const is None:
             if bound == 'lower':

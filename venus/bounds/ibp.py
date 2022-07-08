@@ -44,7 +44,9 @@ class IBP:
         upper_slopes: torch.Tensor=None,
         delta_flags: torch.Tensor=None
     ) -> int:
-        if type(node) in [Relu, MaxPool, Slice, Unsqueeze, Reshape, Flatten]:
+        if type(node) in [
+                Relu, MaxPool, AveragePool, Slice, Unsqueeze, Reshape, Flatten, Pad
+        ]:
             lower, upper = self._calc_non_gemm_bounds(node)
 
         elif isinstance(node, BatchNormalization):

@@ -846,7 +846,6 @@ class MatMul(Node):
         self.weights = self.weights.cpu()
 
     def get_milp_var_size(self):
-        self.bounds = self.bounds.cpu()
         """
         Returns the number of milp variables required for the milp encoding of
         the node.
@@ -981,6 +980,151 @@ class MatMul(Node):
 
         return inp @ self.weights[out_flag, :][:, in_flag]
 
+
+class Pad(Node):
+    def __init__(
+        self,
+        from_node: list,
+        to_node: list,
+        input_shape: tuple,
+        pads: tuple,
+        config: Config,
+        depth=0,
+        bounds=Bounds(),
+        id=None
+    ):
+        """
+        Arguments:
+
+            from_node:
+                list of input nodes.
+            to_node:
+                list of output nodes.
+            input_shape:
+                shape of the input tensor to the node. 
+            pads:
+                the pads.
+            config:
+                configuration.
+            depth:
+                the depth of the node.
+            bounds:
+                concrete bounds for the node.
+        """
+        output_shape = input_shape[:-2] + (
+            input_shape[-2] + 2 * pads[0] - 1,
+            input_shape[-1] + 2 * pads[1] - 1
+        )
+        super().__init__(
+            from_node,
+            to_node,
+            input_shape,
+            output_shape,
+            config,
+            depth=depth,
+            bounds=bounds,
+            id=id
+        )
+
+    def copy(self):
+        """
+        Copies the node.
+        """
+        return Pad(
+            self.from_node,
+            self.to_node,
+            self.input_shape,
+            self.pads,
+            self.config,
+            depth=self.depth,
+            bounds=self.bounds.copy(),
+            id=self.id
+        )
+
+    def cuda(self):
+        """
+        Moves all data to gpu memory
+        """
+        super().cuda()
+
+    def cpu(self):
+        """
+        Moves all data to cpu memory
+        """
+        super().cpu()
+
+    def get_milp_var_size(self):
+        self.bounds = self.bounds.cpu()
+        """
+        Returns the number of milp variables required for the milp encoding of
+        the node.
+        """
+        return self.from_node[-1].get_milp_var_indices()
+    
+    def forward(
+        self, inp: torch.Tensor=None, save_output=False
+    ) -> torch.Tensor:
+        """
+        Computes the output of the node given an input.
+
+        Arguments:
+            inp:
+                the input.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0].output if inp is None else inp
+
+        if isinstance(inp, torch.Tensor):
+            return self._forward_torch(inp, save_output)
+
+        elif isinstance(inp, np.ndarray):
+            return self._forward_numpy(inp, save_output)
+
+        else:
+            raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
+
+
+    def _forward_torch(self, inp: torch.Tensor=None, save_output=False) -> torch.Tensor:
+        """
+        Torch implementation of forward.
+
+        Arguments:
+            inp:
+                the input.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        output = torch.pad(inp, self.pads)
+
+        if save_output:
+            self.output = output
+
+        return output
+
+    def _forward_numpy(self, inp: np.array=None, save_output=False) -> np.array:
+        """
+        Numpy implementation of forward.
+
+        Arguments:
+            inp:
+                the input.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        output = np.pad(inp, self.pads)
+
+        if save_output is True:
+            self.output = output
+
+        return output
 
 class ConvBase(Node):
     def __init__(
@@ -2202,7 +2346,9 @@ class MaxPool(Node):
         Returns: 
             the output of the node.
         """
-        padded_inp = Conv.pad(inp, self.pads).reshape((self.in_ch(), 1) + inp.shape[-2:])
+        padded_inp = Conv.pad(inp, self.pads).reshape(
+            (self.in_ch(), 1) + inp.shape[-2:]
+        )
         im2col = Conv.im2col(
             padded_inp, self.kernel_shape, self.strides, device=self.device
         )
@@ -2219,7 +2365,9 @@ class MaxPool(Node):
         return output
 
     @staticmethod
-    def compute_output_shape(in_shape: tuple, kernel_shape: tuple, pads: tuple, strides: tuple) -> tuple:
+    def compute_output_shape(
+        in_shape: tuple, kernel_shape: tuple, pads: tuple, strides: tuple
+    ) -> tuple:
         """
         Computes the output shape of the node.
 
@@ -2255,6 +2403,182 @@ class MaxPool(Node):
             return in_ch, out_height, out_width
         else:
             return batch, in_ch, out_height, out_width
+
+
+class AveragePool(Node):
+    def __init__(
+        self,
+        from_node: list,
+        to_node: list,
+        input_shape: tuple,
+        kernel_shape: tuple,
+        pads: tuple,
+        strides: tuple,
+        config: Config,
+        depth=0,
+        bounds=Bounds(),
+        id=None
+    ):
+        """
+        Arguments:
+            from_node:
+                list of input nodes.
+            to_node:
+                list of output nodes.
+            input_shape:
+                shape of the input tensor to the node. 
+            output_shape:
+                shape of the output tensor to the node.
+            kernel_shape:
+                the kernel shape.
+            pads:
+                the pads.
+            strides:
+                the strides.
+            config:
+                configuration.
+            depth:
+                the depth of the node.
+            bounds:
+                the concrete bounds of the node.
+        """
+        output_shape = MaxPool.compute_output_shape(
+            input_shape, kernel_shape, pads, strides
+        )
+        super().__init__(
+            from_node,
+            to_node,
+            input_shape,
+            output_shape,
+            config,
+            depth=depth,
+            bounds=bounds,
+            id=id
+        )
+        self.kernel_shape = kernel_shape
+        self.pads = pads
+        self.strides = strides
+
+    def copy(self):
+        """
+        Copies the node.
+        """
+        return AveragePool(
+            self.from_node,
+            self.to_node,
+            self.input_shape,
+            self.kernel_shape,
+            self.pads,
+            self.strides,
+            self.config,
+            depth=self.depth,
+            bounds=self.bounds.copy(),
+            id=self.id
+        )
+
+    def cuda(self):
+        """
+        Moves all data to gpu memory
+        """
+        super().cuda()
+
+    def cpu(self):
+        """
+        Moves all data to cpu memory
+        """
+        super().cpu()
+        self.bounds = self.bounds.cpu()
+
+    def get_milp_var_size(self):
+        """
+        Returns the number of milp variables required for the milp encoding of
+        the node.
+        """
+        return self.output_size
+
+    def forward(
+        self, inp: torch.Tensor=None, save_output=False
+    ) -> np.array:
+        """
+        Computes the output of the node given an input.
+
+        Arguments:
+            inp:
+                The input.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0].output if inp is None else inp
+
+        if isinstance(inp, torch.Tensor):
+            return self._forward_torch(inp, save_output)
+
+        elif isinstance(inp, np.ndarray):
+            return self._forward_numpy(inp, save_output)
+
+        else:
+            raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
+
+
+    def _forward_torch(
+        self, inp: torch.Tensor=None, save_output=False
+    ) -> np.array:
+        """
+        Torch implementation of forward.
+
+        Arguments:
+            inp:
+                The input.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        output = torch.nn.functional.avg_pool2d(
+            inp,
+            self.kernel_shape,
+            stride=self.strides,
+            padding=self.pads
+        )
+
+        if save_output:
+            self.output = output
+
+        return output
+
+
+    def _forward_numpy(self, inp: torch.Tensor=None, save_output=False) -> np.array:
+        """
+        Numpy implementation of forward.
+
+        Arguments:
+            inp:
+                The input.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        padded_inp = Conv.pad(inp, self.pads).reshape(
+            (self.in_ch(), 1) + inp.shape[-2:]
+        )
+        im2col = Conv.im2col(
+            padded_inp, self.kernel_shape, self.strides, device=self.device
+        )
+        
+        output = np.average(im2col, axis=0).reshape(
+             self.output_shape[-2:] + (self.in_ch(),)
+        ).transpose(2, 0, 1)
+        if self.has_batch_dimension() is True:
+            output = np.expand_dims(output, 0)
+
+        if save_output is True:
+            self.output = output
+
+        return output
 
 class Relu(Node):
     def __init__(
@@ -4067,5 +4391,5 @@ class Concat(Node):
         return output
 
 
-class Dropout(Node):
+class DummyNode(Node):
     pass

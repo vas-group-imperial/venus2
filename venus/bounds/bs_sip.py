@@ -562,8 +562,8 @@ class BSSIP:
         self,
         matrix: torch.Tensor,
         node: Node,
-        out_flag: torch.tensor,
-        in_flag: torch.tensor
+        out_flag: torch.tensor=None,
+        in_flag: torch.tensor=None
     ) -> torch.Tensor:
         batch = matrix.shape[0]
         if out_flag is None:
@@ -579,8 +579,8 @@ class BSSIP:
         self,
         matrix: torch.Tensor,
         node: Node,
-        out_flag:torch.tensor,
-        in_flag: torch.tensor
+        out_flag:torch.tensor=None,
+        in_flag: torch.tensor=None
     ) -> torch.Tensor:
         return node.transpose(matrix, out_flag, in_flag)
 
@@ -654,8 +654,8 @@ class BSSIP:
         self,
         equation: Equation,
         node: Node,
-        out_flag: torch.tensor,
-        in_flag: torch.tensor
+        out_flag: torch.tensor=None,
+        in_flag: torch.tensor=None
     ) -> Equation:
         matrix = self._backward_affine_matrix(equation.matrix, node, out_flag, in_flag)
         const = Equation.derive_const(node, out_flag)
@@ -667,8 +667,8 @@ class BSSIP:
         self,
         equation: Equation,
         node: Node,
-        out_flag:torch.tensor,
-        in_flag: torch.tensor
+        out_flag:torch.tensor=None,
+        in_flag: torch.tensor=None
     ) -> Equation:
         matrix = self._backward_matmul_matrix(equation.matrix, node, out_flag, in_flag)
 
@@ -699,9 +699,23 @@ class BSSIP:
         if node.const is None:
             const = equation.const.clone()
         else:
-            const = node.const.flatten() + self.const
+            const = node.const.flatten() + equation.const
 
         return Equation(matrix, const, self.config)
+
+    def _backward_average_pool(self, equation: Equation, node: Node):
+        krn = torch.ones(
+            (node.in_ch(),) + node.kernel_shape,
+            dtype=self.config.PRECISION,
+            device=self.config.DEVICE
+        )
+        conv_node = Conv(
+            [], [], node.input_shape, krn, None, node.pads, node.strides, self.config
+        )
+        matrix = self._backward_affine_matrix(equation.matrix, node)
+        matrix /= np.prod(node.kernel_shape)
+
+        return Equation(matrix, equation.const, self.config)
 
     def _int_backward(
         self,
