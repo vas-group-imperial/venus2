@@ -654,7 +654,7 @@ class ONNXParser:
             mid = int(len(pads)/2)
             pads_start, pads_end = pads[:mid], pads[mid:]
             torch_pads = ()
-            for i in range(mid):
+            for i in range(mid - 1, -1, -1):
                 torch_pads += (pads_start[i], pads_end[i])
             node = Pad([], [], input_shape, torch_pads, self.config)
 

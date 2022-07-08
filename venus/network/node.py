@@ -1012,8 +1012,8 @@ class Pad(Node):
                 concrete bounds for the node.
         """
         output_shape = input_shape[:-2] + (
-            input_shape[-2] + pads[-4] + pads[-3],
-            input_shape[-1] + pads[-2] + pads[-1]
+            input_shape[-2] + pads[2] + pads[3],
+            input_shape[-1] + pads[0] + pads[1]
         )
         super().__init__(
             from_node,

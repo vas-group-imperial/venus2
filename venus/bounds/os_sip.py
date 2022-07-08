@@ -64,9 +64,18 @@ class OSSIP:
         max_depth = max([
             self.prob.nn.node[i].depth for i in self.lower_eq
         ])
-        idxs = [
-            i for i in self.lower_eq if self.prob.nn.node[i].depth >= max_depth - 1
-        ]
+        idxs = []
+
+        for i in self.lower_eq:
+            cond1 = self.prob.nn.node[i].depth >= max_depth - 1
+            cond2 = self.prob.nn.node[i].has_sip_branching_node()
+            cond3 = np.any([
+                i.is_sip_branching_node(i) and i.depth >= max_depth - 1
+                for i in self.prob.nn.node[i].to_node
+            ])
+            if cond1 or (cond2 and cond3):
+                idxs.append(i)
+
         self.lower_eq = {
             i: self.lower_eq[i] for i in idxs
         }
@@ -86,9 +95,7 @@ class OSSIP:
             upper_eq = lower_eq
 
         elif node.depth < non_linear_starting_depth:
-            lower_eq = self._forward(
-                self.lower_eq[node.from_node[0].id], node
-            )
+            lower_eq = self._forward(node)
             upper_eq = lower_eq
 
         else:
@@ -106,12 +113,13 @@ class OSSIP:
         self.lower_eq[node.id], self.upper_eq[node.id] = lower_eq, upper_eq
 
     def _forward(
-        self, 
-        equation: Equation,
+        self,
         node: Node,
         lower_slopes: torch.Tensor=None,
         upper_slopes: torch.Tensor=None
     ):
+        equation = self.lower_eq[node.from_node[0].id]
+
         if isinstance(node, Gemm):
             f_equation =  self._forward_gemm(equation, node)
 
@@ -129,6 +137,10 @@ class OSSIP:
 
         elif isinstance(node, Pad):
             f_equation = self._forward_pad(equation, node)
+
+        elif isinstance(node, Concat):
+            equation = [self.lower_eq[i.id] for i in node.from_node]
+            f_equation = self._forward_concat(equation, node)
 
         elif type(node) in [Flatten, Reshape, Unsqueeze]:
             f_equation = equation
@@ -188,6 +200,20 @@ class OSSIP:
 
         return Equation(matrix, const, self.config)
 
+
+    def _forward_concat(self, equations: Equation, node: Node):
+        shape = (equations[0].coeffs_size,) + node.input_shape_no_batch()
+        matrix = torch.cat(
+            [i.matrix.T.reshape(shape) for i in equations],
+            axis=node.axis + 1
+        ).reshape(equations[0].coeffs_size, -1).T 
+        const = torch.cat(
+            [i.const.reshape(shape) for i in equations],
+            axis=node.axis
+        ).flatten()
+
+        return Equation(matrix, const, self.config)
+
     def _int_forward(self,  node: Node, bound: str, slopes: torch.Tensor=None):         
         lower = self.lower_eq[node.from_node[0].id]
         upper = self.upper_eq[node.from_node[0].id]
@@ -232,6 +258,11 @@ class OSSIP:
             equation = self._int_forward_add(
                 in_equation, node, bound
             )
+
+        elif isinstance(node, Concat):
+            equations = self.lower_eq if bound == 'lower' else self.upper_eq
+            equations = [equations[i.id] for i in node.from_node]
+            return self._forward_concat(equations, node)
 
         elif type(node) in [Flatten, Reshape, Unsqueeze]:
             equation = in_equation
