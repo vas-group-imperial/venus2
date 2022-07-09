@@ -4092,6 +4092,52 @@ class Slice(Node):
             for i in range(len(input_shape))
         )
 
+class Split(Node):
+    def __init__(
+        self,
+        from_node: list,
+        to_node: list,
+        input_shape: tuple,
+        axis: int,
+        splits: list,
+        config: Config,
+        depth=0,
+        bounds=Bounds(),
+        id=None
+    ):
+        """
+        Arguments:
+
+            from_node:
+                list of input nodes.
+            to_node:
+                list of output nodes.
+            input_shape:
+                shape of the input tensor to the node.
+            slices:
+                a list of slice objets for each dimension.
+            config:
+                configuration.
+            depth:
+                the depth of the node.
+            bounds:
+                concrete bounds for the node.
+        """
+        output_shape = Slice.compute_output_shape(input_shape, slices)
+        super().__init__(
+            from_node,
+            to_node,
+            input_shape,
+            None,
+            config,
+            depth=depth,
+            bounds=bounds,
+            id=id
+        )
+        self.axis = axis
+        self.splits = splits
+
+
 class Unsqueeze(Node):
     def __init__(
         self,

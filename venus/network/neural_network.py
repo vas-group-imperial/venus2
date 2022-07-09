@@ -85,7 +85,7 @@ class NeuralNetwork:
         for i in self.node:
             nn.node[i] = self.node[i].copy()
 
-        nn.head = nn.node[self.head.id]
+        nn.head =  [nn.node[i.id] for i in self.head]
         nn.tail = nn.node[self.tail.id]
 
         for i in self.node:
@@ -299,7 +299,8 @@ class NeuralNetwork:
         Returns
             The output given inp.
         """
-        self.head.from_node[0].output = inp
+        for i in self.head:
+            i.from_node[0].output = inp
         for i in range(self.tail.depth + 1):
             nodes = self.get_node_by_depth(i)
             for j in nodes:

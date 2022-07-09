@@ -34,7 +34,8 @@ class VerificationProblem(object):
         self.nn = nn
         self.spec = spec
         # couple neural network with spec
-        self.nn.head.from_node.insert(0, spec.input_node)
+        for i in self.nn.head:
+            i.from_node.insert(0, spec.input_node)
         self.depth = depth
         self.config = config
         self.stability_ratio = -1

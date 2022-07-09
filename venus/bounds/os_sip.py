@@ -208,7 +208,7 @@ class OSSIP:
             axis=node.axis + 1
         ).reshape(equations[0].coeffs_size, -1).T 
         const = torch.cat(
-            [i.const.reshape(shape) for i in equations],
+            [i.const.reshape(node.input_shape) for i in equations],
             axis=node.axis
         ).flatten()
 

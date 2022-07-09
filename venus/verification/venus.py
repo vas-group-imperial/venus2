@@ -89,16 +89,16 @@ class Venus:
             # load spec
             vnn_parser = VNNLIBParser(
                 query[1],
-                nn.head.input_shape,
+                nn.head[0].input_shape,
                 self.config
             )  
             spec = vnn_parser.parse()
 
             
             if self.config.BENCHMARK == 'carvana':
-                head_id = nn.head.id
-                nn.head = nn.head.to_node[0]
-                nn.head.from_node = []
+                head_id = nn.head[0].id
+                nn.head[0] = nn.head[0].to_node[0]
+                nn.head[0].from_node = []
                 del nn.node[head_id]
                 spec[0].carvana_out_vals = spec[0].input_node.bounds.lower[:, 3, ...]
                 spec[0].input_node.bounds.lower = spec[0].input_node.bounds.lower[:,0:3,...]
@@ -106,7 +106,7 @@ class Venus:
                 shape = spec[0].input_node.input_shape
                 shape = (shape[0], 3, shape[2], shape[3])
                 spec[0].input_node.input_shape = shape
-                nn.head.input_shape = shape
+                nn.head[0].input_shape = shape
 
 
             # spec[0].input_node.bounds.upper = spec[0].input_node.bounds.lower.clone()           

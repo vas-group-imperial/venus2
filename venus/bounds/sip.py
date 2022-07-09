@@ -174,7 +174,7 @@ class SIP:
         non_eligible = [
             Input, Relu, Reshape, Flatten, Slice
         ]
-        if type(node) in non_eligible or node is self.prob.nn.head:
+        if type(node) in non_eligible or np.any([node is i for i in self.prob.nn.head]):
             return False
 
         if node.has_relu_activation() and node.to_node[0].get_unstable_count() > 0:

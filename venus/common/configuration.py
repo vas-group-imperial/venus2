@@ -260,7 +260,7 @@ class Config:
         self.set_param_if_not_set('inter_deps', False)
         self.set_param_if_not_set('relu_approximation', 'venus')
         relus = nn.get_n_relu_nodes()
-        if nn.head.input_size < 10:
+        if nn.head[0].input_size < 10:
             self.set_param_if_not_set('inter_dep_constrs', False)
             self.set_param_if_not_set('intra_dep_constrs', False)
             self.set_param_if_not_set('inter_dep_cuts', False)

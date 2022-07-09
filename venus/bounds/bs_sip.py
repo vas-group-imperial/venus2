@@ -636,6 +636,9 @@ class BSSIP:
         elif isinstance(node, MatMul):
             b_equation = self._backward_matmul(equation, node, out_flag, in_flag)
 
+        elif isinstance(node, AveragePool):
+            b_equation = self._backward_average_pool(equation, node)
+
         elif isinstance(node, Slice):
             b_equation = self._backward_slice(equation, node)
 
