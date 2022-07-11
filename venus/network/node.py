@@ -91,6 +91,16 @@ class Node:
         if self.output is not None:
             self.output = self.output.cpu()
 
+    def set_batch_size(self, size: int=1):
+        """
+        Sets the batch size.
+
+        Arguments:
+            size: the batch size.
+        """
+        self.input_shape = (size,) + self.input_shape[1:] 
+        self.output_shape = (size,) + self.output_shape[1:]
+
     def get_outputs(self):
         """
         Constructs a list of the indices of the units in the node.
@@ -4387,6 +4397,18 @@ class Concat(Node):
             bounds=self.bounds.copy(),
             id=self.id
         )
+
+    def set_batch_size(self, size: int=1):
+        """
+        Sets the batch size.
+
+        Arguments:
+            size: the batch size.
+        """
+        for i, j in enumerate(self.input_shape):
+            self.input_shape[i] = (size,) + j[1:]
+
+        self.output_shape = (size,) + self.output_shape[1:]
 
     def get_milp_var_indices(self, var_type: str):
         """

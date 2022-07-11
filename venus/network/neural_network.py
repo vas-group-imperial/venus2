@@ -158,10 +158,7 @@ class NeuralNetwork:
             size: the batch size.
         """
         for _, i in self.node.items():
-            i.input_shape = (size,) + i.input_shape[1:]
-
-        self.nn.set_batch_size(size)
-        self.spec.set_batch_size(size)
+            i.set_batch_size(size)
 
     def predict(self, inp: np.array, mean: float=0, std: float=1):
         """
