@@ -150,6 +150,19 @@ class NeuralNetwork:
         for _, i in self.node.items():
             i.cpu()
 
+    def set_batch_size(self, size: int=1):
+        """
+        Sets the batch size.
+
+        Arguments:
+            size: the batch size.
+        """
+        for _, i in self.node.items():
+            i.input_shape = (size,) + i.input_shape[1:]
+
+        self.nn.set_batch_size(size)
+        self.spec.set_batch_size(size)
+
     def predict(self, inp: np.array, mean: float=0, std: float=1):
         """
         Computes the output of the network on a given input.

@@ -231,6 +231,16 @@ class VerificationProblem(object):
             self.spec.cpu()
             self.device = torch.device('cpu')
 
+    def set_batch_size(self, size: int=1):
+        """
+        Sets the batch size.
+
+        Arguments:
+            size: the batch size.
+        """
+        self.nn.set_batch_size(size)
+        self.spec.set_batch_size(size)
+
     def to_string(self):
         return self.nn.model_path  + ' against ' + self.spec.to_string()
 

@@ -18,6 +18,13 @@ from venus.verification.verifier import Verifier
 from venus.solver.solve_result import SolveResult
 from venus.common.configuration import Config
 
+
+import torch
+from venus.verification.verification_problem import VerificationProblem
+from venus.verification.verification_report import VerificationReport
+from timeit import default_timer as timer
+from venus.bounds.sip import SIP
+
 class Venus:
 
     def __init__(
@@ -200,7 +207,7 @@ class Venus:
 
     def verify_query(self, nn, spec):
         if len(spec) > 1 and self.config.BENCHMARK == 'nn4sys':
-            return self.verify_batch(nn spec)
+            return self.verify_batch(nn, spec)
 
         return verify_sequence(nn, spec)
 
@@ -209,15 +216,14 @@ class Venus:
         start = timer()
 
         ver_report = VerificationReport()
-
-        prob = VerificationProblem(nn, spec, 0, config)
-        spec.input_node.bounds.lower = torch.vstack(
-            (i.input_node.bounds.lower for i in spec)
+        prob = VerificationProblem(nn, spec[0], 0, self.config)
+        prob.spec.input_node.bounds.lower = torch.vstack(
+            tuple(i.input_node.bounds.lower for i in spec)
         )
-        spec.input_node.bounds.upper = torch.vstack(
-            (i.input_node.bounds.upper for i in spec)
+        prob.spec.input_node.bounds.upper = torch.vstack(
+            tuple(i.input_node.bounds.upper for i in spec)
         )
-
+        prob.set_batch_size(len(spec))
         sip = SIP(prob, self.config, batch=True)
         sip.set_bounds()
 
