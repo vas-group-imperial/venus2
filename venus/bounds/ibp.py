@@ -45,15 +45,16 @@ class IBP:
         delta_flags: torch.Tensor=None
     ) -> int:
         if type(node) in [
-                Relu, MaxPool, AveragePool, Slice, Unsqueeze, Reshape, Flatten, Pad
+                Relu, MaxPool, AveragePool, Slice, Unsqueeze, Reshape, Flatten, Pad,
+                ReduceSum, Sigmoid
         ]:
             lower, upper = self._calc_non_gemm_bounds(node)
 
         elif isinstance(node, BatchNormalization):
             lower, upper = self._calc_batch_normalisation_bounds(node)
 
-        elif isinstance(node, Concat):
-            lower, upper = self._calc_concat_bounds(node)
+        elif type(node) in [Concat, Mul, Div]:
+            lower, upper = self._calc_branching_bounds(node)
 
         elif isinstance(node, Sub):
             lower, upper = self._calc_sub_bounds(node)
@@ -86,7 +87,7 @@ class IBP:
 
     def _calc_non_gemm_bounds(self, node: Node):
         inp = node.from_node[0].bounds
-        
+
         return node.forward(inp.lower), node.forward(inp.upper)
 
     def _calc_batch_normalisation_bounds(self, node: Node):
@@ -95,7 +96,7 @@ class IBP:
 
         return torch.min(f_l, f_u), torch.max(f_l, f_u)
 
-    def _calc_concat_bounds(self, node: Node):
+    def _calc_branching_bounds(self, node: Node):
         inp_lower = [i.bounds.lower for i in node.from_node]
         inp_upper = [i.bounds.upper for i in node.from_node]
         
@@ -103,7 +104,8 @@ class IBP:
 
     def _calc_sub_bounds(self, node: Node):
         inp = node.from_node[0].bounds
-        if node.const is none:
+
+        if node.const is None:
             const_lower = node.from_node[1].bounds.lower
             const_upper = node.from_node[1].bounds.upper
         else:
@@ -114,6 +116,7 @@ class IBP:
 
     def _calc_add_bounds(self, node: Node):
         inp = node.from_node[0].bounds
+
         if node.const is None:
             const_lower = node.from_node[1].bounds.lower
             const_upper = node.from_node[1].bounds.upper

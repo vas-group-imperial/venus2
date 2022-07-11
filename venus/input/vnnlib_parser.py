@@ -61,10 +61,14 @@ class VNNLIBParser:
                     f = clause[1]
                 else:
                     raise Exception('No output constraints found')
-
+                
+                bounds = Bounds(
+                    clause[0][0].reshape(self.input_shape),
+                    clause[0][1].reshape(self.input_shape)
+                )
                 specs.append(
                     Specification(
-                        Input(clause[0][0], clause[0][1]),
+                        Input(bounds, self.config),
                         NegationFormula(f).to_NNF(),
                         self.config,
                         os.path.basename(self.pf)[1]

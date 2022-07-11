@@ -162,7 +162,8 @@ class Config:
         self.PRECISION = torch.float32
         self.DEVICE = torch.device('cpu')
         self._user_set_params = set()
-        self.BENCHMARK = 'carvana'
+        self.BENCHMARK = 'nn4sys'
+        # self.BENCHMARK = 'carvana'
 
     def set_param(self, param, value):
         if value is None: return

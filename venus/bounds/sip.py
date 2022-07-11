@@ -29,7 +29,9 @@ class SIP:
 
     logger = None
 
-    def __init__(self, prob, config: Config, delta_flags=None):
+    NON_SYMBOLIC_NODES = [Mul, Div, ReduceSum]
+
+    def __init__(self, prob, config: Config, delta_flags=None, batch=False):
         """
         Arguments:
 
@@ -47,6 +49,7 @@ class SIP:
         self.ibp = IBP(self.prob, self.config)
         self.os_sip = OSSIP(self.prob, self.config)
         self.bs_sip = BSSIP(self.prob, self.config)
+        self._batch = batch
         
     def set_bounds(self):
         """
@@ -54,6 +57,12 @@ class SIP:
         """
         start = timer()
 
+        # x = x[:, :, slice(0, 7), ...]
+        # print(x.shape)
+        # x = x[..., 6]
+        # print(x.shape)
+        # print(torch.sum(x, (1), keepdim=False))
+        # input()
         if self.config.DEVICE == torch.device('cuda'):
             self.prob.cuda()
 
@@ -111,20 +120,26 @@ class SIP:
         upper_slopes: dict=None,
         delta_flag: torch.Tensor=None
     ):
-        print(node, node.output_size)
+        print(node, node.id, node.input_shape, node.output_shape, node.output_size)
+        # print('      ', [i.id for i in node.from_node])
+        # input()
         # set interval propagation bounds
         ia_count = self.ibp.set_bounds(node, lower_slopes, upper_slopes, delta_flag)
-        print('ia', ia_count, torch.mean(node.bounds.lower))
+        print('     ia', ia_count, torch.mean(node.bounds.lower))
+        if node.has_relu_activation():
+            print('   unst', node.to_node[0].get_unstable_count())
+            
 
         # check eligibility for symbolic equations
         symb_elg = self.is_symb_eq_eligible(node)
 
         # set one step symbolic bounds
-        if self.config.SIP.ONE_STEP_SYMBOLIC is True:
+        if self.config.SIP.ONE_STEP_SYMBOLIC is True and \
+        node.is_non_symbolically_connected() is not True:
             self.os_sip.forward(node, lower_slopes, upper_slopes)
             if symb_elg is True:
                 os_count = self.os_sip.set_bounds(node)
-                print('os', os_count, torch.mean(node.bounds.lower))
+                print('     os', os_count, torch.mean(node.bounds.lower))
  
         # recheck eligibility for symbolic equations
         non_linear_depth = self.prob.nn.get_non_linear_starting_depth()
@@ -146,7 +161,7 @@ class SIP:
             bs_count = self.bs_sip.set_bounds(
                 node, lower_slopes, upper_slopes, concretisations
             )
-            print('bs', bs_count, torch.mean(node.bounds.lower))
+            print('     bs', bs_count, torch.mean(node.bounds.lower))
 
     def _get_delta_for_node(self, node: Node, delta_flags: torch.Tensor) -> torch.Tensor:
         if delta_flags is not None and node.has_relu_activation() is True:
@@ -158,14 +173,14 @@ class SIP:
         if slopes is None:
             return None, None
                     
-        return slopes[0][node.id], slopes[1][node.id]
+        return slopes[0][node.id], slopes[2][node.id]
 
     def is_symb_eq_eligible(self, node: None) -> bool:
         """
         Determines whether the node implements function requiring a symbolic
         equation for bound calculation.
         """ 
-        if node.depth <= 1:
+        if node.depth <= 1 or node.is_non_symbolically_connected() is True:
             return False
 
         if node is self.prob.nn.tail:

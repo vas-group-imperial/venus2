@@ -108,7 +108,6 @@ class OSSIP:
             lower_eq = self._int_forward(node, 'lower', lower_slopes)
             upper_eq = self._int_forward(node, 'upper', upper_slopes)
 
-
         self.current_lower_eq, self.current_upper_eq = lower_eq, upper_eq
         self.lower_eq[node.id], self.upper_eq[node.id] = lower_eq, upper_eq
 
@@ -151,8 +150,13 @@ class OSSIP:
         return f_equation
     
     def _forward_gemm(self, equation: Equation, node: Node):
-        matrix = node.forward(equation.matrix, add_bias=False)
-        const = node.forward(equation.const, add_bias=True)
+        shape = (equation.coeffs_size,) + node.input_shape_no_batch()
+        matrix = node.forward(equation.matrix.T.reshape(shape), add_bias=False)
+        matrix = matrix.reshape(equation.coeffs_size, -1).T
+        const = node.forward(
+            equation.const.reshape(node.input_shape), 
+            add_bias=True
+        ).flatten()
 
         return Equation(matrix, const, self.config)
 
@@ -167,8 +171,12 @@ class OSSIP:
         return Equation(matrix, const, self.config)
     
     def _forward_matmul(self, equation: Equation, node: Node):
-        matrix = node.forward(equation.matrix)
-        const = node.forward(equation.const)
+        shape = (equation.coeffs_size,) + node.input_shape_no_batch()
+        matrix = node.forward(equation.matrix.T.reshape(shape))
+        matrix = matrix.reshape(equation.coeffs_size, -1).T
+        const = node.forward(
+            equation.const.reshape(node.input_shape)
+        ).flatten()
 
         return Equation(matrix, const, self.config)
 
@@ -185,8 +193,9 @@ class OSSIP:
     def _forward_slice(self, equation: Equation, node: Node):
         shape = (equation.coeffs_size,) + node.input_shape_no_batch()
         slices = [slice(0, equation.coeffs_size)] + node.slices
-        matrix = equation.matrix.reshape(shape)[slices]
-        const = equation.const.reshape(node.input_shape_no_batch())[node.slices]
+        matrix = equation.matrix.T.reshape(shape)[slices]
+        matrix = matrix.reshape(equation.coeffs_size, -1).T
+        const = equation.const.reshape(node.input_shape)[node.slices].flatten()
 
         return Equation(matrix, const, self.config)
 
@@ -206,7 +215,7 @@ class OSSIP:
         matrix = torch.cat(
             [i.matrix.T.reshape(shape) for i in equations],
             axis=node.axis + 1
-        ).reshape(equations[0].coeffs_size, -1).T 
+        ).reshape(equations[0].coeffs_size, -1).T
         const = torch.cat(
             [i.const.reshape(node.input_shape) for i in equations],
             axis=node.axis
@@ -293,33 +302,42 @@ class OSSIP:
     def _int_forward_gemm(
         self, lower_eq: Equation, upper_eq: Equation, node: Node, bound: str
     ):
+        shape = (lower_eq.coeffs_size,) + node.input_shape_no_batch()
+
         if  bound == 'lower':
             matrix = node.forward(
-                lower_eq.matrix, clip='+', add_bias=False
-            ) + node.forward(
-                upper_eq.matrix, clip='-', add_bias=False
+                lower_eq.matrix.T.reshape(shape), clip='+', add_bias=False
+            )
+            matrix += node.forward(
+                upper_eq.matrix.T.reshape(shape), clip='-', add_bias=False
             )
             const = node.forward(
-                lower_eq.const, clip='+', add_bias=False
-            ) + node.forward(
-                upper_eq.const, clip='-', add_bias=True
-                
+                lower_eq.const.reshape(node.input_shape), clip='+', add_bias=False
             )
+            const += node.forward(
+                upper_eq.const.reshape(node.input_shape), clip='-', add_bias=True
+            )
+            const = const.flatten()
 
         elif bound == 'upper':
             matrix = node.forward(
-                lower_eq.matrix, clip='-', add_bias=False
-            ) + node.forward(
-                upper_eq.matrix, clip='+', add_bias=False
+                lower_eq.matrix.T.reshape(shape), clip='-', add_bias=False
+            )
+            matrix += node.forward(
+                upper_eq.matrix.T.reshape(shape), clip='+', add_bias=False
             )
             const = node.forward(
-                lower_eq.const, clip='-', add_bias=False
-            ) + node.forward(
-                upper_eq.const, clip='+', add_bias=True
+                lower_eq.const.reshape(node.input_shape), clip='-', add_bias=False
             )
+            const += node.forward(
+                upper_eq.const.reshape(node.input_shape), clip='+', add_bias=True
+            )
+            const = const.flatten()
 
         else:
             raise ValueError(f"Bound type {bound} could not be recognised.")
+
+        matrix = matrix.reshape(lower_eq.coeffs_size, -1).T
 
         return Equation(matrix, const, node.config)
 

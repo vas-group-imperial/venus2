@@ -199,8 +199,42 @@ class Venus:
         return results[0] if len(results) == 1 else results
 
     def verify_query(self, nn, spec):
+        if len(spec) > 1 and self.config.BENCHMARK == 'nn4sys':
+            return self.verify_batch(nn spec)
+
+        return verify_sequence(nn, spec)
+
+
+    def verify_batch(self, nn, spec):
+        start = timer()
+
+        ver_report = VerificationReport()
+
+        prob = VerificationProblem(nn, spec, 0, config)
+        spec.input_node.bounds.lower = torch.vstack(
+            (i.input_node.bounds.lower for i in spec)
+        )
+        spec.input_node.bounds.upper = torch.vstack(
+            (i.input_node.bounds.upper for i in spec)
+        )
+
+        sip = SIP(prob, self.config, batch=True)
+        sip.set_bounds()
+
+        for i, j in enumerate(spec):
+            if j.is_satisfied(
+                prob.nn.tail.bounds.lower[i], prob.nn.tail.bounds.upper[i]
+            ) is not True:
+                ver_report.runtime = timer() - start
+                return ver_report
+
+        ver_report.result = SolveResult.SATISFIED
+        return ver_report
+
+    def verify_sequence(self, nn, spec):
         time_elapsed = 0
         ver_report = None
+
         for subspec in spec:
             # create verifier
             verifier = Verifier(nn, subspec, self.config)

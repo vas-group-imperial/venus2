@@ -45,10 +45,12 @@ class BSSIP:
         os_sip: OSSIP=None
     ) -> Bounds:
         out_flag = self._get_out_prop_flag(node)
+
         symb_eq = self._derive_symb_eq(node)
         lower_bounds, lower_flag = self.back_substitution(
             symb_eq, node, 'lower', out_flag, lower_slopes, os_sip
         )
+
 
         if lower_bounds is None:
             return
@@ -148,8 +150,8 @@ class BSSIP:
         return Equation.derive(
             node,
             self.config,
-            None if out_flag is None else out_flag.flatten(),
-            None if in_flag is None else in_flag.flatten()
+            None if out_flag is None else out_flag,
+            None if in_flag is None else in_flag
         )
 
     def back_substitution(
@@ -478,10 +480,10 @@ class BSSIP:
         out_flag = self._get_out_prop_flag(node)
         if out_flag is None:
             out_flag = torch.ones(
-                node.output_size, dtype=torch.bool, device=self.config.DEVICE
+                node.output_shape, dtype=torch.bool, device=self.config.DEVICE
             )
         else:
-            out_flag = out_flag.flatten()
+            out_flag = out_flag
             
         equation = Equation.derive(node, self.config, out_flag, None)
 
@@ -538,8 +540,11 @@ class BSSIP:
         out_flag: torch.Tensor=None,
         in_flag: torch.Tensor=None
     ) -> torch.Tensor:
-        if type(node) in [Gemm, Conv, ConvTranspose]:
+        if type(node) in [Conv, ConvTranspose]:
             b_matrix =  self._backward_affine_matrix(matrix, node, out_flag, in_flag)
+        
+        elif isinstance(node, Gemm):
+            b_matrix = self._backward_gemm_matrix(matrix, node, out_flag, in_flag)
 
         elif isinstance(node, MatMul):
             b_matrix = self._backward_matmul_matrix(matrix, node, out_flag, in_flag)
@@ -558,7 +563,7 @@ class BSSIP:
 
         return b_matrix
 
-    def _backward_affine_matrix(
+    def _backward_conv_matrix(
         self,
         matrix: torch.Tensor,
         node: Node,
@@ -575,6 +580,23 @@ class BSSIP:
 
         return b_matrix
 
+    def _backward_gemm_matrix(
+        self,
+        matrix: torch.Tensor,
+        node: Node,
+        out_flag: torch.tensor=None,
+        in_flag: torch.tensor=None
+    ) -> torch.Tensor:
+        size = matrix.shape[0]
+
+        matrix = matrix.reshape((size,) + node.output_shape)
+        matrix = matrix.permute(*torch.arange(matrix.ndim - 1, -1, -1))
+        matrix = node.transpose(matrix, out_flag, in_flag)
+        matrix = matrix.permute(*torch.arange(matrix.ndim - 1, -1, -1))
+        matrix = matrix.reshape(size, -1)
+        return matrix
+
+
     def _backward_matmul_matrix(
         self,
         matrix: torch.Tensor,
@@ -582,7 +604,7 @@ class BSSIP:
         out_flag:torch.tensor=None,
         in_flag: torch.tensor=None
     ) -> torch.Tensor:
-        return node.transpose(matrix, out_flag, in_flag)
+        return node.transpose(matrix.T, out_flag, in_flag).T
 
     def _backward_sub_matrix(self, matrix: torch.Tensor, node:Node) -> torch.Tensor:
         if node.const is None:
@@ -684,7 +706,8 @@ class BSSIP:
             device=self.config.DEVICE
         )
         slices = [slice(0, equation.size)] + node.slices
-        matrix[slices] = equation.matrix
+        matrix[slices] = equation.matrix.reshape((equation.size,) + node.output_shape)
+        matrix = matrix.reshape(equation.size, -1)
 
         return Equation(matrix, equation.const, self.config)
  

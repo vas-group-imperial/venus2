@@ -243,7 +243,7 @@ class DependencyGraph:
             None
         """ 
         bounds = n.from_node[0].bounds
-        w = (n.weights[idx1, :].flatten(), n.weights[idx2, :].flatten())
+        w = (n.weights[:, idx1].flatten(), n.weights[:, idx2].flatten())
         if n.has_bias() is True:
             b = (n.bias[idx1], n.bias[idx2])
         else:
@@ -305,8 +305,24 @@ class DependencyGraph:
         weights_plus = np.clip(wp, 0, math.inf)
         weights_minus = np.clip(wp, -math.inf, 0)
         _min = _max = 0
-        _min +=  weights_plus.dot(bounds.lower) + weights_minus.dot(bounds.upper) + bp
-        _max +=  weights_plus.dot(bounds.upper) + weights_minus.dot(bounds.lower) + bp
+        _min +=  torch.tensordot(
+            bounds.lower, weights_plus, dims=([len(bounds.lower.shape) - 1], [0])
+        )
+        _min += torch.tensordot(
+            bounds.upper, weights_minus, dims=([len(bounds.upper.shape) - 1], [0])
+        )
+        _min += bp
+        _max +=  torch.tensordot(
+            bounds.upper, weights_plus, dims=([len(bounds.upper.shape) - 1], [0])
+        )
+        _max +=  torch.tensordot(
+            bounds.lower, weights_minus, dims=([len(bounds.upper.shape) - 1], [0])
+        )
+        _max += bp
+
+        
+        # _min +=  weights_plus.dot(bounds.lower) + weights_minus.dot(bounds.upper) + bp
+        # _max +=  weights_plus.dot(bounds.upper) + weights_minus.dot(bounds.lower) + bp
 
         return _min, _max
 

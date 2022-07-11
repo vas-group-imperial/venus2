@@ -14,7 +14,6 @@ import torch
 import onnx
 import onnx.numpy_helper
 from onnx import NodeProto, ModelProto, ValueInfoProto, AttributeProto
-
 from venus.common.configuration import Config
 from venus.network.node import *
 
@@ -24,7 +23,7 @@ class ONNXParser:
                        'Add', 'Div', 'Sub', 'BatchNormalization', 'Slice',
                        'MaxPool','ConvTranspose', 'Cast', 'Reshape', 'Dropout', 
                        'AveragePool', 'Split',  'ConstantOfShape', 'Pad',
-                       'Transpose', 'OneHot', 'Equal']
+                       'Transpose', 'OneHot', 'Equal', 'Mul', 'ReduceSum', 'Sigmoid']
 
     def __init__(self, config: Config):
         self.config = config
@@ -62,11 +61,11 @@ class ONNXParser:
                 )
                 for i, j in enumerate(node.output):
                     venus_nodes[j] = vnodes[i]
-                queue.extend([
-                    dictnode[i.output[0]]
-                    for i in model.graph.node
-                    if len(i.input) > 0 and i.input[0] == node.output[0]
-                ])
+                    # queue.extend([
+                        # dictnode[i.output[0]]
+                        # for i in model.graph.node
+                        # if len(i.input) > 0 and i.input[0] == node.output[0]
+                    # ])
             else:
                 queue.append(node)
 
@@ -116,8 +115,6 @@ class ONNXParser:
         init: list,
         inp: ValueInfoProto
     ) -> Node:
-        print(node.op_type, node.output[0])
-
         assert node.op_type in self.SUPPORTED_NODES, \
             f'node {node.op_type} is not supported'    
         node_check = node.op_type == 'Constant' or node.input[0] not in init 
@@ -146,7 +143,6 @@ class ONNXParser:
         else:
             input_shape = None
 
-        # print(input_shape)
         # process node
         if node.output[0] in venus_nodes:
             vnode = venus_nodes[node.output[0]]
@@ -155,8 +151,6 @@ class ONNXParser:
                 vnode = self.parse_gemm(node, input_shape, venus_nodes, init)
 
             elif node.op_type == 'MatMul':
-                print('sfsdf')
-                input()
                 vnode = self.parse_matmul(node, input_shape, venus_nodes, init)
 
             elif node.op_type == 'Conv':
@@ -181,13 +175,19 @@ class ONNXParser:
                 vnode = self.parse_constant(node)
 
             elif node.op_type == 'Sub':
-                vnode = self.parse_sub(node, input_shape, venus_nodes, init)
+                vnode = self.parse_sub(node, venus_nodes, init)
 
             elif node.op_type == 'Add':
-                vnode = self.parse_add(node, input_shape, venus_nodes, init)
+                vnode = self.parse_add(node, venus_nodes, init)
 
             elif node.op_type == 'Div':
                 vnode = self.parse_div(node, input_shape, venus_nodes, init)
+
+            elif node.op_type == 'Mul':
+                vnode = self.parse_mul(node, input_shape, venus_nodes, init)
+
+            elif node.op_type == 'ReduceSum':
+                vnode = self.parse_reduce_sum(node, input_shape, venus_nodes, init)
                 
             elif node.op_type == 'BatchNormalization':
                 vnode = self.parse_batchnormalization(
@@ -229,15 +229,18 @@ class ONNXParser:
             elif node.op_type == 'Pad':
                 vnode = self.parse_pad(node, input_shape, venus_nodes, init)
 
+            elif node.op_type == 'Mul':
+                vnode =  Mul([], [], input_shape, self.config)
+
+            elif node.op_type == 'Sigmoid':
+                vnode =  Sigmoid([], [], input_shape, self.config)
+
             else:
                 raise NotImplementedError(f'{node.op_type}')
 
         if isinstance(vnode, list) is not True:
             vnode = [vnode]
 
-        # for i in vnode:
-            # print(i.output_shape)
-        # input()
         # update inputs and outputs
         for i in node.input:
             if i in venus_nodes:
@@ -404,8 +407,7 @@ class ONNXParser:
         )
 
     def parse_sub(
-        self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list
-    ) -> Node:
+        self, node: NodeProto, venus_nodes: list, init: list) -> Node:
         const0, const1 = None, None
         if self._is_constant(node.input[0], venus_nodes, init): 
             const0 = self._to_tensor(node.input[0], venus_nodes, init)
@@ -414,21 +416,23 @@ class ONNXParser:
 
         if const0 is not None and const1 is not None:
             const = const0 - const1
+            input_shape = None
 
         elif const0 is not None and const1 is None:
-            const = const0 
+            const = const0
+            input_shape = venus_nodes[node.input[1]].output_shape
 
         elif const1 is not None and const0 is None:
             const = const1
+            input_shape = venus_nodes[node.input[0]].output_shape
 
         else:
             const = None
+            input_shape = venus_nodes[node.input[0]].output_shape
 
         return Sub([], [], input_shape, self.config, const=const)
 
-    def parse_add(
-        self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list
-    ) -> Node:
+    def parse_add(self, node: NodeProto, venus_nodes: list, init: list) -> Node:
         const0, const1 = None, None
         if self._is_constant(node.input[0], venus_nodes, init): 
             const0 = self._to_tensor(node.input[0], venus_nodes, init)
@@ -437,25 +441,68 @@ class ONNXParser:
 
         if const0 is not None and const1 is not None:
             const = const0 + const1
+            input_shape = None
 
         elif const0 is not None and const1 is None:
-            const = const0 
+            const = const0
+            input_shape = venus_nodes[node.input[1]].output_shape
 
         elif const1 is not None and const0 is None:
             const = const1
+            input_shape = venus_nodes[node.input[0]].output_shape
 
         else:
             const = None
+            input_shape = venus_nodes[node.input[0]].output_shape
 
         return Add([], [], input_shape, self.config, const=const)
 
     def parse_div(
         self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list
     ) -> Node:
-        const0 = self._to_tensor(node.input[0], venus_nodes, init)
-        const1 = self._to_tensor(node.input[1], venus_nodes, init)
+        if self._is_constant(node.input[0], venus_nodes, init) and \
+        self._is_constant(node.input[1], venus_nodes, init):
+            const0 = self._to_tensor(node.input[0], venus_nodes, init)
+            const1 = self._to_tensor(node.input[1], venus_nodes, init)
+            return Constant([], const0 / const1, self.config)
 
-        return Constant([], const0 / const1, self.config)
+        elif self._is_constant(node.input[0], venus_nodes, init) is not True and \
+        self._is_constant(node.input[1], venus_nodes, init) is not True:
+            return Div([], [], input_shape, self.config)
+
+        else:
+            raise NotImplementedError(
+                "inputs can either be both constants or both nodes"
+            )
+
+    def parse_mul(
+        self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list
+    ) -> Node:
+        if self._is_constant(node.input[0], venus_nodes, init) and \
+        self._is_constant(node.input[1], venus_nodes, init):
+            const0 = self._to_tensor(node.input[0], venus_nodes, init)
+            const1 = self._to_tensor(node.input[1], venus_nodes, init)
+            return Constant([], const0 / const1, self.config)
+
+        elif self._is_constant(node.input[0], venus_nodes, init) is not True and \
+        self._is_constant(node.input[1], venus_nodes, init) is not True:
+            return Mul([], [], input_shape, self.config)
+
+        else:
+            raise NotImplementedError(
+                "inputs can either be both constants or both nodes"
+            )
+
+    def parse_reduce_sum(
+        self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list
+    ) -> Node:
+         axes = self._get_attribute(node, 'axes')
+         axes = tuple(i for i in axes.ints)
+         keepdims = self._get_attribute(node, 'keepdims').i
+         keepdims = True if keepdims == 1 else False
+
+         return ReduceSum([], [], input_shape, self.config, axes, keepdims)
+
 
     def parse_batchnormalization(
         self, node: NodeProto, input_shape: tuple, venus_nodes:list, init: list
@@ -617,7 +664,12 @@ class ONNXParser:
         slices, cur_axis = [], 0
         for i in range(len(input_shape)):
             if i in axes:
-                slices.append(slice(starts[cur_axis], ends[cur_axis], steps[cur_axis]))
+                start = starts[cur_axis]
+                if ends[cur_axis] < 0 or ends[cur_axis] > input_shape[i]:
+                    end = input_shape[i]
+                else:
+                    end = ends[cur_axis] 
+                slices.append(slice(start, end, steps[cur_axis]))
                 cur_axis += 1
             else:
                 slices.append(slice(0, input_shape[i]))
@@ -653,6 +705,7 @@ class ONNXParser:
                 slice(0, input_shape[j], 1) for j in range(axis + 1, len(input_shape))
             ]
 
+            cur_split = cur_split + i
             slice_nodes.append(Slice([], [], input_shape, slices, self.config))
 
         return slice_nodes

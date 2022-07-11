@@ -409,6 +409,18 @@ class Node:
 
         return self.output_size    
 
+    def is_non_symbolically_connected(self):
+        if type(self) in [Mul, Div, ReduceSum, Sigmoid]:
+            return True
+
+        if self.is_head_node():
+            return False
+    
+        for i in self.from_node:
+            if i.is_non_symbolically_connected():
+                return True
+
+        return False
 
 class Constant(Node):
     def __init__(self, to_node: list, const: torch.Tensor, config: Config, id: int=None):
@@ -628,7 +640,7 @@ class Gemm(Node):
          
             the weight.
         """
-        return self.weights[index1, index2].item()
+        return self.weights[index2, index1].item()
     
 
     def forward(
@@ -704,7 +716,7 @@ class Gemm(Node):
         # if self.has_batch_dimension(inp) is True:
             # output = torch.tensordot(weights, inp, dims=([1], [1])).T
         # else:  
-        output = weights @ inp
+        output = torch.tensordot(inp, weights, dims=([len(inp.shape) - 1], [0]))
 
         if add_bias is True and self.has_bias() is True:
             # if self.has_batch_dimension(inp) is True:
@@ -732,7 +744,10 @@ class Gemm(Node):
         # if has_batch_dimension(inp) is True:
             # output = np.tensordot(self.weights.numpy(), inp, axes=([1], [1])).T
         # else:   
-        output = self.weights.numpy() @ inp
+        # output = self.weights.numpy() @ inp
+        output = np.tensordot(
+            inp, self.weights.numpy(), dims=([len(inp.shape) - 1], [0])
+        )
 
         if self.has_bias() is True:
             # if self.has_batch_dimension(inp) is True:
@@ -764,10 +779,12 @@ class Gemm(Node):
         Returns:
             the input of the node.
         """
-        in_flag = range(self.weights.shape[1]) if in_flag is None else in_flag
-        out_flag = range(self.weights.shape[0]) if out_flag is None else out_flag
+        in_flag = range(self.weights.shape[0]) if in_flag is None else in_flag
+        out_flag = range(self.weights.shape[1]) if out_flag is None else out_flag
 
-        return inp @ self.weights[out_flag, :][:, in_flag]
+        return torch.tensordot(
+            self.weights[in_flag, :][:, out_flag], inp, dims=([1], [0])
+        )
 
 
 class MatMul(Node):
@@ -868,7 +885,7 @@ class MatMul(Node):
          
             the weight.
         """
-        return self.weights[index1, index2].item()
+        return self.weights[index2, index1].item()
     
     def forward(
         self, inp: torch.Tensor=None, clip: str=None, save_output=False
@@ -929,8 +946,10 @@ class MatMul(Node):
         else:
             raise ValueError(f'Kernel clip value {clip} not recognised')
 
+        output = torch.tensordot(inp, weights, dims=([len(inp.shape) - 1], [0]))
 
-        output = weights @ inp
+        # output = weights @ inp
+
 
         if save_output:
             self.output = output
@@ -949,7 +968,11 @@ class MatMul(Node):
         Returns: 
             the output of the node.
         """
-        output = self.weights.cpu().numpy() @ inp 
+
+        output = np.tensordot(
+            inp, self.weights.numpy(), dims=([len(inp.shape) - 1], [0])
+        )
+        # output = self.weights.cpu().numpy() @ inp 
 
         if save_output is True:
             self.output = output
@@ -975,10 +998,12 @@ class MatMul(Node):
         Returns:
             the input of the node.
         """
-        in_flag = range(self.weights.shape[1]) if in_flag is None else in_flag
-        out_flag = range(self.weights.shape[0]) if out_flag is None else out_flag
+        in_flag = range(self.weights.shape[0]) if in_flag is None else in_flag
+        out_flag = range(self.weights.shape[1]) if out_flag is None else out_flag
 
-        return inp @ self.weights[out_flag, :][:, in_flag]
+        return torch.tensordot(
+            self.weights[in_flag, :][:, out_flag], inp, dims=([1], [0])
+        )
 
 
 class Pad(Node):
@@ -4437,6 +4462,477 @@ class Concat(Node):
 
         return output
 
+
+class Mul(Node):
+    def __init__(
+        self,
+        from_node: list,
+        to_node: list,
+        input_shape: tuple,
+        config: Config,
+        depth=0,
+        bounds=Bounds(),
+        id=None
+    ):
+        """
+        Arguments:
+
+            from_node:
+                list of input nodes.
+            to_node:
+                list of output nodes.
+            input_shape:
+                list of shapes of the input tensors to the node.
+            config:
+                configuration.
+            depth:
+                the depth of the node.
+            bounds:
+                concrete bounds for the node.
+        """
+        super().__init__(
+            from_node,
+            to_node,
+            input_shape,
+            input_shape,
+            config,
+            depth=depth,
+            bounds=bounds,
+            id=id
+        )
+
+    def copy(self):
+        """
+        Copies the node.
+        """
+        return Mul(
+            self.from_node,
+            self.to_node,
+            self.input_shape,
+            self.config,
+            depth=self.depth,
+            bounds=self.bounds.copy(),
+            id=self.id
+        )
+
+    def forward(self, inp: list=None, save_output=False) -> torch.Tensor:
+        """
+        Computes the output of the node given an input.
+
+        Arguments:
+            inp:
+                list of inputs to the node.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        assert inp is not None or \
+        (self.from_node[0].output is not None and self.from_node[0].output is not None)
+
+        inp_0 = self.from_node[0] if inp is None else inp[0]
+        inp_1 = self.from_node[1] if inp is None else inp[1]
+
+        if isinstance(inp_0, torch.Tensor) and isinstance(inp_1, torch.Tensor):
+            return self._forward_torch(inp_0, inp_1, save_output)
+
+        elif isinstance(inp_0, np.ndarray) and isinstance(inp_1, np.ndarray):
+            return self._forward_numpy(inp_0, inp_1, save_output)
+
+        else:
+            raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
+
+    def _forward_torch(
+        self, inp_0: torch.Tensor, inp_1: torch.Tensor, save_output=False
+    ) -> torch.Tensor:
+        """
+        Torch implementation of forward.
+
+        Arguments:
+            inp_0:
+                first input.
+            inp_1:
+                second: input.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        output = torch.mul(inp_0, inp_1)
+
+        if save_output is True:
+            self.output = output
+
+        return output
+
+    def _forward_numpy(self, inp: list=None, save_output=False) -> np.ndarray:
+        """
+        Numpy implementation of forward.
+
+        Arguments:
+            inp:
+                list of inputs to the node.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        output = np.multiply(inp_0, inp_1)
+
+        if save_output is True:
+            self.output = output
+
+        return output
+
+
+class Div(Node):
+    def __init__(
+        self,
+        from_node: list,
+        to_node: list,
+        input_shape: tuple,
+        config: Config,
+        depth=0,
+        bounds=Bounds(),
+        id=None
+    ):
+        """
+        Arguments:
+
+            from_node:
+                list of input nodes.
+            to_node:
+                list of output nodes.
+            input_shape:
+                list of shapes of the input tensors to the node.
+            config:
+                configuration.
+            depth:
+                the depth of the node.
+            bounds:
+                concrete bounds for the node.
+        """
+        super().__init__(
+            from_node,
+            to_node,
+            input_shape,
+            input_shape,
+            config,
+            depth=depth,
+            bounds=bounds,
+            id=id
+        )
+
+    def copy(self):
+        """
+        Copies the node.
+        """
+        return Mul(
+            self.from_node,
+            self.to_node,
+            self.input_shape,
+            self.config,
+            depth=self.depth,
+            bounds=self.bounds.copy(),
+            id=self.id
+        )
+
+    def forward(self, inp=None, save_output=False) -> torch.Tensor:
+        """
+        Computes the output of the node given an input.
+
+        Arguments:
+            inp:
+                list of inputs to the node.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        assert inp is not None or \
+        (self.from_node[0].output is not None and self.from_node[0].output is not None)
+
+        inp_0 = self.from_node[0] if inp is None else inp[0]
+        inp_1 = self.from_node[1] if inp is None else inp[1]
+
+        if isinstance(inp_0, torch.Tensor) and isinstance(inp_1, torch.Tensor):
+            return self._forward_torch(inp_0, inp_1, save_output)
+
+        elif isinstance(inp_0, np.ndarray) and isinstance(inp_1, np.ndarray):
+            return self._forward_numpy(inp_0, inp_1, save_output)
+
+        else:
+            raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
+
+    def _forward_torch(
+        self, inp_0: torch.Tensor, inp_1: torch.Tensor, save_output=False
+    ) -> torch.Tensor:
+        """
+        Torch implementation of forward.
+
+        Arguments:
+            inp_0:
+                first input.
+            inp_1:
+                second: input.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        output = torch.div(inp_0, inp_1)
+
+        if save_output is True:
+            self.output = output
+
+        return output
+
+    def _forward_numpy(self, inp: list=None, save_output=False) -> np.ndarray:
+        """
+        Numpy implementation of forward.
+
+        Arguments:
+            inp:
+                list of inputs to the node.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        output = np.divide(inp_0, inp_1)
+
+        if save_output is True:
+            self.output = output
+
+        return output
+
+
+class ReduceSum(Node):
+    def __init__(
+        self,
+        from_node: list,
+        to_node: list,
+        input_shape: tuple,
+        config: Config,
+        axes: list[int] = (0),
+        keepdims: bool=True,
+        depth=0,
+        bounds=Bounds(),
+        id=None
+    ):
+        """
+        Arguments:
+
+            from_node:
+                list of input nodes.
+            to_node:
+                list of output nodes.
+            input_shape:
+                list of shapes of the input tensors to the node.
+            axes:
+                the axis along which to reduce.
+            keepdims:
+                whether to keep the reduced dimensions
+            config:
+                configuration.
+            depth:
+                the depth of the node.
+            bounds:
+                concrete bounds for the node.
+        """
+        if keepdims is True:
+            output_shape = tuple(
+                1 if i not in axes else input_shape[i] for i in range(len(input_shape)) 
+            )
+        else:
+            output_shape = tuple(
+                input_shape[i] for i in range(len(input_shape)) if i not in axes
+            )
+        super().__init__(
+            from_node,
+            to_node,
+            input_shape,
+            output_shape,
+            config,
+            depth=depth,
+            bounds=bounds,
+            id=id
+        )
+        self.axes = axes
+        self.keepdims = keepdims
+
+    def copy(self):
+        """
+        Copies the node.
+        """
+        return ReduceSum(
+            self.from_node,
+            self.to_node,
+            self.input_shape,
+            self.config,
+            self.axes,
+            self.keepdims,
+            depth=self.depth,
+            bounds=self.bounds.copy(),
+            id=self.id
+        )
+
+    def forward(self, inp=None, save_output=False) -> torch.Tensor:
+        """
+        Computes the output of the node given an input.
+
+        Arguments:
+            inp:
+                list of inputs to the node.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0] if inp is None else inp
+
+        if isinstance(inp, torch.Tensor):
+            return self._forward_torch(inp, save_output)
+
+        elif isinstance(inp, np.ndarray):
+            return self._forward_numpy(inp, save_output)
+
+        else:
+            raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
+
+    def _forward_torch(self, inp: torch.Tensor, save_output=False) -> torch.Tensor:
+        """
+        Torch implementation of forward.
+
+        Arguments:
+            inp:
+                the input.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        output = torch.sum(inp, self.axes, keepdim=self.keepdims)
+
+        if save_output is True:
+            self.output = output
+
+        return output
+
+    def _forward_numpy(self, inp: np.ndarray, save_output=False) -> np.ndarray:
+        """
+        Numpy implementation of forward.
+
+        Arguments:
+            inp:
+                the input.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        output = np.sum(inp, axis=self.axes, keepdims=self.keepdims)
+
+        if save_output is True:
+            self.output = output
+
+        return output
+
+class Sigmoid(Node):
+    def __init__(
+        self,
+        from_node: list,
+        to_node: list,
+        input_shape: tuple,
+        config: Config,
+        depth=0,
+        bounds=Bounds(),
+        id=None
+    ):
+        """
+        Arguments:
+
+            from_node:
+                list of input nodes.
+            to_node:
+                list of output nodes.
+            input_shape:
+                list of shapes of the input tensors to the node.
+            config:
+                configuration.
+            depth:
+                the depth of the node.
+            bounds:
+                concrete bounds for the node.
+        """
+        super().__init__(
+            from_node,
+            to_node,
+            input_shape,
+            input_shape,
+            config,
+            depth=depth,
+            bounds=bounds,
+            id=id
+        )
+
+    def copy(self):
+        """
+        Copies the node.
+        """
+        return ReduceSum(
+            self.from_node,
+            self.to_node,
+            self.input_shape,
+            self.config,
+            depth=self.depth,
+            bounds=self.bounds.copy(),
+            id=self.id
+        )
+
+    def forward(self, inp=None, save_output=False) -> torch.Tensor:
+        """
+        Computes the output of the node given an input.
+
+        Arguments:
+            inp:
+                list of inputs to the node.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0] if inp is None else inp
+
+        if isinstance(inp, torch.Tensor):
+            return self._forward_torch(inp, save_output)
+
+        elif isinstance(inp, np.ndarray):
+            return self._forward_numpy(inp, save_output)
+
+        else:
+            raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
+
+    def _forward_torch(self, inp: torch.Tensor, save_output=False) -> torch.Tensor:
+        """
+        Torch implementation of forward.
+
+        Arguments:
+            inp:
+                the input.
+            save_output:
+                Whether to save the output in the node. 
+        Returns: 
+            the output of the node.
+        """
+        output = torch.sigmoid(inp)
+
+        if save_output is True:
+            self.output = output
+
+        return output
 
 class DummyNode(Node):
     pass
