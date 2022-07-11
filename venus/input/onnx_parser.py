@@ -729,12 +729,14 @@ class ONNXParser:
 
     def parse_concat(self, node: NodeProto, venus_nodes: list, init: list) -> Node:
         axis = self._get_attribute(node, "axis").i
-        input_shapes = [list(venus_nodes[i].output_shape) for i in node.input]
-        input_shape = tuple(input_shapes[0])
-        output_shape = input_shapes[0].copy()
-        output_shape[axis] = sum([i[axis] for i in input_shapes])
-        output_shape = tuple(output_shape)
 
+        input_shapes = [venus_nodes[i].output_shape for i in node.input]
+        output_shape = tuple(input_shapes[0][i] for i in range(axis))
+        output_shape += sum([i[axis] for i in input_shapes]),
+        output_shape += tuple(
+            input_shapes[0][i] for i in range(axis + 1, len(input_shapes[0]))
+        )
+                                              
         if np.all([self._is_constant(i, venus_nodes, init) for i in node.input]):
             data = [self._to_tensor(i, venus_nodes, init) for i in node.input]
             data = torch.cat(data, axis=axis)

@@ -498,7 +498,11 @@ class Equation():
     ):
         if in_flag is None:
             # matrix = node.weights[:, out_flag].T 
-            matrix = torch.zeros((node.output_size, node.input_size))
+            matrix = torch.zeros(
+                (node.output_size, node.input_size),
+                dtype=node.config.PRECISION,
+                device=node.config.DEVICE
+            )
             for i in range(np.prod(node.input_shape[:-1])):
                 start1, end1 = i * node.weights.shape[1], (i + 1) * node.weights.shape[1]
                 start2, end2 = i * node.weights.shape[0], (i + 1) * node.weights.shape[0]
@@ -615,7 +619,7 @@ class Equation():
         else:
             size = node.output_size if flag is None else torch.sum(flag)
             const = torch.zeros(
-                size, dtype=node.config.PRECISION, device=node.confog.DEVICE
+                size, dtype=node.config.PRECISION, device=node.config.DEVICE
             )
      
         return const

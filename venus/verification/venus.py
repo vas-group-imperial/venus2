@@ -213,26 +213,33 @@ class Venus:
 
 
     def verify_batch(self, nn, spec):
+        size, batch = len(spec), 50
+        ver_report = VerificationReport()
         start = timer()
 
-        ver_report = VerificationReport()
-        prob = VerificationProblem(nn, spec[0], 0, self.config)
-        prob.spec.input_node.bounds.lower = torch.vstack(
-            tuple(i.input_node.bounds.lower for i in spec)
-        )
-        prob.spec.input_node.bounds.upper = torch.vstack(
-            tuple(i.input_node.bounds.upper for i in spec)
-        )
-        prob.set_batch_size(len(spec))
-        sip = SIP(prob, self.config, batch=True)
-        sip.set_bounds()
-
-        for i, j in enumerate(spec):
-            if j.is_satisfied(
-                prob.nn.tail.bounds.lower[i], prob.nn.tail.bounds.upper[i]
-            ) is not True:
-                ver_report.runtime = timer() - start
-                return ver_report
+        for i in range(0, math.ceil(size / batch)):
+            until = min(size, i + batch)
+            prob = VerificationProblem(nn, spec[i], 0, self.config)
+            prob.spec.input_node.bounds.lower = torch.vstack(
+                tuple(
+                    j.input_node.bounds.lower for j in spec[i: until]
+                )
+            ) 
+            prob.spec.input_node.bounds.upper = torch.vstack(
+                tuple(
+                    j.input_node.bounds.upper for j in spec[i: until]
+                )
+            )
+            prob.set_batch_size(batch)
+            
+            sip = SIP(prob, self.config, batch=True)
+            sip.set_bounds()
+            for j, k in enumerate(spec[i: until]):
+                if k.is_satisfied(
+                    prob.nn.tail.bounds.lower[j], prob.nn.tail.bounds.upper[j]
+                ) is not True:
+                    ver_report.runtime = timer() - start
+                    return ver_report
 
         ver_report.result = SolveResult.SATISFIED
         return ver_report

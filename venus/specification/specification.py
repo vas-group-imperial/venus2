@@ -624,6 +624,9 @@ class Specification:
         self.input_node.input_shape =  (size,) + self.input_node.input_shape[1:]
         self.input_node.output_shape = self.input_node.input_shape
 
+        self.input_node.input_size = np.prod(self.input_node.input_shape)
+        self.input_node.output_size = np.prod(self.input_node.output_shape)
+
     def clean_vars(self):
         """
         Nulls out all MILP variables associate with the specification.

@@ -101,6 +101,9 @@ class Node:
         self.input_shape = (size,) + self.input_shape[1:] 
         self.output_shape = (size,) + self.output_shape[1:]
 
+        self.input_size = np.prod(self.input_shape)
+        self.output_size = np.prod(self.output_shape)
+
     def get_outputs(self):
         """
         Constructs a list of the indices of the units in the node.
@@ -4034,6 +4037,16 @@ class Slice(Node):
             id=self.id
         )
 
+    def set_batch_size(self, size: int=1):
+        """
+        Sets the batch size.
+
+        Arguments:
+            size: the batch size.
+        """
+        super().set_batch_size(size)
+        self.slices[0] = slice(0, size, 1)
+                    
     def get_milp_var_indices(self, var_type: str):
         """
         Returns the starting and ending indices of the milp variables encoding
@@ -4407,8 +4420,10 @@ class Concat(Node):
         """
         for i, j in enumerate(self.input_shape):
             self.input_shape[i] = (size,) + j[1:]
-
         self.output_shape = (size,) + self.output_shape[1:]
+
+        self.input_size = np.prod(self.input_shape)
+        self.output_size = np.prod(self.output_shape)
 
     def get_milp_var_indices(self, var_type: str):
         """
