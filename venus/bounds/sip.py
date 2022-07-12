@@ -49,7 +49,12 @@ class SIP:
         self.os_sip = OSSIP(self.prob, self.config)
         self.bs_sip = BSSIP(self.prob, self.config)
         self._batch = batch
-        
+       
+    def init(self):
+        self.ibp = IBP(self.prob, self.config)
+        self.os_sip = OSSIP(self.prob, self.config)
+        self.bs_sip = BSSIP(self.prob, self.config)
+
     def set_bounds(self):
         """
         Sets the bounds.
@@ -70,16 +75,22 @@ class SIP:
 
         # optimise the relaxation slopes using pgd
         if self.config.SIP.SLOPE_OPTIMISATION is True and \
-        self.prob.nn.has_custom_relaxation_slope() is not True:
+        self.prob.nn.has_custom_relaxation_slope() is not True \
+        and self.prob.spec.is_satisfied(
+            self.prob.nn.tail.bounds.lower,
+            self.prob.nn.tail.bounds.upper
+        ) is not True:
             bs_sip = BSSIP(self.prob, self.config)
             slopes = bs_sip.optimise(self.prob.nn.tail)
             self.prob.nn.relu_relaxation_slopes = slopes
-            starting_depth = self.prob.nn.get_non_linear_starting_depth()
+            # starting_depth = self.prob.nn.get_non_linear_starting_depth()
+            starting_depth = 0
+            self.init()
             self._set_bounds(slopes=slopes, depth=starting_depth)
 
-        # print(self.prob.nn.tail.bounds.lower)
-        # print(self.prob.nn.tail.bounds.upper)
-        # print('done')
+        print(self.prob.nn.tail.bounds.lower)
+        print(self.prob.nn.tail.bounds.upper)
+        print('done')
 
         if self.logger is not None:
             SIP.logger.info(

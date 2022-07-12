@@ -67,7 +67,7 @@ class OSSIP:
         idxs = []
 
         for i in self.lower_eq:
-            cond1 = self.prob.nn.node[i].depth >= max_depth - 1
+            cond1 = self.prob.nn.node[i].get_prv_non_relu().depth >= max_depth - 1
             cond2 = self.prob.nn.node[i].has_sip_branching_node()
             cond3 = np.any([
                 j.is_sip_branching_node() and j.depth >= max_depth - 1

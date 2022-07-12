@@ -164,7 +164,8 @@ class Config:
         self._user_set_params = set()
         # self.BENCHMARK = 'nn4sys'
         # self.BENCHMARK = 'carvana'
-        self.BENCHMARK = 'mnistfc'
+        # self.BENCHMARK = 'mnistfc'
+        self.BENCHMARK = 'cifar_biasfield'
 
     def set_param(self, param, value):
         if value is None: return
