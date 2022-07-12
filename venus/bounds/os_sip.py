@@ -67,8 +67,8 @@ class OSSIP:
                 bounds.lower[old_fl]  < 0, bounds.upper[old_fl] > 0
             )
 
-            lower_slopes = lower_slopes[new_fl]
-            upper_slopes = upper_slopes[new_fl]
+            lower_slopes[node.to_node[0].id] = lower_slopes[node.to_node[0].id][new_fl]
+            upper_slopes[node.to_node[0].id] = upper_slopes[node.to_node[0].id][new_fl]
 
         node.update_bounds(bounds, lower_slopes=lower_slopes, upper_slopes=upper_slopes)
 

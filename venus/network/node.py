@@ -297,12 +297,7 @@ class Node:
         """
         return len(self.to_node) == 0
 
-    def update_bounds(
-        self, bounds: Bounds,
-        flag: torch.Tensor=None,
-        lower_slopes: torch.Tensor=None,
-        upper_slopes: torch.Tensor=None
-    ) -> None:
+    def update_bounds(self, bounds: Bounds, flag: torch.Tensor=None) -> None:
         """
         Updates the bounds.
 
@@ -321,9 +316,6 @@ class Node:
 
         if self.has_relu_activation():
             self.to_node[0].reset_state_flags()
-            if lower_slopes and upper_slopes is not None:
-                self._lower_relaxation_slope = (lower_slopes, upper_slopes)
-
 
     def clear_bounds(self) -> None:
         """

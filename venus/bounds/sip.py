@@ -117,8 +117,8 @@ class SIP:
             nodes = self.prob.nn.get_node_by_depth(i)
             for j in nodes:
                 delta = self._get_delta_for_node(j, delta_flags)
-                lower_slopes, upper_slopes = self._get_slopes_for_node(j, slopes)
-                self._set_bounds_for_node(j, lower_slopes, upper_slopes, delta_flags)
+                # lower_slopes, upper_slopes = self._get_slopes_for_node(j, slopes)
+                self._set_bounds_for_node(j, slopes[0], slopes[1], delta_flags)
  
     def _set_bounds_for_node(
         self,

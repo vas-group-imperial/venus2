@@ -94,8 +94,6 @@ class BSSIP:
         self._set_bounds(
             node,
             Bounds(lower_bounds, upper_bounds),
-            lower_slopes=lower_slopes,
-            upper_slopes=upper_slopes,
             out_flag=upper_flag
         )
 
@@ -120,16 +118,14 @@ class BSSIP:
             old_fl = node.get_next_relu().get_unstable_flag() 
             new_fl = out_flag[old_fl]
 
-            lower_slopes = lower_slopes[new_fl]
-            upper_slopes = upper_slopes[new_fl]
-            # lower_slopes[node.get_next_relu().id] = \
-                # lower_slopes[node.get_next_relu().id][new_fl]
-            # upper_slopes[node.get_next_relu().id] = \
-                # upper_slopes[node.get_next_relu().id][new_fl]
+            lower_slopes[node.get_next_relu().id] = \
+                lower_slopes[node.get_next_relu().id][new_fl]
+            upper_slopes[node.get_next_relu().id] = \
+                upper_slopes[node.get_next_relu().id][new_fl]
 
         node.update_bounds(
             bounds,
-            out_flag=out_flag,
+            flag=out_flag,
             lower_slopes=lower_slopes,
             upper_slopes=upper_slopes
         )
@@ -226,7 +222,7 @@ class BSSIP:
         cur_node: Node,
         bound: str,
         i_flag: torch.Tensor=None,
-        slopes: torch.Tensor=None,
+        slopes: dict=None,
         os_sip: OSSIP=None
     ):
         """
@@ -250,7 +246,7 @@ class BSSIP:
         cur_node: Node,
         bound: str,
         i_flag: torch.Tensor=None,
-        slopes: torch.Tensor=None,
+        slopes: dict=None,
         os_sip: OSSIP=None
     ):
         """
