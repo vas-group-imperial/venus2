@@ -97,13 +97,8 @@ class OSSIP:
             i: self.upper_eq[i] for i in idxs
         }
 
-    def forward(
-        self, node: Node,
-        lower_slopes: torch.Tensor=None,
-        upper_slopes: torch.Tensor=None
-    ) -> None:
+    def forward(self, node: Node, slopes: tuple=None) -> None:
         non_linear_starting_depth = self.prob.nn.get_non_linear_starting_depth()
-
         if node.depth == 1:
             lower_eq = Equation.derive(node, self.config)
             upper_eq = lower_eq
@@ -113,6 +108,13 @@ class OSSIP:
             upper_eq = lower_eq
 
         else:
+            
+            if slopes is not None and node.has_fwd_relu_activation() is True:
+                lower_slopes = slopes[0][node.get_next_relu().id]
+                upper_slopes = slopes[1][node.get_next_relu().id]
+            else:
+                lower_slopes, upper_slopes = None, None
+
             if node.depth == non_linear_starting_depth + 1:
                 for i, j in self.upper_eq.items():
                     if self.prob.nn.node[i].depth == non_linear_starting_depth \

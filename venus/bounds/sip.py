@@ -118,7 +118,7 @@ class SIP:
             for j in nodes:
                 delta = self._get_delta_for_node(j, delta_flags)
                 # lower_slopes, upper_slopes = self._get_slopes_for_node(j, slopes)
-                self._set_bounds_for_node(j, slopes[0], slopes[1], delta_flags)
+                self._set_bounds_for_node(j, slopes, delta_flags)
  
     def _set_bounds_for_node(
         self,
@@ -143,7 +143,7 @@ class SIP:
         node.is_non_symbolically_connected() is not True:
             self.os_sip.forward(node, slopes)
             if symb_elg is True:
-                os_count = self.os_sip.set_bounds(node, lower_slopes, upper_slopes)
+                os_count = self.os_sip.set_bounds(node, slopes)
                 # print('     os', os_count, torch.mean(node.bounds.lower))
  
         # recheck eligibility for symbolic equations
