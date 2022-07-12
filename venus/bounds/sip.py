@@ -88,7 +88,7 @@ class SIP:
             self._set_bounds(slopes=slopes, depth=starting_depth)
             # this should be after _set_bounds as the unstable nodes may change
             # - to refactor
-            self.prob.nn.set_lower_relaxation_slopes(slopes[0], slope[1])
+            self.prob.nn.set_lower_relaxation_slopes(slopes[0], slopes[1])
 
         print(self.prob.nn.tail.bounds.lower)
         print(self.prob.nn.tail.bounds.upper)

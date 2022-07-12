@@ -127,7 +127,12 @@ class BSSIP:
             # upper_slopes[node.get_next_relu().id] = \
                 # upper_slopes[node.get_next_relu().id][new_fl]
 
-        node.update_bounds(bounds, out_flag)
+        node.update_bounds(
+            bounds,
+            out_flag=out_flag,
+            lower_slopes=lower_slopes,
+            upper_slopes=upper_slopes
+        )
 
     def _get_out_prop_flag(self, node: Node):
         if node.has_fwd_relu_activation():

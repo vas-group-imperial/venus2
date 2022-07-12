@@ -376,4 +376,4 @@ class NeuralNetwork:
                 A dictionary of the lower relaxation slopes of the relu nodes.
         """
         for i in lower:
-            self.node[i].set_lower_relaxation_slope(lower[i], upper[i]
+            self.node[i].set_lower_relaxation_slope(lower[i], upper[i])

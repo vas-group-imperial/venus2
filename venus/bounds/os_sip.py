@@ -70,7 +70,7 @@ class OSSIP:
             lower_slopes = lower_slopes[new_fl]
             upper_slopes = upper_slopes[new_fl]
 
-        node.update_bounds(bounds)
+        node.update_bounds(bounds, lower_slopes=lower_slopes, upper_slopes=upper_slopes)
 
         if node.has_relu_activation() is True:
             return node.to_node[0].get_unstable_count()
