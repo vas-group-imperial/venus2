@@ -759,7 +759,7 @@ class Gemm(Node):
         # else:   
         # output = self.weights.numpy() @ inp
         output = np.tensordot(
-            inp, self.weights.numpy(), dims=([len(inp.shape) - 1], [0])
+            inp, self.weights.numpy(), axes=([len(inp.shape) - 1], [0])
         )
 
         if self.has_bias() is True:

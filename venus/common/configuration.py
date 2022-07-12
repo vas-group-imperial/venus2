@@ -22,7 +22,7 @@ class Logger():
 class Solver():
     # Gurobi time limit per MILP in seconds;
     # Default: -1 (No time limit)
-    TIME_LIMIT: int = 1800
+    TIME_LIMIT: int = 7200
     # Frequency of Gurobi callbacks for ideal cuts
     # Cuts are added every 1 in pow(milp_nodes_solved, IDEAL_FREQ)
     IDEAL_FREQ: float = 1
@@ -32,18 +32,18 @@ class Solver():
     # Whether to use Gurobi's default cuts   
     DEFAULT_CUTS: bool = False
     # Whether to use ideal cuts
-    IDEAL_CUTS: bool = True
+    IDEAL_CUTS: bool = False
     # Whether to use inter-depenency cuts
-    INTER_DEP_CUTS: bool = True
+    INTER_DEP_CUTS: bool = False
     # Whether to use intra-depenency cuts
     INTRA_DEP_CUTS: bool = False
     # Whether to use inter-dependency constraints
-    INTER_DEP_CONSTRS: bool = True
+    INTER_DEP_CONSTRS: bool = False
     # Whether to use intra-dependency constraints
     INTRA_DEP_CONSTRS: bool = False
     # whether to monitor the number of MILP nodes solved and initiate
     # splititng only after BRANCH_THRESHOLD is reached.
-    MONITOR_SPLIT: bool = True
+    MONITOR_SPLIT: bool = False
     # Number of MILP nodes solved before initiating splitting. Splitting
     # will be initiated only if MONITOR_SPLIT is True.
     BRANCH_THRESHOLD: int = 100
@@ -73,18 +73,18 @@ class Solver():
     
 class Verifier():
     # complete or incomplete verification
-    COMPLETE: bool = True
+    COMPLETE: bool = False
     # number of parallel processes solving subproblems
     # VER_PROC_NUM: int = multiprocessing.cpu_count()
     VER_PROC_NUM: int = multiprocessing.cpu_count()
     # console output
     CONSOLE_OUTPUT: bool = True
     # whether to use lp relaxations
-    LP: bool = True
+    LP: bool = False
     # whether to try verification via PGD
     PGD: bool = False
     # whether to try verification via PGD on the LP relaxation
-    PGD_ON_LP: bool = True
+    PGD_ON_LP: bool = False
     # pgd step size - The epsilon will be divided by this number.
     PGD_EPS: float = 1
     # pgd number of iterations
@@ -100,9 +100,9 @@ class Splitter():
     SLEEPING_INTERVAL: int = 3
     # the number of input dimensions still considered to be small
     # so that the best split can be chosen exhaustively
-    SMALL_N_INPUT_DIMENSIONS: int = 6
+    SMALL_N_INPUT_DIMENSIONS: int = 10
     # splitting strategy
-    SPLIT_STRATEGY: SplitStrategy = SplitStrategy.NODE
+    SPLIT_STRATEGY: SplitStrategy = SplitStrategy.NONE
     # the stability ratio weight for computing the difficulty of a problem
     STABILITY_RATIO_WEIGHT: float = 1
     # the value of fixed ratio above which the splitting can stop in any
@@ -118,7 +118,7 @@ class SIP():
 
     def __init__(self):
         # one step symbolic bounds
-        self.ONE_STEP_SYMBOLIC = True
+        self.ONE_STEP_SYMBOLIC = False
         # symbolic bounds using back-substitution
         self.SYMBOLIC = True
         # whether to concretise bounds during back substitution
@@ -162,8 +162,9 @@ class Config:
         self.PRECISION = torch.float32
         self.DEVICE = torch.device('cpu')
         self._user_set_params = set()
-        self.BENCHMARK = 'nn4sys'
+        # self.BENCHMARK = 'nn4sys'
         # self.BENCHMARK = 'carvana'
+        self.BENCHMARK = 'mnistfc'
 
     def set_param(self, param, value):
         if value is None: return
@@ -327,3 +328,41 @@ class Config:
         self.set_param('relu_approximation', u_params.relu_approximation)
         self.set_param('complete', u_params.complete)
         self.set_param('console_output', u_params.console_output)
+
+        
+    def set_vnncomp_params(self, n_relus):
+        if self.BENCHMARK == 'mnistfc':
+            self.SOLVER.IDEAL_CUTS = True
+            self.SOLVER.INTER_DEP_CUTS = True
+            self.SOLVER.INTER_DEP_CONSTRS = True
+            self.SOLVER.INTRA_DEP_CONSTRS = False
+            self.MONITOR_SPLIT = True
+            if n_relus < 1000:
+                self.SPLITTER.BRANCHING_DEPTH = 2
+                self.SOLVER.BRANCH_THRESHOLD = 10000
+            elif relus < 2000:
+                self.SPLITTER.BRANCHING_DEPTH = 2
+                self.SOLVER.BRANCH_THRESHOLD = 5000
+            else:
+                self.SPLITTER.BRANCHING_DEPTH = 7
+                self.SOLVER.BRANCH_THRESHOLD = 300
+            self.VERIFIER.COMPLETE = True
+            self.VERIFIER.PGD = True
+            self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.NODE
+            self.SIP.ONE_STEP_SYMBOLIC = True
+            self.SIP.EQ_CONCRETISATION = False
+            self.SIP.SIMPLIFY_FORMULA = True
+            self.SIP.SLOPE_OPTIMISATION = True
+
+        elif self.BENCHMARK == 'cifar_biasfield':
+            self.SOLVER.INTER_DEP_CONSTRS = True
+            self.VERIFIER.COMPLETE = True
+            self.VERIFIER.PGD = True
+            self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.INPUT
+            self.SIP.ONE_STEP_SYMBOLIC = True
+            self.SIP.EQ_CONCRETISATION = True
+            self.SIP.SLOPE_OPTIMISATION = True
+
+
+
+

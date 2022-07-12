@@ -70,8 +70,8 @@ class OSSIP:
             cond1 = self.prob.nn.node[i].depth >= max_depth - 1
             cond2 = self.prob.nn.node[i].has_sip_branching_node()
             cond3 = np.any([
-                i.is_sip_branching_node(i) and i.depth >= max_depth - 1
-                for i in self.prob.nn.node[i].to_node
+                j.is_sip_branching_node() and j.depth >= max_depth - 1
+                for j in self.prob.nn.node[i].to_node
             ])
             if cond1 or (cond2 and cond3):
                 idxs.append(i)

@@ -21,7 +21,6 @@ from venus.bounds.os_sip import OSSIP
 from venus.bounds.bs_sip import BSSIP
 from venus.common.logger import get_logger
 from venus.common.configuration import Config
-from venus.specification.formula import  * 
 
 torch.set_num_threads(1)
 
@@ -57,12 +56,6 @@ class SIP:
         """
         start = timer()
 
-        # x = x[:, :, slice(0, 7), ...]
-        # print(x.shape)
-        # x = x[..., 6]
-        # print(x.shape)
-        # print(torch.sum(x, (1), keepdim=False))
-        # input()
         if self.config.DEVICE == torch.device('cuda'):
             self.prob.cuda()
 
@@ -82,13 +75,11 @@ class SIP:
             slopes = bs_sip.optimise(self.prob.nn.tail)
             self.prob.nn.relu_relaxation_slopes = slopes
             starting_depth = self.prob.nn.get_non_linear_starting_depth()
-            self._set_bounds(slopes, depth=starting_depth)
+            self._set_bounds(slopes=slopes, depth=starting_depth)
 
-        print(self.prob.nn.tail.bounds.lower)
-        print(self.prob.nn.tail.bounds.upper)
-        print('done')
-        import sys
-        sys.exit()
+        # print(self.prob.nn.tail.bounds.lower)
+        # print(self.prob.nn.tail.bounds.upper)
+        # print('done')
 
         if self.logger is not None:
             SIP.logger.info(
@@ -101,7 +92,7 @@ class SIP:
             )
 
     def _set_bounds(
-        self, slopes: tuple[dict]=None, delta_flags: torch.Tensor=None, depth=1
+        self, slopes: tuple=None, delta_flags: torch.Tensor=None, depth=1
     ):
         """
         Sets the bounds.
@@ -120,16 +111,15 @@ class SIP:
         upper_slopes: dict=None,
         delta_flag: torch.Tensor=None
     ):
-        print(node, node.id, node.input_shape, node.output_shape, node.output_size)
-        # print('      ', [i.id for i in node.from_node])
+        # print(node, node.id, node.input_shape, node.output_shape, node.output_size)
         # input()
+
         # set interval propagation bounds
         ia_count = self.ibp.set_bounds(node, lower_slopes, upper_slopes, delta_flag)
-        print('     ia', ia_count, torch.mean(node.bounds.lower))
-        if node.has_relu_activation():
-            print('   unst', node.to_node[0].get_unstable_count())
+        # print('     ia', ia_count, torch.mean(node.bounds.lower))
+        # if node.has_relu_activation():
+            # print('   unst', node.to_node[0].get_unstable_count())
             
-
         # check eligibility for symbolic equations
         symb_elg = self.is_symb_eq_eligible(node)
 
@@ -139,7 +129,7 @@ class SIP:
             self.os_sip.forward(node, lower_slopes, upper_slopes)
             if symb_elg is True:
                 os_count = self.os_sip.set_bounds(node)
-                print('     os', os_count, torch.mean(node.bounds.lower))
+                # print('     os', os_count, torch.mean(node.bounds.lower))
  
         # recheck eligibility for symbolic equations
         non_linear_depth = self.prob.nn.get_non_linear_starting_depth()
@@ -161,7 +151,7 @@ class SIP:
             bs_count = self.bs_sip.set_bounds(
                 node, lower_slopes, upper_slopes, concretisations
             )
-            print('     bs', bs_count, torch.mean(node.bounds.lower))
+            # print('     bs', bs_count, torch.mean(node.bounds.lower))
 
     def _get_delta_for_node(self, node: Node, delta_flags: torch.Tensor) -> torch.Tensor:
         if delta_flags is not None and node.has_relu_activation() is True:
@@ -170,10 +160,10 @@ class SIP:
         return None
 
     def _get_slopes_for_node(self, node: Node, slopes: tuple[dict]) -> torch.Tensor:
-        if slopes is None:
+        if slopes is None or node.has_relu_activation() is not True:
             return None, None
-                    
-        return slopes[0][node.id], slopes[2][node.id]
+
+        return slopes[0][node.to_node[0].id], slopes[1][node.to_node[0].id]
 
     def is_symb_eq_eligible(self, node: None) -> bool:
         """
@@ -269,48 +259,9 @@ class SIP:
         return lbounds, ubounds
 
     def simplify_formula(self, formula):
-        if isinstance(formula, VarVarConstraint):
-            coeffs = torch.zeros(
-                (1, self.prob.nn.tail.output_size),
-                dtype=self.config.PRECISION,
-                device=self.config.DEVICE
-            )
-            const = torch.tensor(
-                [0], dtype=self.config.PRECISION, device=self.config.DEVICE
-            )
-            if formula.sense == Formula.Sense.GT:
-                coeffs[0, formula.op1.i], coeffs[0, formula.op2.i] = 1, -1
-            elif formula.sense == Formula.Sense.LT:
-                coeffs[0, formula.op1.i], coeffs[0, formula.op2.i] = -1, 1
-            else:
-                raise ValueError('Formula sense {formula.sense} not expected')
-            equation = Equation(coeffs, const, self.config)
-            diff = self.back_substitution(
-                equation, self.prob.nn.tail, 'lower'
-            )
+        if self.config.SIP.SYMBOLIC is True:
+            simp_formula = self.bs_sip.simplify_formula(formula)
+        else:
+            simp_formula = formula
 
-            return formula if diff <= 0 else TrueFormula()
-
-        if isinstance(formula, DisjFormula):
-            fleft = self.simplify_formula(formula.left)
-            fright = self.simplify_formula(formula.right)
-
-            return DisjFormula(fleft, fright)
-
-        if isinstance(formula, ConjFormula):
-            fleft = self.simplify_formula(formula.left)
-            fright = self.simplify_formula(formula.right)
-
-            return ConjFormula(fleft, fright)
-
-        if isinstance(formula, NAryDisjFormula):
-            clauses = [self.simplify_formula(f) for f in formula.clauses]
-
-            return NAryDisjFormula(clauses)
-
-        if isinstance(formula, NAryConjFormula):
-            clauses = [self.simplify_formula(f) for f in formula.clauses]
-
-            return NAryConjFormula(clauses)
-
-        return formula 
+        return formula

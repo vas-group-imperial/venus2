@@ -15,6 +15,7 @@ from venus.bounds.os_sip import OSSIP
 from venus.bounds.equation import Equation
 from venus.common.logger import get_logger
 from venus.common.configuration import Config
+from venus.specification.formula import  * 
 
 torch.set_num_threads(1)
 
@@ -93,9 +94,9 @@ class BSSIP:
         self._set_bounds(
             node,
             Bounds(lower_bounds, upper_bounds),
-            lower_slopes,
-            upper_slopes,
-            upper_flag
+            lower_slopes=lower_slopes,
+            upper_slopes=upper_slopes,
+            out_flag=upper_flag
         )
 
         if node.has_fwd_relu_activation() is True:
@@ -119,10 +120,12 @@ class BSSIP:
             old_fl = node.get_next_relu().get_unstable_flag() 
             new_fl = out_flag[old_fl]
 
-            lower_slopes[node.get_next_relu().id] = \
-                lower_slopes[node.get_next_relu().id][new_fl]
-            upper_slopes[node.get_next_relu().id] = \
-                upper_slopes[node.get_next_relu().id][new_fl]
+            lower_slopes = lower_slopes[new_fl]
+            upper_slopes = upper_slopes[new_fl]
+            # lower_slopes[node.get_next_relu().id] = \
+                # lower_slopes[node.get_next_relu().id][new_fl]
+            # upper_slopes[node.get_next_relu().id] = \
+                # upper_slopes[node.get_next_relu().id][new_fl]
 
         node.update_bounds(bounds, out_flag)
 
@@ -248,16 +251,15 @@ class BSSIP:
         """
         Helper function for back_substitution
         """
-        # if base_node.id == 23:
+        # if base_node.id == 21:
             # print('linear', cur_node,  cur_node.id, cur_node.output_shape, equation.matrix.shape)
-            # input()
         if isinstance(cur_node, Input):
             return  equation, i_flag
 
         if cur_node.has_relu_activation() is True and \
         slopes is not None and \
         cur_node.to_node[0].id in slopes:
-            node_slopes = slopes[cur_node.id]
+            node_slopes = slopes[cur_node.to_node[0].id]
         else:
             node_slopes = None
         non_linear_cond = cur_node.has_relu_activation() or \
@@ -277,7 +279,7 @@ class BSSIP:
                 )
             else:
                 equation = self._backward(equation, cur_node, in_flag, out_flag)
-
+ 
             tranposed = True
 
         if os_sip is not None and tranposed is True:
@@ -473,7 +475,7 @@ class BSSIP:
         l_slopes =  self._optimise(node, 'lower', l_slopes)
         u_slopes =  self._optimise(node, 'upper', u_slopes)
 
-        return lower_slopes, upper_slopes
+        return l_slopes, u_slopes
 
     def _optimise(self, node: Node, bound: str, slopes: torch.tensor):
         in_flag = self._get_stability_flag(node.from_node[0])
@@ -496,8 +498,8 @@ class BSSIP:
             current_mean, best_mean = math.inf, torch.mean(node.bounds.upper)
         
         for i in range(self.config.SIP.GD_STEPS):
-            bounds = self.back_substitution(
-                equation, node.from_node[0], bound, slopes=slopes
+            bounds, _ = self.back_substitution(
+                equation, node, bound, slopes=slopes
             ) 
             bounds = torch.mean(bounds)
             if bound == 'lower' and bounds.item() > current_mean and bounds.item() - current_mean < 10e-3:
@@ -541,7 +543,7 @@ class BSSIP:
         in_flag: torch.Tensor=None
     ) -> torch.Tensor:
         if type(node) in [Conv, ConvTranspose]:
-            b_matrix =  self._backward_affine_matrix(matrix, node, out_flag, in_flag)
+            b_matrix =  self._backward_conv_matrix(matrix, node, out_flag, in_flag)
         
         elif isinstance(node, Gemm):
             b_matrix = self._backward_gemm_matrix(matrix, node, out_flag, in_flag)
@@ -652,8 +654,11 @@ class BSSIP:
         out_flag: torch.Tensor=None,
         in_flag: torch.Tensor=None
     ) -> Equation:
-        if type(node) in [Gemm, Conv, ConvTranspose]:
-            b_equation =  self._backward_affine(equation, node, out_flag, in_flag)
+        if type(node) in [Conv, ConvTranspose]:
+            b_equation =  self._backward_conv(equation, node, out_flag, in_flag)
+
+        elif isinstance(node, Gemm):
+            b_equation =  self._backward_gemm(equation, node, out_flag, in_flag)
 
         elif isinstance(node, MatMul):
             b_equation = self._backward_matmul(equation, node, out_flag, in_flag)
@@ -675,14 +680,28 @@ class BSSIP:
 
         return b_equation 
 
-    def _backward_affine(
+
+    def _backward_gemm(
         self,
         equation: Equation,
         node: Node,
         out_flag: torch.tensor=None,
         in_flag: torch.tensor=None
     ) -> Equation:
-        matrix = self._backward_affine_matrix(equation.matrix, node, out_flag, in_flag)
+        matrix = self._backward_gemm_matrix(equation.matrix, node, out_flag, in_flag)
+        const = Equation.derive_const(node, out_flag)
+        const = (equation.matrix @ const) + equation.const
+
+        return Equation(matrix, const, self.config)
+
+    def _backward_conv(
+        self,
+        equation: Equation,
+        node: Node,
+        out_flag: torch.tensor=None,
+        in_flag: torch.tensor=None
+    ) -> Equation:
+        matrix = self._backward_conv_matrix(equation.matrix, node, out_flag, in_flag)
         const = Equation.derive_const(node, out_flag)
         const = (equation.matrix @ const) + equation.const
 
@@ -924,6 +943,86 @@ class BSSIP:
             out_flag = node.get_propagation_flag()
 
         return in_flag, out_flag
+
+
+    def simplify_formula(self, formula):
+        if isinstance(formula, VarVarConstraint):
+            coeffs = torch.zeros(
+                (self.prob.nn.tail.output_size, 1),
+                dtype=self.config.PRECISION,
+                device=self.config.DEVICE
+            )
+            const = torch.tensor(
+                [0], dtype=self.config.PRECISION, device=self.config.DEVICE
+            )
+            if formula.sense == Formula.Sense.GT:
+                coeffs[formula.op1.i, 0], coeffs[formula.op2.i, 0] = 1, -1
+            elif formula.sense == Formula.Sense.LT:
+                coeffs[formula.op1.i, 0], coeffs[formula.op2.i, 0] = -1, 1
+            else:
+                raise ValueError('Formula sense {formula.sense} not expected')
+            matmul_layer = MatMul(
+                [self.prob.nn.tail],
+                [],
+                self.prob.nn.tail.output_shape, 
+                (1,),
+                coeffs,
+                self.config,
+                self.prob.nn.tail.depth + 1
+            )
+            equation = Equation(coeffs.T, const, self.config)
+            diff, _ = self.back_substitution(
+                equation, matmul_layer, 'lower'
+            )
+            return formula if diff.item() <= 0 else TrueFormula()
+
+            # coeffs = torch.zeros(
+                # (1, self.prob.nn.tail.output_size),
+                # dtype=self.config.PRECISION,
+                # device=self.config.DEVICE
+            # )
+            # const = torch.tensor(
+                # [0], dtype=self.config.PRECISION, device=self.config.DEVICE
+            # )
+            # if formula.sense == Formula.Sense.GT:
+                # coeffs[0, formula.op1.i], coeffs[0, formula.op2.i] = 1, -1
+            # elif formula.sense == Formula.Sense.LT:
+                # coeffs[0, formula.op1.i], coeffs[0, formula.op2.i] = -1, 1
+            # else:
+                # raise ValueError('Formula sense {formula.sense} not expected')
+            # equation = Equation(coeffs, const, self.config)
+            # diff = self.back_substitution(
+                # equation, self.prob.nn.tail, 'lower'
+            # )
+
+            # return formula if diff <= 0 else TrueFormula()
+
+        if isinstance(formula, DisjFormula):
+            fleft = self.simplify_formula(formula.left)
+            fright = self.simplify_formula(formula.right)
+
+            return DisjFormula(fleft, fright)
+
+        if isinstance(formula, ConjFormula):
+            fleft = self.simplify_formula(formula.left)
+            fright = self.simplify_formula(formula.right)
+
+            return ConjFormula(fleft, fright)
+
+        if isinstance(formula, NAryDisjFormula):
+            clauses = [self.simplify_formula(f) for f in formula.clauses]
+
+            return NAryDisjFormula(clauses)
+
+        if isinstance(formula, NAryConjFormula):
+            clauses = [self.simplify_formula(f) for f in formula.clauses]
+
+            return NAryConjFormula(clauses)
+
+        return formula 
+
+
+
 
 
 """

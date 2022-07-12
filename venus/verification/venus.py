@@ -25,6 +25,8 @@ from venus.verification.verification_report import VerificationReport
 from timeit import default_timer as timer
 from venus.bounds.sip import SIP
 
+import math
+
 class Venus:
 
     def __init__(
@@ -60,6 +62,7 @@ class Venus:
         with open(self.config.LOGGER.SUMFILE, 'w'):
             pass
 
+
     def verify(self):
         results = []
         safe, unsafe, undecided, timeout = 0, 0, 0, 0
@@ -76,7 +79,7 @@ class Venus:
             # load model
             nn = NeuralNetwork(query[0], self.config)
             nn.load()
-            # self.config.set_nn_defaults(nn)
+            self.config.set_vnncomp_params(nn.get_n_relu_nodes())
 
             # import numpy as np
             # from venus.bounds.bounds import Bounds
@@ -209,7 +212,9 @@ class Venus:
         if len(spec) > 1 and self.config.BENCHMARK == 'nn4sys':
             return self.verify_batch(nn, spec)
 
-        return verify_sequence(nn, spec)
+        return self.verify_sequence(nn, spec)
+
+            
 
 
     def verify_batch(self, nn, spec):

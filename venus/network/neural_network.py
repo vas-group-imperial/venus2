@@ -124,7 +124,8 @@ class NeuralNetwork:
         """
         Nulls out all outputs of the nodes of the network.
         """
-        self.head.from_node[0].output = None
+        for i in self.head:
+            i.from_node[0].output = None
 
         for _, i in self.node.items():
             i.output = None

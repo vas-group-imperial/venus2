@@ -503,7 +503,8 @@ class Equation():
                 dtype=node.config.PRECISION,
                 device=node.config.DEVICE
             )
-            for i in range(np.prod(node.input_shape[:-1])):
+
+            for i in range(int(np.prod(node.input_shape[:-1]))):
                 start1, end1 = i * node.weights.shape[1], (i + 1) * node.weights.shape[1]
                 start2, end2 = i * node.weights.shape[0], (i + 1) * node.weights.shape[0]
                 temp = matrix[start1 : end1, :]
@@ -614,7 +615,7 @@ class Equation():
     @staticmethod 
     def _derive_gemm_const(node: Node, flag: torch.Tensor): 
         if node.has_bias() is True:
-            const = torch.tile(node.bias, (np.prod(node.input_shape[:-1]),))
+            const = torch.tile(node.bias, (int(np.prod(node.input_shape[:-1])),))
             const = const if flag is None else const[flag]
         else:
             size = node.output_size if flag is None else torch.sum(flag)

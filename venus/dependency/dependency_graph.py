@@ -9,15 +9,18 @@
 # Description: Dependency graph class.
 # ************
 
+import numpy as np
+import itertools
+import math
+import torch
+
+
 from venus.dependency.dependency_graph_node import DependencyGraphNode
 from venus.dependency.dependency_type import DependencyType
 from venus.network.node import Gemm
 from venus.common.logger import get_logger
 from venus.common.utils import ReluState, DFSState
 from timeit import default_timer as timer
-import numpy as np
-import itertools
-import math
 
 class DependencyGraph:
     """

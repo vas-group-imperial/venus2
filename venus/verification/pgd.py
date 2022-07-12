@@ -15,7 +15,7 @@ class ProjectedGradientDescent:
     def __init__(self, config):
         self.config = config
 
-    def start(self, prob, init_adv: torch.tensor=None, device=torch.device('cpu')):
+    def start(self, prob, init_adv: torch.tensor=None, device=torch.device('cpu'), specs=None):
         """
         PGD (see Madry et al. 2017): https://arxiv.org/pdf/1706.06083.pdf
         
@@ -55,8 +55,15 @@ class ProjectedGradientDescent:
             )
 
             output = prob.nn.forward(adv)
-            if prob.spec.is_satisfied(output, output) is not True:
-                return adv.detach()
+            # to edit code
+            if specs is not None: 
+                for i, j in enumerate(specs):
+                    if i.is_satisfied(output[j,...], output[j,...]) is not True:
+                        return adv[i, ...].detach()
+
+            else:
+                if prob.spec.is_satisfied(output, output) is not True:
+                    return adv.detach()
 
             i += 1
 
@@ -80,7 +87,8 @@ class ProjectedGradientDescent:
         prob,
         x,
         eps,
-        device=torch.device('cpu')
+        device=torch.device('cpu'),
+        specs=None
     ):
         """
         Fast Gradient Signed Method.
@@ -103,7 +111,12 @@ class ProjectedGradientDescent:
 
         if true_label == -1:
             output = prob.nn.forward(x).flatten()
-            loss = prob.spec.get_mse_loss(output)
+            if specs is not None:
+                loss = torch.mean([
+                    specs[i].get_mse_loss(output[i, ...]) for i, _ in enumerate(specs)
+                ])
+            else:
+                loss = prob.spec.get_mse_loss(output)
 
         else:
             output_flag =  prob.spec.get_output_flag(prob.nn.tail.output_shape)
