@@ -116,7 +116,7 @@ class InputSplitter:
         prob1 = VerificationProblem(
             prob.nn.copy(),
             prob.spec.copy(
-                Input(Bounds(l, u))
+                Input(Bounds(l, u), self.config)
             ),
             prob.depth + 1,
             self.config
@@ -127,7 +127,7 @@ class InputSplitter:
         prob2 = VerificationProblem(
             prob.nn.copy(),
             prob.spec.copy(
-                Input(Bounds(l, u))
+                Input(Bounds(l, u), self.config)
             ),
             prob.depth + 1,
             self.config

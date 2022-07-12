@@ -38,7 +38,9 @@ class OSSIP:
         self.lower_eq, self.upper_eq = {}, {}
         self.current_lower_eq, self.current_upper_eq = None, None
     
-    def set_bounds(self, node: Node) -> int:
+    def set_bounds(
+    self, node: Node, lower_slopes: torch.Tensor=None, upper_slopes: torch.Tensor=None
+    ) -> int:
         input_lower = self.prob.spec.input_node.bounds.lower.flatten()
         input_upper = self.prob.spec.input_node.bounds.upper.flatten()
 
@@ -53,6 +55,21 @@ class OSSIP:
         upper = torch.min(node.bounds.upper, upper)
 
         bounds = Bounds(lower, upper)
+
+        if node.has_relu_activation() and \
+        lower_slopes is not None and \
+        upper_slopes is not None:
+            # relu node with custom slopes - leave slopes as are but remove slopes from
+            # newly stable nodes.
+            old_fl = node.get_next_relu().get_unstable_flag()
+            
+            new_fl = torch.logical_and(
+                bounds.lower[old_fl]  < 0, bounds.upper[old_fl] > 0
+            )
+
+            lower_slopes = lower_slopes[new_fl]
+            upper_slopes = upper_slopes[new_fl]
+
         node.update_bounds(bounds)
 
         if node.has_relu_activation() is True:

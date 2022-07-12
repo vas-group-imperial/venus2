@@ -83,7 +83,7 @@ class SIP:
             bs_sip = BSSIP(self.prob, self.config)
             slopes = bs_sip.optimise(self.prob.nn.tail)
             # starting_depth = self.prob.nn.get_non_linear_starting_depth()
-            starting_depth = 0
+            starting_depth = 1
             self.init()
             self._set_bounds(slopes=slopes, depth=starting_depth)
             # this should be after _set_bounds as the unstable nodes may change
@@ -93,6 +93,9 @@ class SIP:
         print(self.prob.nn.tail.bounds.lower)
         print(self.prob.nn.tail.bounds.upper)
         print('done')
+
+        if self.config.DEVICE == torch.device('cuda'):
+            self.prob.cpu()
 
         if self.logger is not None:
             SIP.logger.info(
