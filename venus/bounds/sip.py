@@ -88,7 +88,7 @@ class SIP:
             self._set_bounds(slopes=slopes, depth=starting_depth)
             # this should be after _set_bounds as the unstable nodes may change
             # - to refactor
-            self.prob.nn.set_lower_relaxation_slopes(slopes[0], slopes[1])
+            self.prob.nn.set_lower_relaxation_slopes(slopes)
 
         print(self.prob.nn.tail.bounds.lower)
         print(self.prob.nn.tail.bounds.upper)
@@ -121,10 +121,7 @@ class SIP:
                 self._set_bounds_for_node(j, slopes, delta_flags)
  
     def _set_bounds_for_node(
-        self,
-        node: Node,
-        slopes: dict=None,
-        delta_flag: torch.Tensor=None
+        self, node: Node, slopes: dict=None, delta_flag: torch.Tensor=None
     ):
         # print(node, node.id, node.input_shape, node.output_shape, node.output_size)
         # input()

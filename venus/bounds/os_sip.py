@@ -107,13 +107,14 @@ class OSSIP:
             lower_eq = self._forward(node)
             upper_eq = lower_eq
 
-        else:
-            
+        else: 
             if slopes is not None and node.has_fwd_relu_activation() is True:
-                lower_slopes = slopes[0][node.get_next_relu().id]
-                upper_slopes = slopes[1][node.get_next_relu().id]
+                node_slopes = (
+                    slopes[0][node.get_next_relu().id],
+                    slopes[1][node.get_next_relu().id]
+                )
             else:
-                lower_slopes, upper_slopes = None, None
+                node_slopes = None 
 
             if node.depth == non_linear_starting_depth + 1:
                 for i, j in self.upper_eq.items():
@@ -121,18 +122,13 @@ class OSSIP:
                     and self.prob.nn.node[i] in node.from_node:
                         j = self.lower_eq[i].copy()
                         self.current_upper_eq = j
-            lower_eq = self._int_forward(node, 'lower', lower_slopes)
-            upper_eq = self._int_forward(node, 'upper', upper_slopes)
+            lower_eq = self._int_forward(node, 'lower', node_slopes)
+            upper_eq = self._int_forward(node, 'upper', node_slopes)
 
         self.current_lower_eq, self.current_upper_eq = lower_eq, upper_eq
         self.lower_eq[node.id], self.upper_eq[node.id] = lower_eq, upper_eq
 
-    def _forward(
-        self,
-        node: Node,
-        lower_slopes: torch.Tensor=None,
-        upper_slopes: torch.Tensor=None
-    ):
+    def _forward(self, node: Node) -> Equation:
         equation = self.lower_eq[node.from_node[0].id]
 
         if isinstance(node, Gemm):
@@ -239,7 +235,7 @@ class OSSIP:
 
         return Equation(matrix, const, self.config)
 
-    def _int_forward(self,  node: Node, bound: str, slopes: torch.Tensor=None):         
+    def _int_forward(self,  node: Node, bound: str, slopes: tuple=None):         
         lower = self.lower_eq[node.from_node[0].id]
         upper = self.upper_eq[node.from_node[0].id]
         in_equation = lower if bound == 'lower' else upper

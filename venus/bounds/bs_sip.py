@@ -41,15 +41,11 @@ class BSSIP:
     def set_bounds(
         self, node: Node, slopes: tuple=None, os_sip: OSSIP=None
     ) -> Bounds:
-        if slopes is None:
-            lower_slopes, upper_slopes = None, None
-        else:
-            lower_slopes, upper_slopes = slopes
         out_flag = self._get_out_prop_flag(node)
 
         symb_eq = self._derive_symb_eq(node)
         lower_bounds, lower_flag = self.back_substitution(
-            symb_eq, node, 'lower', out_flag, lower_slopes, os_sip
+            symb_eq, node, 'lower', out_flag, slopes, os_sip
         )
 
 
@@ -75,7 +71,7 @@ class BSSIP:
             )
 
         upper_bounds, upper_flag = self.back_substitution(
-            symb_eq, node, 'upper', concr, upper_slopes, os_sip
+            symb_eq, node, 'upper', concr, slopes, os_sip
         )
 
         if upper_bounds is None:
@@ -94,7 +90,8 @@ class BSSIP:
         self._set_bounds(
             node,
             Bounds(lower_bounds, upper_bounds),
-            out_flag=upper_flag
+            out_flag=upper_flag,
+            slopes=slopes 
         )
 
         if node.has_fwd_relu_activation() is True:
@@ -106,29 +103,22 @@ class BSSIP:
         self,
         node: None,
         bounds: Bounds,
-        lower_slopes: torch.Tensor=None,
-        upper_slopes: torch.Tensor=None,
-        out_flag: torch.tensor=None
+        out_flag: torch.tensor=None,
+        slopes: torch.Tensor=None
+
     ):
-        if node.has_fwd_relu_activation() and \
-        lower_slopes is not None and \
-        upper_slopes is not None:
+        if node.has_fwd_relu_activation() and slopes is not None:
             # relu node with custom slope - leave slope as is but remove from
             # it newly stable nodes.
             old_fl = node.get_next_relu().get_unstable_flag() 
             new_fl = out_flag[old_fl]
 
-            lower_slopes[node.get_next_relu().id] = \
-                lower_slopes[node.get_next_relu().id][new_fl]
-            upper_slopes[node.get_next_relu().id] = \
-                upper_slopes[node.get_next_relu().id][new_fl]
+            slopes[0][node.get_next_relu().id] = \
+                slopes[0][node.get_next_relu().id][new_fl]
+            slopes[1][node.get_next_relu().id] = \
+                slopes[1][node.get_next_relu().id][new_fl]
 
-        node.update_bounds(
-            bounds,
-            flag=out_flag,
-            lower_slopes=lower_slopes,
-            upper_slopes=upper_slopes
-        )
+        node.update_bounds(bounds, flag=out_flag)
 
     def _get_out_prop_flag(self, node: Node):
         if node.has_fwd_relu_activation():
@@ -164,7 +154,7 @@ class BSSIP:
         node: None,
         bound: str, 
         i_flag: torch.Tensor=None,
-        slopes: dict=None,
+        slopes: tuple=None,
         os_sip: OSSIP=None
     ):
         """
@@ -246,7 +236,7 @@ class BSSIP:
         cur_node: Node,
         bound: str,
         i_flag: torch.Tensor=None,
-        slopes: dict=None,
+        slopes: tuple=None,
         os_sip: OSSIP=None
     ):
         """
@@ -257,10 +247,11 @@ class BSSIP:
         if isinstance(cur_node, Input):
             return  equation, i_flag
 
-        if cur_node.has_relu_activation() is True and \
-        slopes is not None and \
-        cur_node.to_node[0].id in slopes:
-            node_slopes = slopes[cur_node.to_node[0].id]
+        if cur_node.has_relu_activation() is True and slopes is not None:
+            node_slopes = (
+                slopes[0][cur_node.to_node[0].id],
+                slopes[1][cur_node.to_node[0].id]
+            )
         else:
             node_slopes = None
         non_linear_cond = cur_node.has_relu_activation() or \
@@ -370,7 +361,8 @@ class BSSIP:
 
 
         elif isinstance(cur_node, Concat):
-            idx = cur_node.from_node[0].output_size
+            raise NotImplementedError('Concat branching bs')
+                    idx = cur_node.from_node[0].output_size
             b_eq = Equation(
                 eq.matrix[:, torch.arange(0, cur_node.from_node[0].output_size)],
                 torch.zeros(
