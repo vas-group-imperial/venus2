@@ -121,7 +121,7 @@ class SIP:
                 self._set_bounds_for_node(j, slopes, delta_flags)
  
     def _set_bounds_for_node(
-        self, node: Node, slopes: dict=None, delta_flag: torch.Tensor=None
+        self, node: Node, slopes: tuple=None, delta_flag: torch.Tensor=None
     ):
         # print(node, node.id, node.input_shape, node.output_shape, node.output_size)
         # input()

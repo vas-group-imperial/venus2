@@ -212,7 +212,7 @@ class BSSIP:
         cur_node: Node,
         bound: str,
         i_flag: torch.Tensor=None,
-        slopes: dict=None,
+        slopes: tuple=None,
         os_sip: OSSIP=None
     ):
         """
@@ -247,13 +247,6 @@ class BSSIP:
         if isinstance(cur_node, Input):
             return  equation, i_flag
 
-        if cur_node.has_relu_activation() is True and slopes is not None:
-            node_slopes = (
-                slopes[0][cur_node.to_node[0].id],
-                slopes[1][cur_node.to_node[0].id]
-            )
-        else:
-            node_slopes = None
         non_linear_cond = cur_node.has_relu_activation() or \
             type(cur_node) in [MaxPool, BatchNormalization]
         tranposed = False
@@ -267,7 +260,7 @@ class BSSIP:
 
             if non_linear_cond is True:
                 equation = self._int_backward(
-                    equation, cur_node, bound, in_flag, out_flag, node_slopes
+                    equation, cur_node, bound, in_flag, out_flag, slopes
                 )
             else:
                 equation = self._backward(equation, cur_node, in_flag, out_flag)
@@ -360,34 +353,34 @@ class BSSIP:
             # return eq1.add(eq2), i_flag
 
 
-        elif isinstance(cur_node, Concat):
-            raise NotImplementedError('Concat branching bs')
-                    idx = cur_node.from_node[0].output_size
-            b_eq = Equation(
-                eq.matrix[:, torch.arange(0, cur_node.from_node[0].output_size)],
-                torch.zeros(
-                    eq.size, dtype=self.config.PRECISION, device=self.config.DEVICE
-                ),
-                self.config
-            )
-            b_eq, i_flag = self._back_substitution(
-                b_eq, base_node, cur_node.from_node[0], bound, i_flag, slopes, os_sip
-            )
+        # elif isinstance(cur_node, Concat):
+            # raise NotImplementedError('Concat branching bs')
+            # idx = cur_node.from_node[0].output_size
+            # b_eq = Equation(
+                # eq.matrix[:, torch.arange(0, cur_node.from_node[0].output_size)],
+                # torch.zeros(
+                    # eq.size, dtype=self.config.PRECISION, device=self.config.DEVICE
+                # ),
+                # self.config
+            # )
+            # b_eq, i_flag = self._back_substitution(
+                # b_eq, base_node, cur_node.from_node[0], bound, i_flag, slopes, os_sip
+            # )
 
-            for i in cur_node.from_node[1:]:
-                part_eq = Equation(
-                    eq.matrix[:, torch.arange(idx, cur_node.from_node[0].output_size)],
-                    torch.zeros(
-                        eq.size, dtype=self.config.PRECISION, device=self.config.DEVICE
-                    ),
-                    self.config
-                )
-                part_eq, i_flag = self._back_substitution(
-                    part_eq, base_node, i,  bound, i_flag, slopes, os_sip
-                )
-                b_eq = b_eq.add(part_eq)
+            # for i in cur_node.from_node[1:]:
+                # part_eq = Equation(
+                    # eq.matrix[:, torch.arange(idx, cur_node.from_node[0].output_size)],
+                    # torch.zeros(
+                        # eq.size, dtype=self.config.PRECISION, device=self.config.DEVICE
+                    # ),
+                    # self.config
+                # )
+                # part_eq, i_flag = self._back_substitution(
+                    # part_eq, base_node, i,  bound, i_flag, slopes, os_sip
+                # )
+                # b_eq = b_eq.add(part_eq)
 
-            return b_eq, i_flag
+            # return b_eq, i_flag
 
         else:
             raise TypeError(
@@ -464,13 +457,14 @@ class BSSIP:
         return reduced_eq, flag
 
     def optimise(self, node: Node):
-        l_slopes, u_slopes = self.prob.nn.get_lower_relaxation_slopes(gradient=True)
-        l_slopes =  self._optimise(node, 'lower', l_slopes)
-        u_slopes =  self._optimise(node, 'upper', u_slopes)
+        slopes = self.prob.nn.get_lower_relaxation_slopes(gradient=True)
+        l_slopes =  self._optimise(node, 'lower', slopes)
+        u_slopes =  self._optimise(node, 'upper', slopes)
 
-        return l_slopes, u_slopes
+        return [l_slopes, u_slopes]
 
-    def _optimise(self, node: Node, bound: str, slopes: torch.tensor):
+    def _optimise(self, node: Node, bound: str, slopes: tuple):
+        idx = 0 if bound == 'lower' else 1
         in_flag = self._get_stability_flag(node.from_node[0])
         out_flag = self._get_out_prop_flag(node)
         if out_flag is None:
@@ -506,27 +500,31 @@ class BSSIP:
             if (bound == 'lower' and bounds.item() >= best_mean) or \
             (bound == 'upper' and bounds.item() <= best_mean):
                 best_mean = bounds.item()
-                best_slopes = {i: slopes[i].detach().clone() for i in slopes}
+                best_slopes[idx] = {
+                    i: slopes[idx][i].detach().clone() for i in slopes[idx]
+                }
 
-            for j in slopes:
-                if slopes[j].grad is not None:
-                    step = lr * (slopes[j].grad.data / torch.mean(slopes[j].grad.data))
+            for j in slopes[idx]:
+                if slopes[idx][j].grad is not None:
+                    step = lr * (slopes[idx][j].grad.data / torch.mean(slopes[idx][j].grad.data))
 
                     if bound == 'upper':
-                        slopes[j].data -= step + torch.mean(slopes[j].data)
+                        slopes[idx][j].data -= step + torch.mean(slopes[idx][j].data)
                     else:
-                        slopes[j].data += step - torch.mean(slopes[j].data)
+                        slopes[idx][j].data += step - torch.mean(slopes[idx][j].data)
 
-                    slopes[j].data = torch.clamp(slopes[j].data, 0, 1)
+                    slopes[idx][j].data = torch.clamp(slopes[idx][j].data, 0, 1)
 
             if (bound == 'lower' and bounds.item() >= best_mean) or \
             (bound == 'upper' and bounds.item() <= best_mean):
                 best_mean = bounds.item()
-                best_slopes = {i: slopes[i].detach().clone() for i in slopes}
+                best_slopes[idx] = {
+                    i: slopes[idx][i].detach().clone() for i in slopes[idx]
+                }
 
         self.prob.nn.detach()
                 
-        return slopes
+        return best_slopes
 
     def _backward_matrix(
         self,
@@ -791,10 +789,22 @@ class BSSIP:
         bound: str,
         out_flag: torch.tensor=None,
         in_flag: torch.tensor=None,
-        slopes: torch.tensor = None
+        slopes: tuple= None
     ):
-        lower_slope = equation.get_relu_slope(node, 'lower', bound, out_flag, slopes)
-        upper_slope = equation.get_relu_slope(node, 'upper', bound, out_flag, slopes)
+        if slopes is not None:
+            node_slopes = (
+                slopes[0][node.get_next_relu().id],
+                slopes[1][node.get_next_relu().id]
+            )
+        else:
+            node_slopes = None
+
+        lower_slope = equation.get_relu_slope(
+            node, 'lower', bound, out_flag, node_slopes
+        )
+        upper_slope = equation.get_relu_slope(
+            node, 'upper', bound, out_flag, node_slopes
+        )
         out_flag = None if out_flag is None else out_flag.flatten()
         lower_const = Equation.derive_const(node, out_flag)
         upper_const = lower_const.clone()

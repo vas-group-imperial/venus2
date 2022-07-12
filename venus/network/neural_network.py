@@ -364,9 +364,9 @@ class NeuralNetwork:
                 if slope[1] is not None:
                     upper[i.id] = slope[1].detach().clone().requires_grad_(gradient)
 
-        return lower, upper
+        return [lower, upper]
 
-    def set_lower_relaxation_slopes(self, slopes: tuple)
+    def set_lower_relaxation_slopes(self, slopes: tuple):
         """
         Sets the lower relaxation slopes of the relu nodes.
 
