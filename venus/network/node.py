@@ -2697,6 +2697,7 @@ class Relu(Node):
                 self._lower_relaxation_slope[0].detach().clone(),
                 self._lower_relaxation_slope[1].detach().clone()
             )
+        relu._custom_relaxation_slope = self._custom_relaxation_slope
 
         return relu
 
@@ -3097,7 +3098,7 @@ class Relu(Node):
         """
         Returns whether the relaxation slope is not the default.
         """
-        return self._custom_relaxation_slope
+        return self._custom_relaxation_slope is True
 
     def get_milp_var_indices(self, var_type: str='all'):
         """
