@@ -341,7 +341,7 @@ class Config:
             if n_relus < 1000:
                 self.SPLITTER.BRANCHING_DEPTH = 2
                 self.SOLVER.BRANCH_THRESHOLD = 10000
-            elif relus < 2000:
+            elif n_relus < 2000:
                 self.SPLITTER.BRANCHING_DEPTH = 2
                 self.SOLVER.BRANCH_THRESHOLD = 5000
             else:

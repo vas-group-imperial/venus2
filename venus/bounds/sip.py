@@ -82,11 +82,13 @@ class SIP:
         ) is not True:
             bs_sip = BSSIP(self.prob, self.config)
             slopes = bs_sip.optimise(self.prob.nn.tail)
-            self.prob.nn.relu_relaxation_slopes = slopes
             # starting_depth = self.prob.nn.get_non_linear_starting_depth()
             starting_depth = 0
             self.init()
             self._set_bounds(slopes=slopes, depth=starting_depth)
+            # this should be after _set_bounds as the unstable nodes may change
+            # - to refactor
+            self.prob.nn.relu_relaxation_slopes = slopes
 
         print(self.prob.nn.tail.bounds.lower)
         print(self.prob.nn.tail.bounds.upper)
