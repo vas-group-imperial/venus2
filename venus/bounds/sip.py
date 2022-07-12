@@ -88,7 +88,7 @@ class SIP:
             self._set_bounds(slopes=slopes, depth=starting_depth)
             # this should be after _set_bounds as the unstable nodes may change
             # - to refactor
-            self.prob.nn.relu_relaxation_slopes = slopes
+            self.prob.nn.set_lower_relaxation_slopes(slopes[0], slope[1])
 
         print(self.prob.nn.tail.bounds.lower)
         print(self.prob.nn.tail.bounds.upper)
@@ -144,7 +144,7 @@ class SIP:
         node.is_non_symbolically_connected() is not True:
             self.os_sip.forward(node, lower_slopes, upper_slopes)
             if symb_elg is True:
-                os_count = self.os_sip.set_bounds(node)
+                os_count = self.os_sip.set_bounds(node, lower_slopes, upper_slopes)
                 # print('     os', os_count, torch.mean(node.bounds.lower))
  
         # recheck eligibility for symbolic equations

@@ -333,6 +333,7 @@ class NeuralNetwork:
 
         return False
 
+
     def get_non_linear_starting_depth(self):
         """
         Returns the shallowest depth with a non linear activation function.
@@ -364,3 +365,15 @@ class NeuralNetwork:
                     upper[i.id] = slope[1].detach().clone().requires_grad_(gradient)
 
         return lower, upper
+
+    def set_lower_relaxation_slopes(self, lower: dict, upper: dict):
+        """
+        Sets the lower relaxation slopes of the relu nodes.
+
+        Arguments:
+        
+            slopes:
+                A dictionary of the lower relaxation slopes of the relu nodes.
+        """
+        for i in lower:
+            self.node[i].set_lower_relaxation_slope(lower[i], upper[i]
