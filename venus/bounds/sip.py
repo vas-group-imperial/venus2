@@ -123,15 +123,14 @@ class SIP:
     def _set_bounds_for_node(
         self,
         node: Node,
-        lower_slopes: dict=None,
-        upper_slopes: dict=None,
+        slopes: dict=None,
         delta_flag: torch.Tensor=None
     ):
         # print(node, node.id, node.input_shape, node.output_shape, node.output_size)
         # input()
 
         # set interval propagation bounds
-        ia_count = self.ibp.set_bounds(node, lower_slopes, upper_slopes, delta_flag)
+        ia_count = self.ibp.set_bounds(node, slopes, delta_flag)
         # print('     ia', ia_count, torch.mean(node.bounds.lower))
         # if node.has_relu_activation():
             # print('   unst', node.to_node[0].get_unstable_count())
@@ -142,7 +141,7 @@ class SIP:
         # set one step symbolic bounds
         if self.config.SIP.ONE_STEP_SYMBOLIC is True and \
         node.is_non_symbolically_connected() is not True:
-            self.os_sip.forward(node, lower_slopes, upper_slopes)
+            self.os_sip.forward(node, slopes)
             if symb_elg is True:
                 os_count = self.os_sip.set_bounds(node, lower_slopes, upper_slopes)
                 # print('     os', os_count, torch.mean(node.bounds.lower))
@@ -165,7 +164,7 @@ class SIP:
                 concretisations = None
 
             bs_count = self.bs_sip.set_bounds(
-                node, lower_slopes, upper_slopes, concretisations
+                node, slopes, concretisations
             )
             # print('     bs', bs_count, torch.mean(node.bounds.lower))
 

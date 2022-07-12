@@ -39,12 +39,9 @@ class BSSIP:
  
 
     def set_bounds(
-        self,
-        node: Node,
-        lower_slopes: dict=None,
-        upper_slopes: dict=None,
-        os_sip: OSSIP=None
+        self, node: Node, slopes: pair=None, os_sip: OSSIP=None
     ) -> Bounds:
+        lower_slopes, upper_slopes = slopes
         out_flag = self._get_out_prop_flag(node)
 
         symb_eq = self._derive_symb_eq(node)

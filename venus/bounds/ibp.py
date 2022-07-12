@@ -38,11 +38,7 @@ class IBP:
             IBP.logger = get_logger(__name__, config.LOGGER.LOGFILE)
         
     def set_bounds(
-        self,
-        node: Node,
-        lower_slopes: torch.Tensor=None,
-        upper_slopes: torch.Tensor=None,
-        delta_flags: torch.Tensor=None
+        self, node: Node, slopes: torch.Tensor=None, delta_flags: torch.Tensor=None
     ) -> int:
         if type(node) in [
                 Relu, MaxPool, AveragePool, Slice, Unsqueeze, Reshape, Flatten, Pad,
@@ -78,7 +74,7 @@ class IBP:
             lower.reshape(node.output_shape), upper.reshape(node.output_shape)
         )
 
-        self._set_bounds(node, bounds, lower_slopes, upper_slopes)
+        self._set_bounds(node, bounds, slopes)
         
         if node.has_relu_activation() is True:
             return node.to_node[0].get_unstable_count()
@@ -164,15 +160,9 @@ class IBP:
         return lower, upper
 
     def _set_bounds(
-        self,
-        node: None,
-        bounds: Bounds,
-        lower_slopes: torch.Tensor=None,
-        upper_slopes: torch.Tensor=None
+        self, node: Node, bounds: Bounds, slopes: tuple=None
     ):
-        if node.has_relu_activation() and \
-        lower_slopes is not None and \
-        upper_slopes is not None:
+        if node.has_relu_activation() and slopes is not None:
             # relu node with custom slopes - leave slopes as are but remove slopes from
             # newly stable nodes.
             old_fl = node.get_next_relu().get_unstable_flag()
@@ -186,11 +176,7 @@ class IBP:
                 bounds.lower[old_fl]  < 0, bounds.upper[old_fl] > 0
             )
 
-            lower_slopes[node.to_node[0].id] = lower_slopes[node.to_node[0].id][new_fl]
-            upper_slopes[node.to_node[0].id] = upper_slopes[node.to_node[0].id][new_fl]
+            slopes[0][node.to_node[0].id] = slopes[0][node.to_node[0].id][new_fl]
+            slopes[1][node.to_node[0].id] = slopes[1][node.to_node[0].id][new_fl]
 
-        node.update_bounds(
-            bounds,
-            lower_slopes=lower_slopes,
-            upper_slopes=upper_slopes
-        )
+        node.update_bounds(bounds)

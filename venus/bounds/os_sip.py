@@ -38,9 +38,7 @@ class OSSIP:
         self.lower_eq, self.upper_eq = {}, {}
         self.current_lower_eq, self.current_upper_eq = None, None
     
-    def set_bounds(
-    self, node: Node, lower_slopes: torch.Tensor=None, upper_slopes: torch.Tensor=None
-    ) -> int:
+    def set_bounds(self, node: Node, slopes: tuple=None) -> int:
         input_lower = self.prob.spec.input_node.bounds.lower.flatten()
         input_upper = self.prob.spec.input_node.bounds.upper.flatten()
 
@@ -56,9 +54,7 @@ class OSSIP:
 
         bounds = Bounds(lower, upper)
 
-        if node.has_relu_activation() and \
-        lower_slopes is not None and \
-        upper_slopes is not None:
+        if node.has_relu_activation() and slopes is not None:
             # relu node with custom slopes - leave slopes as are but remove slopes from
             # newly stable nodes.
             old_fl = node.get_next_relu().get_unstable_flag()
@@ -67,10 +63,11 @@ class OSSIP:
                 bounds.lower[old_fl]  < 0, bounds.upper[old_fl] > 0
             )
 
-            lower_slopes[node.to_node[0].id] = lower_slopes[node.to_node[0].id][new_fl]
-            upper_slopes[node.to_node[0].id] = upper_slopes[node.to_node[0].id][new_fl]
+            slopes[0][node.to_node[0].id] = slopes[0][node.to_node[0].id][new_fl]
+            slopes[1][node.to_node[0].id] = slopes[1][node.to_node[0].id][new_fl]
 
-        node.update_bounds(bounds, lower_slopes=lower_slopes, upper_slopes=upper_slopes)
+
+        node.update_bounds(bounds)
 
         if node.has_relu_activation() is True:
             return node.to_node[0].get_unstable_count()
