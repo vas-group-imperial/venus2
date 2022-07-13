@@ -442,6 +442,12 @@ class Node:
 
         return False
 
+    def detach(self):
+        """
+        Detaches and clones potentially gradient required tensors. 
+        """
+        self.bounds.detach()
+
 class Constant(Node):
     def __init__(self, to_node: list, const: torch.Tensor, config: Config, id: int=None):
         """

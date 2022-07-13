@@ -126,7 +126,7 @@ class NodeSplitter(object):
         )
 
         prob2.nn.node[dgnode.nodeid].set_dep_root(dgnode.index, True)
-        prob2.nn.node[dgnode.nodeid].bounds.upper[dgnode.index] = 0
+        prob2.nn.node[dgnode.nodeid].bounds.lower[dgnode.index] = 0
         if self.set_states(prob2, dg, dgnode, ReluState.INACTIVE):
             # prob2.bound_analysis()
             subprobs.append(prob2)

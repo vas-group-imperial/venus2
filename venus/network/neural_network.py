@@ -132,10 +132,10 @@ class NeuralNetwork:
 
     def detach(self):
         """
-        Detaches and clones the bound tensors. 
+        Detaches and clones potentially gradient required tensors. 
         """
         for _, i in self.node.items():
-            i.bounds.detach()
+            i.detach()
 
     def cuda(self):
         """

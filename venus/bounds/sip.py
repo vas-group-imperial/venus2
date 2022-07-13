@@ -223,28 +223,27 @@ class SIP:
                     )
 
                     if delta_flags is not None:
-                        bounds.lower[out_flag[delta_flags[0]]] = 0.0
-                        bounds.upper[out_flag[delta_flags[0]]] = 0.0
+                        bounds.lower[delta_flags[0][out_flag]] = 0.0
+                        bounds.upper[delta_flags[0][out_flag]] = 0.0
         
-                        bounds.lower[out_flag[delta_flags[1]]] = torch.clamp(
-                            bounds.lower[out_flag[delta_flags[1]]], 0.0, math.inf
+                        bounds.lower[delta_flags[1][out_flag]] = torch.clamp(
+                            bounds.lower[delta_flags[1][out_flag]], 0.0, math.inf
                         )
-                        bounds.upper[out_flag[delta_flags[1]]] = torch.clamp(
-                            bounds.upper[out_flag[delta_flags[1]]], 0.0, math.inf
-                        )
-
-                        new_fl = torch.logical_and(
-                            bounds.lower[old_fl]  < 0, bounds.upper[old_fl] > 0
+                        bounds.upper[delta_flags[1][out_flag]] = torch.clamp(
+                            bounds.upper[delta_flags[1][out_flag]], 0.0, math.inf
                         )
 
                     new_fl = torch.logical_and(
                         bounds.lower  < 0, bounds.upper > 0
                     )
+                    idxs = torch.zeros_like(old_fl, dtype=torch.bool)
+                    idxs[out_flag] = new_fl
+                    idxs = idxs[old_fl]
 
                     slopes[0][node.get_next_relu().id] = \
-                        slopes[0][node.get_next_relu().id][new_fl]
+                        slopes[0][node.get_next_relu().id][idxs]
                     slopes[1][node.get_next_relu().id] = \
-                        slopes[1][node.get_next_relu().id][new_fl]
+                        slopes[1][node.get_next_relu().id][idxs]
             
         if slopes is not None and node.has_relu_activation():
             node_slopes = [

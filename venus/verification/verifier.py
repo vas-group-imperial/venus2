@@ -241,7 +241,10 @@ class Verifier:
                 )
             else:
                 splits = [self.prob]
-                           
+      
+            for i in splits:
+                i.nn.detach()
+
             self.split_procs = [
                 self._mp_context.Process(
                     target=run_split_process,
@@ -273,7 +276,7 @@ class Verifier:
             procs_to_gen = range(1)
         else:
             procs_to_gen = range(len(self.ver_procs), self.config.VERIFIER.VER_PROC_NUM)
-          
+         
         ver_procs = [
             self._mp_context.Process(
                     target=run_subverifier,

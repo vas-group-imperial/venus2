@@ -53,7 +53,6 @@ class BSSIP:
             symb_eq, node, 'lower', out_flag, lower_slopes, os_sip
         )
 
-
         if lower_bounds is None:
             return
 
@@ -414,7 +413,7 @@ class BSSIP:
             base_node.bounds.lower[flag] = torch.max(
                 base_node.bounds.lower[flag], concr_bounds[stable_idxs]
             )
-            base_node.get_next_relu().reset_state_flags()
+            # base_node.get_next_relu().reset_state_flags()
 
         elif bound == 'upper':
             if input_node.id not in os_sip.upper_eq:
@@ -435,7 +434,7 @@ class BSSIP:
             base_node.bounds.upper[flag] = torch.min(
                 base_node.bounds.upper[flag], concr_bounds[stable_idxs]
             )
-            base_node.get_next_relu().reset_state_flags()
+            # base_node.get_next_relu().reset_state_flags()
         else:
             raise Exception(f"Bound type {bound} not recognised.")
   
@@ -462,7 +461,6 @@ class BSSIP:
             u_slopes =  self._optimise_adv_rob(node, 'upper', label, u_slopes)
 
         return [l_slopes, u_slopes]
-
 
     def _optimise_adv_rob(self, node: Node, bound: str, label: str, slopes: dict):
         if bound == 'lower':
@@ -495,7 +493,7 @@ class BSSIP:
         )
         equation = Equation(coeffs.T, const, self.config)
 
-        best_slopes = slopes
+        best_slopes = {i: slopes[i].detach().clone() for i in slopes}
         if bound == 'lower':
             lr = self.config.SIP.GD_LR
             current, best = math.inf, self.prob.nn.tail.bounds.lower.flatten()[target]
@@ -509,11 +507,11 @@ class BSSIP:
             ) 
 
             if bound == 'lower' and bounds.item() > current and bounds.item() - current < 10e-3:
-                self.prob.nn.detach()
+                self.prob.detach()
                 return best_slopes
 
             elif bound == 'upper' and bounds.item() < current and current - bounds.item() < 10e-4:
-                self.prob.nn.detach()
+                self.prob.detach()
                 return best_slopes
             
             current = bounds.item()
@@ -544,8 +542,7 @@ class BSSIP:
                     i: slopes[i].detach().clone() for i in slopes
                 }
 
-        self.prob.nn.detach() 
-
+        self.prob.detach()
         return best_slopes
 
 
@@ -611,7 +608,7 @@ class BSSIP:
                     i: slopes[i].detach().clone() for i in slopes
                 }
 
-        self.prob.nn.detach() 
+        self.prob.detach() 
 
         return best_slopes
 
