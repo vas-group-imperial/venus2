@@ -70,6 +70,7 @@ class Node:
         self.delta_vars = np.empty(0)
         self.output = None
         self.bounds = bounds
+        self.cached_bounds = None
         self.device = device
         self._milp_var_indices = None
 
@@ -3031,6 +3032,9 @@ class Relu(Node):
         """
         Returns an array of instability statuses for each ReLU node.
         """
+        if self.cached_bounds is None:
+            return self.get_unstable_flag()
+
         return torch.logical_and(
             self.from_node[0].cached_bounds.lower < 0,
             self.from_node[0].cached_bounds.upper > 0
