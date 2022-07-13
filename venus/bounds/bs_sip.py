@@ -453,12 +453,87 @@ class BSSIP:
 
     def optimise(self, node: Node):
         l_slopes, u_slopes = self.prob.nn.get_lower_relaxation_slopes(gradient=True)
-        l_slopes =  self._optimise(node, 'lower', l_slopes)
-        u_slopes =  self._optimise(node, 'upper', u_slopes)
+        label = self.prob.spec.is_adversarial_robustnes()
+        if label == -1:
+            l_slopes =  self._optimise_mean(node, 'lower', l_slopes)
+            u_slopes =  self._optimise_mean(node, 'upper', u_slopes)
+        else:
+            l_slopes =  self._optimise_adv_rob(node, label, l_slopes)
+            u_slopes =  l_slopes
 
         return [l_slopes, u_slopes]
 
-    def _optimise(self, node: Node, bound: str, slopes: dict):
+
+    def _optimise_adv_rob(self, node: Node, label: str, slopes: dict):
+        target = torch.argmax(
+            self.prob.nn.tail.bounds.upper.flatten()[
+                list(range(label)) + \
+                list(range(label + 1), self.prob.nn.tail.output_size)
+            ]
+        )
+        coeffs = torch.zeros(
+            (self.prob.nn.tail.output_size, 1),
+            dtype=self.config.PRECISION,
+            device=self.config.DEVICE
+        )
+        coeffs[label, 0], coeffs[target, 0] = 1, -1
+        const = torch.tensor(
+            [0, 0], dtype=self.config.PRECISION, device=self.config.DEVICE
+        )
+        matmul_layer = MatMul(
+            [self.prob.nn.tail],
+            [],
+            self.prob.nn.tail.output_shape, 
+            (1,),
+            coeffs,
+            self.config,
+            self.prob.nn.tail.depth + 1
+        )
+        equation = Equation(coeffs.T, const, self.config)
+
+        best_slopes = slopes
+        lr = -self.config.SIP.GD_LR
+        current = -math.inf
+        best = self.prob.nn.tail.bounds[lower].flatten()[label] - \
+            self.prob.nn.tail.bounds[lower].flatten()[target] \ 
+        
+        for i in range(self.config.SIP.GD_STEPS):
+            bounds, _ = self.back_substitution(
+                equation, matmul_layer, 'lower', slopes=slopes
+            ) 
+            diff = self.prob.nn.tail.bounds[lower].flatten()[label] - \
+                self.prob.nn.tail.bounds[lower].flatten()[target]
+
+            if diff > current and diff - current < 10e-3:
+                self.prob.nn.detach()
+                return best_slopes
+            
+            current = diff.item()
+
+            diff.backward()
+ 
+            if diff.item() >= best:
+                best = diff.item()
+                best_slopes = {i: slopes[i].detach().clone() for i in slopes}
+
+            for j in slopes:
+                if slopes[j].grad is not None:
+                    step = lr * (slopes[j].grad.data / torch.mean(slopes[j].grad.data))
+                    slopes[j].data += step - torch.mean(slopes[j].data)
+                    slopes[j].data = torch.clamp(slopes[j].data, 0, 1)
+
+            if diff.item() >= best:
+                best = diff.item()
+                best_slopes = {
+                    i: slopes[i].detach().clone() for i in slopes
+                }
+
+        self.prob.nn.detach() 
+
+        return best_slopes
+
+
+    def _optimise_mean(self, node: Node, bound: str, slopes: dict):
         in_flag = self._get_stability_flag(node.from_node[0])
         out_flag = self._get_out_prop_flag(node)
         if out_flag is None:

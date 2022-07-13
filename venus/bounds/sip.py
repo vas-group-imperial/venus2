@@ -94,6 +94,11 @@ class SIP:
         print(self.prob.nn.tail.bounds.upper)
         print('done')
 
+        if self.config.SIP.SIMPLIFY_FORMULA is True:
+            self.prob.spec.output_formula = self.simplify_formula(
+                self.prob.spec.output_formula
+            )
+
         if self.config.DEVICE == torch.device('cuda'):
             self.prob.cpu()
 
@@ -128,7 +133,7 @@ class SIP:
         # set interval propagation bounds
         bounds = self.ibp.calc_bounds(node)
         slopes = self._update_bounds(node, bounds, slopes, delta_flag)
-        if node.has_relu_activation():
+        if node.has_fwd_relu_activation():
             ia_count = node.get_next_relu().get_unstable_count()
 
         # print('     ia', ia_count, torch.mean(node.bounds.lower))
@@ -145,7 +150,8 @@ class SIP:
             if symb_elg is True:
                 bounds =  self.os_sip.calc_bounds(node)
                 slopes = self._update_bounds(node, bounds, slopes, delta_flag)
-                os_count = node.get_next_relu().get_unstable_count()
+                if node.has_fwd_relu_activation():
+                    os_count = node.get_next_relu().get_unstable_count()
                 # print('     os', os_count, torch.mean(node.bounds.lower))
  
         # recheck eligibility for symbolic equations

@@ -62,8 +62,7 @@ class VerificationProblem(object):
         if sip is not None:
             self.stability_ratio = self.nn.get_stability_ratio()
             self.output_range = self.nn.get_output_range()
-            if self.config.SIP.SIMPLIFY_FORMULA is True:
-                self.spec.output_formula = sip.simplify_formula(self.spec.output_formula)
+
             return True
 
         else:
