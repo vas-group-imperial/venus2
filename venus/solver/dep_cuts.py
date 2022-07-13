@@ -51,6 +51,7 @@ class DepCuts(Cuts):
         # compute runtime bounds
         delta, _delta = self._get_current_delta()
         _delta_flags = {i: [_delta[i] == 0, _delta[i] == 1] for i in _delta}
+        self.prob.nn.cache_bounds()
         self.prob.set_bounds(delta_flags=_delta_flags)
         # get linear desctiption of the current stabilised binary variables
         le = self._get_lin_descr(delta, _delta)
@@ -82,6 +83,8 @@ class DepCuts(Cuts):
                 elif dep == DependencyType.ACTIVE_ACTIVE:
                     self.gmodel.cbCut(1 - delta2 <= le + 1 - delta1)
 
+
+        self.prob.nn.use_cache_bounds()
         te = timer()
         DepCuts.logger.info(f'Added dependency cuts, #cuts: {dg.get_total_deps_count()}, time: {te - ts}')
 

@@ -448,6 +448,17 @@ class Node:
         """
         self.bounds.detach()
 
+    def cache_bounds(self):
+        self._cache_bounds = self.bounds.copy()
+
+    def use_cache_bounds(self):
+        self.bounds = self._cache_bounds.copy()
+        self._cache_bounds = None
+        if self.has_relu_activation():
+            self.to_node[0].reset_state_flags()
+
+
+
 class Constant(Node):
     def __init__(self, to_node: list, const: torch.Tensor, config: Config, id: int=None):
         """

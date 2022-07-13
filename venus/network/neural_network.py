@@ -164,6 +164,15 @@ class NeuralNetwork:
         for _, i in self.node.items():
             i.set_batch_size(size)
 
+    def cache_bounds(self):
+        for _, i in self.node.items():
+            i.cache_bounds()
+
+    def use_cache_bounds(self):
+        for _, i in self.node.items():
+            i.use_cache_bounds()
+
+
     def predict(self, inp: np.array, mean: float=0, std: float=1):
         """
         Computes the output of the network on a given input.

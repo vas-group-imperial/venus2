@@ -70,8 +70,8 @@ class Cuts:
         """
         start, end = node.get_milp_var_indices(var_type)
         delta_temp = self.gmodel._vars[start: end]
-
         if isinstance(node, Relu) and var_type=='delta':
+            delta_temp = node.delta_vars
             _delta = np.empty(node.output_size)     
             _delta[node.get_unstable_flag()] = np.asarray(
                 self.gmodel.cbGetNodeRel(delta_temp)
@@ -82,6 +82,7 @@ class Cuts:
             delta = delta.reshape(node.output_shape)
 
         else:
+            delta_temp = node.out_vars
             _delta = np.asarray(
                 self.gmodel.cbGetNodeRel(delta_temp)
             ).reshape(node.output_shape)
