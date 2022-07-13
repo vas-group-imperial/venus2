@@ -128,6 +128,9 @@ class SIP:
         # set interval propagation bounds
         bounds = self.ibp.calc_bounds(node)
         slopes = self._update_bounds(node, bounds, slopes, delta_flag)
+        if node.has_relu_activation():
+            ia_count = node.get_next_relu().get_unstable_count()
+
         # print('     ia', ia_count, torch.mean(node.bounds.lower))
         # if node.has_relu_activation():
             # print('   unst', node.to_node[0].get_unstable_count())
@@ -142,6 +145,7 @@ class SIP:
             if symb_elg is True:
                 bounds =  self.os_sip.calc_bounds(node)
                 slopes = self._update_bounds(node, bounds, slopes, delta_flag)
+                os_count = node.get_next_relu().get_unstable_count()
                 # print('     os', os_count, torch.mean(node.bounds.lower))
  
         # recheck eligibility for symbolic equations
