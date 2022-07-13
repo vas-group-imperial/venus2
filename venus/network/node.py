@@ -472,12 +472,12 @@ class Node:
         """
         self.bounds.detach()
 
-    def cache_bounds(self):
-        self.cache_bounds = self.bounds.clone()
+    def set_cache_bounds(self):
+        self.cached_bounds = self.bounds.clone()
 
     def use_cache_bounds(self):
-        self.bounds = self.cache_bounds.clone()
-        self.cache_bounds = None
+        self.bounds = self.cached_bounds.clone()
+        self.cached_bounds = None
         if self.has_relu_activation():
             self.to_node[0].reset_state_flags()
 
@@ -3032,8 +3032,8 @@ class Relu(Node):
         Returns an array of instability statuses for each ReLU node.
         """
         return torch.logical_and(
-            self.from_node[0].cache_bounds.lower < 0,
-            self.from_node[0].cache_bounds.upper > 0
+            self.from_node[0].cached_bounds.lower < 0,
+            self.from_node[0].cached_bounds.upper > 0
         )
 
         return self.unstable_flag
