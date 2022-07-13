@@ -71,6 +71,7 @@ class Verifier:
                 Configuration.
         """
         self.prob = VerificationProblem(nn, spec, 0, config)
+        self.prob.simplify_input()
         self.config = config
 
         self._mp_context = mp.get_context('spawn')

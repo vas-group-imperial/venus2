@@ -168,8 +168,8 @@ class ONNXParser:
             elif node.op_type == 'Relu':
                 vnode =  Relu([], [], input_shape, self.config)
 
-            elif node.op_type == 'Flatten':
-                vnode = Flatten([], [], input_shape, self.config)
+            elif node.op_type == 'Flatten':    
+                vnode = self.parse_flatten(node, input_shape)
 
             elif node.op_type == 'Constant':
                 vnode = self.parse_constant(node)
@@ -564,6 +564,14 @@ class ONNXParser:
         
         return Constant([], torch.full(shape, value), self.config)
 
+    def parse_flatten(
+            self, node: NodeProto, input_shape: tuple
+    ) -> Node:
+        if np.prod(input_shape) > 1:
+            return Flatten([], [], input_shape, self.config)
+        else:
+            return DummyNode([], [], input_shape, input_shape, self.config)
+
     def parse_reshape(
             self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list
     ) -> Node:
@@ -784,11 +792,12 @@ class ONNXParser:
        
         elif isinstance(node, DummyNode):
             node.from_node[0].remove_to_node(node)
-            node.from_node[0].add_to_node(node.to_node[0])
-            node.to_node[0].remove_from_node(node)
-            node.to_node[0].add_from_node(node.from_node[0])
+            if len(node.to_node) > 0:
+                node.to_node[0].remove_from_node(node)
+                node.to_node[0].add_from_node(node.from_node[0])
+                node.from_node[0].add_to_node(node.to_node[0])
 
-            dic = dic | self._simplify(node.to_node[0], dic, visited)
+                dic = dic | self._simplify(node.to_node[0], dic, visited)
 
             return dic
 

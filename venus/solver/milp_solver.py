@@ -98,6 +98,8 @@ class MILPSolver:
             cex = np.zeros(cex_shape)
             for i in itertools.product(*[range(j) for j in cex_shape]):
                 cex[i] = MILPSolver.prob.spec.input_node.out_vars[i].x
+            if MILPSolver.prob.spec.input_node.is_simplified() is True:
+                cex = MILPSolver.prob.spec.input_node.expand_simp_input(cex) 
             result = SolveResult.UNSAFE
         elif gmodel.status == GRB.TIME_LIMIT:
             result = SolveResult.TIMEOUT

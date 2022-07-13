@@ -164,8 +164,10 @@ class Config:
         self._user_set_params = set()
         # self.BENCHMARK = 'nn4sys'
         # self.BENCHMARK = 'carvana'
-        self.BENCHMARK = 'mnistfc'
+        # self.BENCHMARK = 'mnistfc'
         # self.BENCHMARK = 'cifar_biasfield'
+        # self.BENCHMARK = 'rl_benchmarks'
+        self.BENCHMARK = 'collins_rul_cnn'
 
     def set_param(self, param, value):
         if value is None: return
@@ -331,12 +333,17 @@ class Config:
         self.set_param('console_output', u_params.console_output)
 
         
-    def set_vnncomp_params(self, n_relus):
+    def set_vnncomp_params(self, n_relus, i_size):
+
+        if i_size > 10:
+            self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.NODE
+        else:
+            self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.INPUT
+
         if self.BENCHMARK == 'mnistfc':
             self.SOLVER.IDEAL_CUTS = True
             self.SOLVER.INTER_DEP_CUTS = True
             self.SOLVER.INTER_DEP_CONSTRS = True
-            self.SOLVER.INTRA_DEP_CONSTRS = False
             self.MONITOR_SPLIT = True
             if n_relus < 1000:
                 self.SPLITTER.BRANCHING_DEPTH = 2
@@ -349,7 +356,6 @@ class Config:
                 self.SOLVER.BRANCH_THRESHOLD = 300
             self.VERIFIER.COMPLETE = True
             self.VERIFIER.PGD = True
-            self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.NODE
             self.SIP.ONE_STEP_SYMBOLIC = True
             self.SIP.EQ_CONCRETISATION = False
             self.SIP.SIMPLIFY_FORMULA = True
@@ -359,8 +365,61 @@ class Config:
             self.SOLVER.INTER_DEP_CONSTRS = True
             self.VERIFIER.COMPLETE = True
             self.VERIFIER.PGD = True
-            self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.INPUT
             self.SIP.ONE_STEP_SYMBOLIC = True
             self.SIP.EQ_CONCRETISATION = True
             self.SIP.SLOPE_OPTIMISATION = True
             self.SIP.STABILITY_RATIO_CUTOFF = 0.95
+
+        elif self.BENCHMARK == 'reach_prob_density':
+            self.SOLVER.IDEAL_CUTS = True
+            self.SOLVER.INTER_DEP_CUTS = True
+            self.SOLVER.INTER_DEP_CONSTRS = True
+            self.MONITOR_SPLIT = True
+            self.SPLITTER.BRANCHING_DEPTH = 2
+            self.SOLVER.BRANCH_THRESHOLD = 20000
+            self.VERIFIER.COMPLETE = True
+            self.VERIFIER.PGD = True
+            self.SIP.ONE_STEP_SYMBOLIC = True
+            self.SIP.EQ_CONCRETISATION = False
+            self.SIP.SIMPLIFY_FORMULA = True
+            self.SIP.SLOPE_OPTIMISATION = True
+            self.SIP.STABILITY_RATIO_CUTOFF = 0.75
+
+        elif self.BENCHMARK == 'rl_benchmarks':
+            self.SOLVER.IDEAL_CUTS = True
+            self.SOLVER.INTER_DEP_CUTS = True
+            self.SOLVER.INTER_DEP_CONSTRS = True
+            self.MONITOR_SPLIT = True
+            if n_relus < 1000:
+                self.SPLITTER.BRANCHING_DEPTH = 2
+                self.SOLVER.BRANCH_THRESHOLD = 10000
+            elif n_relus < 2000:
+                self.SPLITTER.BRANCHING_DEPTH = 2
+                self.SOLVER.BRANCH_THRESHOLD = 5000
+            else:
+                self.SPLITTER.BRANCHING_DEPTH = 7
+                self.SOLVER.BRANCH_THRESHOLD = 300
+            self.VERIFIER.COMPLETE = True
+            self.VERIFIER.PGD = True
+            self.SIP.ONE_STEP_SYMBOLIC = True
+            self.SIP.EQ_CONCRETISATION = False
+            self.SIP.SIMPLIFY_FORMULA = True
+            self.SIP.SLOPE_OPTIMISATION = True
+            self.SIP.STABILITY_RATIO_CUTOFF = 0.75
+
+        elif self.BENCHMARK in ['collins_rul_cnn', 'oval']:
+            self.SOLVER.IDEAL_CUTS = True
+            self.SOLVER.INTER_DEP_CUTS = True
+            self.SOLVER.INTER_DEP_CONSTRS = True
+            self.MONITOR_SPLIT = True
+            self.SPLITTER.BRANCHING_DEPTH = 7
+            self.SOLVER.BRANCH_THRESHOLD = 300
+            self.VERIFIER.COMPLETE = True
+            self.VERIFIER.PGD = True
+            self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.NODE
+            self.SIP.ONE_STEP_SYMBOLIC = True
+            self.SIP.EQ_CONCRETISATION = True
+            self.SIP.SIMPLIFY_FORMULA = True
+            self.SIP.SLOPE_OPTIMISATION = True
+
+

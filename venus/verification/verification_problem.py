@@ -12,6 +12,8 @@
 import torch
 
 from venus.bounds.sip import SIP
+from venus.bounds.bounds import Bounds
+from venus.network.node import Gemm, Reshape
 
 class VerificationProblem(object):
 
@@ -242,4 +244,106 @@ class VerificationProblem(object):
 
     def to_string(self):
         return self.nn.model_path  + ' against ' + self.spec.to_string()
+
+    def simplify_input(self):
+        assert len(self.nn.head) == 1
+        pert_idxs =  self.spec.input_node.bounds.lower != \
+            self.spec.input_node.bounds.upper
+        unpert_idxs =  self.spec.input_node.bounds.lower == \
+            self.spec.input_node.bounds.upper
+        pert_inputs = torch.sum(pert_idxs)
+        org_input_shape =  self.nn.head[0].input_shape
+        
+        if pert_inputs > 8:
+            return self
+    
+        # new head node
+        matrix = torch.zeros(
+            (pert_inputs, self.spec.input_node.output_size),
+            dtype=self.config.PRECISION,
+            device=self.config.DEVICE
+        )
+        matrix[range(pert_inputs), pert_idxs.flatten()] = 1
+        const = torch.zeros(
+            self.spec.input_node.output_size,
+            dtype=self.config.PRECISION,
+            device=self.config.DEVICE
+        )
+        const[unpert_idxs.flatten()] = self.spec.input_node.bounds.lower[unpert_idxs].flatten()
+        if len(org_input_shape) > 2: 
+            gemm = Gemm(
+                [],
+                [],
+                (pert_inputs,),
+                (self.spec.input_node.output_size,),
+                matrix,
+                const,
+                self.config,
+                depth=1
+            )
+            reshape = Reshape(
+                [gemm],
+                [i for i in self.nn.head],
+                (1, self.spec.input_node.output_size),
+                self.nn.head[0].input_shape,
+                self.config,
+                depth=2
+            )
+            gemm.from_node = [reshape]
+            # couple new head node with old
+            for i in self.nn.head:
+                i.from_node = [reshape]
+            # update depths
+            for _, i in self.nn.node.items():
+                i.depth += 2
+            # insert node into the network 
+            self.nn.node[gemm.id] = gemm
+            self.nn.node[reshape.id] = reshape
+
+        else:
+            gemm = Gemm(
+                [],
+                [i for i in self.nn.head],
+                (pert_inputs,),
+                (self.spec.input_node.output_size,),
+                matrix,
+                const,
+                self.config,
+                depth=1
+            )
+            # couple new head node with old
+            for i in self.nn.head:
+                i.from_node = [gemm]
+            # update depths
+            for _, i in self.nn.node.items():
+                i.depth += 1
+            # insert node into the network 
+            self.nn.node[gemm.id] = gemm
+
+        # update head
+        self.nn.head = [gemm]
+        
+        for i in self.nn.head:
+            i.from_node = [self.spec.input_node]
+
+        # update spec
+        self.spec.input_node.set_simplified(
+            org_input_shape,
+            pert_idxs,
+            unpert_idxs,
+            self.spec.input_node.bounds.lower[unpert_idxs]
+        )
+        self.spec.input_node.bounds = Bounds(
+            self.spec.input_node.bounds.lower[pert_idxs],
+            self.spec.input_node.bounds.upper[pert_idxs]
+        )
+        self.spec.input_node.input_shape = (pert_inputs,)
+        self.spec.input_node.input_size = pert_inputs
+        self.spec.input_node.output_shape = (pert_inputs,)
+        self.spec.input_node.output_size = pert_inputs
+            
+
+        
+
+
 

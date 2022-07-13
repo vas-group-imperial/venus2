@@ -42,6 +42,7 @@ class NeuralNetwork:
         self.head = None
         self.tail = None
         self.node = {}
+        self.input_simplified = False
 
     def load(self):
         """
@@ -95,7 +96,9 @@ class NeuralNetwork:
                 if isinstance(j, Input) is not True
             ]
             nn.node[i].to_node = [nn.node[j.id] for j in self.node[i].to_node]
- 
+
+        nn.input_simplified = self.input_simplified
+
         return nn
 
     def get_node_by_depth(self, depth: int) -> list:

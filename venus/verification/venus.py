@@ -79,7 +79,7 @@ class Venus:
             # load model
             nn = NeuralNetwork(query[0], self.config)
             nn.load()
-            self.config.set_vnncomp_params(nn.get_n_relu_nodes())
+            self.config.set_vnncomp_params(nn.get_n_relu_nodes(), nn.head[0].input_size)
 
             # import numpy as np
             # from venus.bounds.bounds import Bounds
@@ -137,6 +137,16 @@ class Venus:
             elif ver_report.result == SolveResult.UNSAFE:
                 unsafe += 1
                 total_unsafe_time += ver_report.runtime
+                
+                # import onnx
+                # import onnxruntime.backend as rt
+                # m = onnx.load(query[0])
+                # runnable = rt.prepare(m, 'CPU')
+                # pred = runnable.run(ver_report.cex.numpy())
+                # print(pred)
+                # import sys
+                # sys.exit()
+
             elif ver_report.result == SolveResult.UNDECIDED:
                 undecided += 1
             elif ver_report.result == SolveResult.TIMEOUT:

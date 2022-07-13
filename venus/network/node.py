@@ -528,14 +528,51 @@ class Input(Node):
             bounds=bounds,
             id=id
         )
+        self._simplified = False
+        self._simplified_shape = None
+        self._simplified_pert_idx = None
+        self._simplified_unpert_idx = None
+        self._simplified_consts = None
+
+    def is_simplified(self):
+        return self._simplified
+
+    def set_simplified(self, shape, pert_idxs, unpert_idxs, consts):
+        self._simplified = True
+        self._simplified_shape = shape
+        self._simplified_pert_idx = pert_idxs
+        self._simplified_unpert_idx = unpert_idxs
+        self._simplified_consts = consts
+
+    def expand_simp_input(self, inp: torch.Tensor):
+        if self._simplified is not True:
+            return inp
+    
+        ex_inp = torch.zeros(
+            self._simplified_shape,
+            dtype=inp.dtype,
+            device=inp.device
+        )
+        ex_inp[self._simplified_pert_idx] = inp
+        ex_inp[self._simplified_unpert_idx] = self._simplified_consts
+         
+        return ex_inp
+            
 
     def copy(self):
         """
         Copies the node. 
         """
-        return Input(
+        inp = Input(
             self.bounds.copy(), self.config, id=self.id
         )
+        if self._simplified is True:
+            inp.set_simplified(
+                self._simplified_shape,
+                self._simplified_pert_idx,
+                self._simplified_unpert_idx,
+                self._simplified_consts
+            )
 
     def get_milp_var_size(self):
         """

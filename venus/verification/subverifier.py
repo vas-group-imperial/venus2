@@ -147,6 +147,9 @@ class SubVerifier:
         pgd = ProjectedGradientDescent(self.config)
         cex = pgd.start(prob)
         if cex is not None:
+            if prob.spec.input_node.is_simplified() is True:
+                cex = prob.spec.input_node.expand_simp_input(cex)
+
             SubVerifier.logger.info(
                 f'Verification problem {prob.id} was solved via PGD'
             )
@@ -209,6 +212,8 @@ class SubVerifier:
             pgd = ProjectedGradientDescent(self.config)
             cex = pgd.start(prob, init_adv=cex, device=prob.device)
             if cex is not None:
+                if prob.spec.input_node.is_simplified() is True:
+                    cex = prob.spec.input_node.expand_simp_input(cex)
                 SubVerifier.logger.info(
                     f'Verification problem {prob.id} was solved via PGD on LP'
                 )
