@@ -48,7 +48,6 @@ class SIP:
         self.ibp = IBP(self.prob, self.config)
         self.os_sip = OSSIP(self.prob, self.config)
         self.bs_sip = BSSIP(self.prob, self.config)
-        self._batch = batch
        
     def init(self):
         self.ibp = IBP(self.prob, self.config)
@@ -72,7 +71,7 @@ class SIP:
 
         # set bounds using area approximations
         self._set_bounds(slopes, depth=1)
-    
+ 
         # optimise the relaxation slopes using pgd
         if self.config.SIP.SLOPE_OPTIMISATION is True and \
         self.prob.nn.has_custom_relaxation_slope() is not True \
@@ -90,9 +89,8 @@ class SIP:
             # - to refactor
             self.prob.nn.set_lower_relaxation_slopes(slopes[0], slopes[1])
 
-        print(self.prob.nn.tail.bounds.lower)
-        print(self.prob.nn.tail.bounds.upper)
-        print('done')
+        # print(self.prob.nn.tail.bounds.lower)
+        # print(self.prob.nn.tail.bounds.upper)
 
         if self.config.SIP.SIMPLIFY_FORMULA is True:
             self.prob.spec.output_formula = self.simplify_formula(
@@ -163,7 +161,7 @@ class SIP:
             if self.config.SIP.ONE_STEP_SYMBOLIC is True and \
             self.config.SIP.EQ_CONCRETISATION is True and \
             node.depth > 2:
-                if os_count * 5 > ia_count:
+                if node.has_fwd_relu_activation() and os_count * 5 > ia_count:
                     concretisations = self.os_sip
                 else:
                     self.os_sip.clear_equations()

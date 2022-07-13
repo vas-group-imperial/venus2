@@ -453,22 +453,107 @@ class BSSIP:
 
     def optimise(self, node: Node):
         l_slopes, u_slopes = self.prob.nn.get_lower_relaxation_slopes(gradient=True)
-        label = self.prob.spec.is_adversarial_robustnes()
+        label = self.prob.spec.is_adversarial_robustness()
         if label == -1:
             l_slopes =  self._optimise_mean(node, 'lower', l_slopes)
             u_slopes =  self._optimise_mean(node, 'upper', u_slopes)
         else:
-            l_slopes =  self._optimise_adv_rob(node, label, l_slopes)
-            u_slopes =  l_slopes
+            l_slopes =  self._optimise_adv_rob(node, 'lower', label, l_slopes)
+            u_slopes =  self._optimise_adv_rob(node, 'upper', label, u_slopes)
 
         return [l_slopes, u_slopes]
 
 
-    def _optimise_adv_rob(self, node: Node, label: str, slopes: dict):
+    def _optimise_adv_rob(self, node: Node, bound: str, label: str, slopes: dict):
+        if bound == 'lower':
+            target = label
+        else:
+            target = torch.argmax(
+                self.prob.nn.tail.bounds.upper.flatten()[
+                    list(range(label)) + \
+                    list(range(label + 1, self.prob.nn.tail.output_size))
+                ]
+            )
+
+        coeffs = torch.zeros(
+            (self.prob.nn.tail.output_size, 1),
+            dtype=self.config.PRECISION,
+            device=self.config.DEVICE
+        )
+        coeffs[target, 0] = 1
+        const = torch.tensor(
+            [1], dtype=self.config.PRECISION, device=self.config.DEVICE
+        )
+        matmul_layer = MatMul(
+            [self.prob.nn.tail],
+            [],
+            self.prob.nn.tail.output_shape, 
+            (1,),
+            coeffs,
+            self.config,
+            self.prob.nn.tail.depth + 1
+        )
+        equation = Equation(coeffs.T, const, self.config)
+
+        best_slopes = slopes
+        if bound == 'lower':
+            lr = self.config.SIP.GD_LR
+            current, best = math.inf, self.prob.nn.tail.bounds.lower.flatten()[target]
+        else:
+            lr = -self.config.SIP.GD_LR
+            current, best = -math.inf, self.prob.nn.tail.bounds.upper.flatten()[target]
+        
+        for i in range(self.config.SIP.GD_STEPS):
+            bounds, _ = self.back_substitution(
+                equation, matmul_layer, bound, slopes=slopes
+            ) 
+
+            if bound == 'lower' and bounds.item() > current and bounds.item() - current < 10e-3:
+                self.prob.nn.detach()
+                return best_slopes
+
+            elif bound == 'upper' and bounds.item() < current and current - bounds.item() < 10e-4:
+                self.prob.nn.detach()
+                return best_slopes
+            
+            current = bounds.item()
+
+            bounds.backward()
+ 
+            if bound == 'lower' and current >= best or \
+            bound == 'upper' and current <= best:
+                best = current
+                best_slopes = {i: slopes[i].detach().clone() for i in slopes}
+
+            for j in slopes:
+                if slopes[j].grad is not None:
+                    # step = lr * (slopes[j].grad.data / torch.mean(slopes[j].grad.data))
+                    step = lr * slopes[j].grad.data 
+                    if bound == 'lower':
+                        slopes[j].data += step 
+                        # slopes[j].data -= step - torch.mean(slopes[j].data)
+                    else:
+                        slopes[j].data += step
+                        # slopes[j].data -= step - torch.mean(slopes[j].data)
+                        
+                    slopes[j].data = torch.clamp(slopes[j].data, 0, 1)
+
+            if bound == 'lower' and current >= best or bound == 'upper' and current <= best:
+                best = current
+                best_slopes = {
+                    i: slopes[i].detach().clone() for i in slopes
+                }
+
+        self.prob.nn.detach() 
+
+        return best_slopes
+
+
+    def ___optimise_adv_rob(self, node: Node, label: str, slopes: dict):
         target = torch.argmax(
             self.prob.nn.tail.bounds.upper.flatten()[
                 list(range(label)) + \
-                list(range(label + 1), self.prob.nn.tail.output_size)
+                list(range(label + 1, self.prob.nn.tail.output_size))
             ]
         )
         coeffs = torch.zeros(
@@ -478,7 +563,7 @@ class BSSIP:
         )
         coeffs[label, 0], coeffs[target, 0] = 1, -1
         const = torch.tensor(
-            [0, 0], dtype=self.config.PRECISION, device=self.config.DEVICE
+            [1], dtype=self.config.PRECISION, device=self.config.DEVICE
         )
         matmul_layer = MatMul(
             [self.prob.nn.tail],
@@ -494,26 +579,24 @@ class BSSIP:
         best_slopes = slopes
         lr = -self.config.SIP.GD_LR
         current = -math.inf
-        best = self.prob.nn.tail.bounds[lower].flatten()[label] - \
-            self.prob.nn.tail.bounds[lower].flatten()[target] \ 
+        best = self.prob.nn.tail.bounds.lower.flatten()[label] - \
+            self.prob.nn.tail.bounds.lower.flatten()[target]
         
         for i in range(self.config.SIP.GD_STEPS):
             bounds, _ = self.back_substitution(
                 equation, matmul_layer, 'lower', slopes=slopes
             ) 
-            diff = self.prob.nn.tail.bounds[lower].flatten()[label] - \
-                self.prob.nn.tail.bounds[lower].flatten()[target]
 
-            if diff > current and diff - current < 10e-3:
+            if bounds.item() > current and bounds.item() - current < 10e-3:
                 self.prob.nn.detach()
                 return best_slopes
             
-            current = diff.item()
+            current = bounds.item()
 
-            diff.backward()
+            bounds.backward()
  
-            if diff.item() >= best:
-                best = diff.item()
+            if current >= best:
+                best = current
                 best_slopes = {i: slopes[i].detach().clone() for i in slopes}
 
             for j in slopes:
@@ -522,8 +605,8 @@ class BSSIP:
                     slopes[j].data += step - torch.mean(slopes[j].data)
                     slopes[j].data = torch.clamp(slopes[j].data, 0, 1)
 
-            if diff.item() >= best:
-                best = diff.item()
+            if current >= best:
+                best = current
                 best_slopes = {
                     i: slopes[i].detach().clone() for i in slopes
                 }
@@ -531,7 +614,6 @@ class BSSIP:
         self.prob.nn.detach() 
 
         return best_slopes
-
 
     def _optimise_mean(self, node: Node, bound: str, slopes: dict):
         in_flag = self._get_stability_flag(node.from_node[0])

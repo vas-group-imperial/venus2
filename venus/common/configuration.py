@@ -133,7 +133,7 @@ class SIP():
         # whether to use gradient descent optimisation of slopes
         self.SLOPE_OPTIMISATION: bool = False
         # gradient descent learning rate for optimising slopes
-        self.GD_LR: float = 0.01
+        self.GD_LR: float = 1
         # gradient descent steps
         self.GD_STEPS: int = 100
         # STABILITY FLAG THRESHOLD
