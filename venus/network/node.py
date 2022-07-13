@@ -297,7 +297,12 @@ class Node:
         """
         return len(self.to_node) == 0
 
-    def update_bounds(self, bounds: Bounds, flag: torch.Tensor=None) -> None:
+    def update_bounds(
+        self,
+        bounds: Bounds,
+        slopes: tuple,
+        flag: torch.Tensor=None
+    ) -> None:
         """
         Updates the bounds.
 
@@ -316,6 +321,8 @@ class Node:
 
         if self.has_relu_activation():
             self.to_node[0].reset_state_flags()
+            if slopes is not None:
+                self.to_node[0].set_lower_relaxation_slope(slopes[0], slopes[1])
 
     def clear_bounds(self) -> None:
         """
@@ -2829,6 +2836,8 @@ class Relu(Node):
         self.active_count = None
         self.inactive_count = None
         self.propagation_count = None
+        if self.has_custom_relaxation_slope() is not True:
+            self._lower_relaxation_slope = None, None
 
     def is_active(self, index):
         """
@@ -2898,14 +2907,6 @@ class Relu(Node):
         """
         if self.active_flag is None:
             self.active_flag = self.from_node[0].bounds.lower >= 0
-            if self.forced_states > 0:
-                self.active_flag = torch.logical_or(
-                    self.active_flag, 
-                    torch.Tensor(
-                        self.state == ReluState.ACTIVE,
-                        device=self.device
-                    )
-                )
 
         return self.active_flag
 
@@ -2924,14 +2925,6 @@ class Relu(Node):
         """
         if self.inactive_flag is None:
             self.inactive_flag = self.from_node[0].bounds.upper <= 0
-            if self.forced_states > 0:
-                self.inactive_flag = torch.logical_or(
-                    self.inactive_flag, 
-                    torch.Tensor(
-                        self.state == ReluState.INACTIVE,
-                        device=self.device
-                    )
-                )
 
         return self.inactive_flag
 
@@ -2953,14 +2946,6 @@ class Relu(Node):
                 self.from_node[0].bounds.lower < 0,
                 self.from_node[0].bounds.upper > 0
             )
-            if self.forced_states > 0:
-                self.unstable_flag = torch.logical_or(
-                    self.unstable_flag,
-                    torch.Tensor(
-                        self.state == ReluState.UNSTABLE,
-                        device=self.device
-                    )
-                )
 
         return self.unstable_flag
 

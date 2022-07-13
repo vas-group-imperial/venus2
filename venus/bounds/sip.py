@@ -72,7 +72,7 @@ class SIP:
 
         # set bounds using area approximations
         self._set_bounds(slopes, depth=1)
-
+    
         # optimise the relaxation slopes using pgd
         if self.config.SIP.SLOPE_OPTIMISATION is True and \
         self.prob.nn.has_custom_relaxation_slope() is not True \
@@ -88,7 +88,7 @@ class SIP:
             self._set_bounds(slopes=slopes, depth=starting_depth)
             # this should be after _set_bounds as the unstable nodes may change
             # - to refactor
-            self.prob.nn.set_lower_relaxation_slopes(slopes)
+            self.prob.nn.set_lower_relaxation_slopes(slopes[0], slopes[1])
 
         print(self.prob.nn.tail.bounds.lower)
         print(self.prob.nn.tail.bounds.upper)
@@ -117,8 +117,7 @@ class SIP:
             nodes = self.prob.nn.get_node_by_depth(i)
             for j in nodes:
                 delta = self._get_delta_for_node(j, delta_flags)
-                # lower_slopes, upper_slopes = self._get_slopes_for_node(j, slopes)
-                self._set_bounds_for_node(j, slopes, delta_flags)
+                self._set_bounds_for_node(j, slopes, delta)
  
     def _set_bounds_for_node(
         self, node: Node, slopes: tuple=None, delta_flag: torch.Tensor=None
@@ -127,7 +126,8 @@ class SIP:
         # input()
 
         # set interval propagation bounds
-        ia_count = self.ibp.set_bounds(node, slopes, delta_flag)
+        bounds = self.ibp.calc_bounds(node)
+        slopes = self._update_bounds(node, bounds, slopes, delta_flag)
         # print('     ia', ia_count, torch.mean(node.bounds.lower))
         # if node.has_relu_activation():
             # print('   unst', node.to_node[0].get_unstable_count())
@@ -140,7 +140,8 @@ class SIP:
         node.is_non_symbolically_connected() is not True:
             self.os_sip.forward(node, slopes)
             if symb_elg is True:
-                os_count = self.os_sip.set_bounds(node, slopes)
+                bounds =  self.os_sip.calc_bounds(node)
+                slopes = self._update_bounds(node, bounds, slopes, delta_flag)
                 # print('     os', os_count, torch.mean(node.bounds.lower))
  
         # recheck eligibility for symbolic equations
@@ -160,10 +161,93 @@ class SIP:
             else:
                 concretisations = None
 
-            bs_count = self.bs_sip.set_bounds(
+            bounds, flag = self.bs_sip.calc_bounds(
                 node, slopes, concretisations
             )
+            slopes = self._update_bounds(node, bounds, slopes=slopes, out_flag=flag)
+
             # print('     bs', bs_count, torch.mean(node.bounds.lower))
+
+    def _update_bounds(
+        self,
+        node: Node,
+        bounds: Bounds,
+        slopes: tuple=None,
+        delta_flags: torch.Tensor=None,
+        out_flag: torch.Tensor=None
+    ):
+        if node.has_relu_activation():
+            if slopes is not None:
+                # relu node with custom slopes - leave slopes as are but remove
+                # slopes from newly stable nodes.
+                old_fl = node.get_next_relu().get_unstable_flag()
+           
+                if out_flag is None:
+                    bounds = Bounds(
+                        torch.max(node.bounds.lower, bounds.lower),
+                        torch.min(node.bounds.upper, bounds.upper)
+                    )
+
+                    if delta_flags is not None:
+                        bounds.lower[delta_flags[0]] = 0.0
+                        bounds.upper[delta_flags[0]] = 0.0
+        
+                        bounds.lower[delta_flags[1]] = torch.clamp(
+                            bounds.lower[delta_flags[1]], 0.0, math.inf
+                        )
+                        bounds.upper[delta_flags[1]] = torch.clamp(
+                            bounds.upper[delta_flags[1]], 0.0, math.inf
+                        )
+
+                    new_fl = torch.logical_and(
+                        bounds.lower[old_fl]  < 0, bounds.upper[old_fl] > 0
+                    )
+
+                    slopes[0][node.get_next_relu().id] = \
+                        slopes[0][node.get_next_relu().id][new_fl]
+                    slopes[1][node.get_next_relu().id] = \
+                        slopes[1][node.get_next_relu().id][new_fl]
+
+                else:
+                    bounds = Bounds(
+                        torch.max(node.bounds.lower[out_flag], bounds.lower),
+                        torch.min(node.bounds.upper[out_flag], bounds.upper)
+                    )
+
+                    if delta_flags is not None:
+                        bounds.lower[out_flag[delta_flags[0]]] = 0.0
+                        bounds.upper[out_flag[delta_flags[0]]] = 0.0
+        
+                        bounds.lower[out_flag[delta_flags[1]]] = torch.clamp(
+                            bounds.lower[out_flag[delta_flags[1]]], 0.0, math.inf
+                        )
+                        bounds.upper[out_flag[delta_flags[1]]] = torch.clamp(
+                            bounds.upper[out_flag[delta_flags[1]]], 0.0, math.inf
+                        )
+
+                        new_fl = torch.logical_and(
+                            bounds.lower[old_fl]  < 0, bounds.upper[old_fl] > 0
+                        )
+
+                    new_fl = torch.logical_and(
+                        bounds.lower  < 0, bounds.upper > 0
+                    )
+
+                    slopes[0][node.get_next_relu().id] = \
+                        slopes[0][node.get_next_relu().id][new_fl]
+                    slopes[1][node.get_next_relu().id] = \
+                        slopes[1][node.get_next_relu().id][new_fl]
+            
+        if slopes is not None and node.has_relu_activation():
+            node_slopes = [
+                slopes[0][node.get_next_relu().id], slopes[1][node.get_next_relu().id]
+            ]
+        else:
+            node_slopes = None
+
+        node.update_bounds(bounds, node_slopes, out_flag)
+
+        return slopes
 
     def _get_delta_for_node(self, node: Node, delta_flags: torch.Tensor) -> torch.Tensor:
         if delta_flags is not None and node.has_relu_activation() is True:

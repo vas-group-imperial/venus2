@@ -38,7 +38,7 @@ class OSSIP:
         self.lower_eq, self.upper_eq = {}, {}
         self.current_lower_eq, self.current_upper_eq = None, None
     
-    def set_bounds(self, node: Node, slopes: tuple=None) -> int:
+    def calc_bounds(self, node: Node) -> Bounds:
         input_lower = self.prob.spec.input_node.bounds.lower.flatten()
         input_upper = self.prob.spec.input_node.bounds.upper.flatten()
 
@@ -52,27 +52,8 @@ class OSSIP:
         ).reshape(node.output_shape)
         upper = torch.min(node.bounds.upper, upper)
 
-        bounds = Bounds(lower, upper)
+        return Bounds(lower, upper)
 
-        if node.has_relu_activation() and slopes is not None:
-            # relu node with custom slopes - leave slopes as are but remove slopes from
-            # newly stable nodes.
-            old_fl = node.get_next_relu().get_unstable_flag()
-            
-            new_fl = torch.logical_and(
-                bounds.lower[old_fl]  < 0, bounds.upper[old_fl] > 0
-            )
-
-            slopes[0][node.to_node[0].id] = slopes[0][node.to_node[0].id][new_fl]
-            slopes[1][node.to_node[0].id] = slopes[1][node.to_node[0].id][new_fl]
-
-
-        node.update_bounds(bounds)
-
-        if node.has_relu_activation() is True:
-            return node.to_node[0].get_unstable_count()
-
-        return 0
 
     def clear_equations(self):
         max_depth = max([
@@ -108,13 +89,10 @@ class OSSIP:
             upper_eq = lower_eq
 
         else: 
-            if slopes is not None and node.has_fwd_relu_activation() is True:
-                node_slopes = (
-                    slopes[0][node.get_next_relu().id],
-                    slopes[1][node.get_next_relu().id]
-                )
+            if slopes is not None and isinstance(node, Relu):
+                l_slopes, u_slopes = slopes[0][node.id], slopes[1][node.id]
             else:
-                node_slopes = None 
+                l_slopes, u_slopes = None, None
 
             if node.depth == non_linear_starting_depth + 1:
                 for i, j in self.upper_eq.items():
@@ -122,8 +100,8 @@ class OSSIP:
                     and self.prob.nn.node[i] in node.from_node:
                         j = self.lower_eq[i].copy()
                         self.current_upper_eq = j
-            lower_eq = self._int_forward(node, 'lower', node_slopes)
-            upper_eq = self._int_forward(node, 'upper', node_slopes)
+            lower_eq = self._int_forward(node, 'lower', l_slopes)
+            upper_eq = self._int_forward(node, 'upper', u_slopes)
 
         self.current_lower_eq, self.current_upper_eq = lower_eq, upper_eq
         self.lower_eq[node.id], self.upper_eq[node.id] = lower_eq, upper_eq
@@ -239,7 +217,6 @@ class OSSIP:
         lower = self.lower_eq[node.from_node[0].id]
         upper = self.upper_eq[node.from_node[0].id]
         in_equation = lower if bound == 'lower' else upper
-
         if isinstance(node, Relu): 
             equation = self._int_forward_relu(
                 in_equation, node, bound, slopes
@@ -439,7 +416,7 @@ class OSSIP:
         return Equation(matrix, const, node.config)
  
     def _int_forward_relu(
-            self, equation: Equation, node: Node, bound: str, slopes: torch.Tensor=None
+            self, equation: Equation, node: Node, bound: str, slopes: tuple=None
     ):
         slope = equation.get_relu_slope(node.from_node[0], bound, bound, None, slopes)
         matrix = (equation.matrix.T * slope).T

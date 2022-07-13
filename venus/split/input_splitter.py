@@ -122,6 +122,7 @@ class InputSplitter:
             self.config
         )
         prob1.bound_analysis()
+        prob1.detach()
 
         u[dim] = split_point
         prob2 = VerificationProblem(
@@ -133,6 +134,7 @@ class InputSplitter:
             self.config
         )
         prob2.bound_analysis()
+        prob2.detach()
 
         return prob1, prob2
 

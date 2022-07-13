@@ -227,10 +227,10 @@ class Verifier:
         if self.config.SPLITTER.SPLIT_STRATEGY != SplitStrategy.NONE \
         and self.config.SOLVER.MONITOR_SPLIT is False:
             if self.config.SPLITTER.SPLIT_PROC_NUM > 0 and \
-            ( \
-                self.config.SPLITTER.SPLIT_STRATEGY == SplitStrategy.INPUT or \
-                self.config.SPLITTER.SPLIT_STRATEGY == SplitStrategy.INPUT_NODE \
-            ):
+            self.config.SPLITTER.SPLIT_STRATEGY in [
+                SplitStrategy.INPUT,
+                SplitStrategy.INPUT_NODE
+            ]:
                 isplitter = InputSplitter(
                     self.prob,
                     self.prob.stability_ratio,
@@ -241,7 +241,7 @@ class Verifier:
                 )
             else:
                 splits = [self.prob]
-
+                           
             self.split_procs = [
                 self._mp_context.Process(
                     target=run_split_process,

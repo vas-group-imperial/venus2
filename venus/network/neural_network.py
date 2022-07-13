@@ -366,7 +366,9 @@ class NeuralNetwork:
 
         return [lower, upper]
 
-    def set_lower_relaxation_slopes(self, slopes: tuple):
+    def set_lower_relaxation_slopes(
+            self, lower_slopes: torch.Tensor, upper_slopes: torch.Tensor
+    ):
         """
         Sets the lower relaxation slopes of the relu nodes.
 
@@ -375,5 +377,7 @@ class NeuralNetwork:
             slopes:
                 A dictionary of the lower relaxation slopes of the relu nodes.
         """
-        for i in lower:
-            self.node[i].set_lower_relaxation_slope(slopes[0][i], slopes[1][i])
+        for i in lower_slopes:
+            self.node[i].set_lower_relaxation_slope(
+                lower_slopes[i], upper_slopes[i]
+            )

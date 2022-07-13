@@ -37,9 +37,7 @@ class IBP:
         if IBP.logger is None and config.LOGGER.LOGFILE is not None:
             IBP.logger = get_logger(__name__, config.LOGGER.LOGFILE)
         
-    def set_bounds(
-        self, node: Node, slopes: torch.Tensor=None, delta_flags: torch.Tensor=None
-    ) -> int:
+    def calc_bounds(self, node: Node) -> Bounds:
         if type(node) in [
                 Relu, MaxPool, AveragePool, Slice, Unsqueeze, Reshape, Flatten, Pad,
                 ReduceSum, Sigmoid
@@ -67,19 +65,11 @@ class IBP:
         else:
             raise TypeError(f"IA Bounds computation for {type(node)} is not supported")
         
-        if delta_flags is not None:
-            lower, upper = self._update_deltas(lower, upper, delta_flags)
-
         bounds = Bounds(
             lower.reshape(node.output_shape), upper.reshape(node.output_shape)
         )
 
-        self._set_bounds(node, bounds, slopes)
-        
-        if node.has_relu_activation() is True:
-            return node.to_node[0].get_unstable_count()
-
-        return 0
+        return bounds
 
     def _calc_non_gemm_bounds(self, node: Node):
         inp = node.from_node[0].bounds
@@ -144,39 +134,4 @@ class IBP:
 
         return lower, upper
 
-    def _update_deltas(
-        self, lower: torch.Tensor, upper: torch.Tensor, delta_flags: torch.Tensor
-    ):
-        lower[delta_flags[0]] = 0.0
-        upper[delta_flags[0]] = 0.0
-        
-        lower[delta_flags[1]] = np.clip(
-            lower[delta_flags[1]], 0.0, math.inf
-        )
-        upper[delta_flags[1]] = np.clip(
-            upper[delta_flags[1]], 0.0, math.inf
-        )
 
-        return lower, upper
-
-    def _set_bounds(
-        self, node: Node, bounds: Bounds, slopes: tuple=None
-    ):
-        if node.has_relu_activation() and slopes is not None:
-            # relu node with custom slopes - leave slopes as are but remove slopes from
-            # newly stable nodes.
-            old_fl = node.get_next_relu().get_unstable_flag()
-            
-            bounds = Bounds(
-                torch.max(node.bounds.lower, bounds.lower),
-                torch.min(node.bounds.upper, bounds.upper)
-            )
-
-            new_fl = torch.logical_and(
-                bounds.lower[old_fl]  < 0, bounds.upper[old_fl] > 0
-            )
-
-            slopes[0][node.to_node[0].id] = slopes[0][node.to_node[0].id][new_fl]
-            slopes[1][node.to_node[0].id] = slopes[1][node.to_node[0].id][new_fl]
-
-        node.update_bounds(bounds)

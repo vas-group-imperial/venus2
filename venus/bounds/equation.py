@@ -214,7 +214,7 @@ class Equation():
                     slopes = node.to_node[0].get_lower_relaxation_slope()
                     sl[idxs] = slopes[0] if bound == 'lower' else slopes[1]
                 else:
-                    sl[idxs] = slopes[0] if bound == 'lower' else slopes[1]
+                    sl[idxs] = slopes
 
             elif slope_type == 'upper':
                 sl = torch.zeros(

@@ -1,5 +1,5 @@
 # ************
-    # File: config.py
+# File: config.py
 # Top contributors (to current version): 
 # 	Panagiotis Kouvaros (panagiotis.kouvaros@gmail.com)
 # This file is part of the Venus project.
@@ -164,8 +164,8 @@ class Config:
         self._user_set_params = set()
         # self.BENCHMARK = 'nn4sys'
         # self.BENCHMARK = 'carvana'
-        # self.BENCHMARK = 'mnistfc'
-        self.BENCHMARK = 'cifar_biasfield'
+        self.BENCHMARK = 'mnistfc'
+        # self.BENCHMARK = 'cifar_biasfield'
 
     def set_param(self, param, value):
         if value is None: return
@@ -349,7 +349,7 @@ class Config:
                 self.SOLVER.BRANCH_THRESHOLD = 300
             self.VERIFIER.COMPLETE = True
             self.VERIFIER.PGD = True
-            self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.NODE
+            self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.INPUT
             self.SIP.ONE_STEP_SYMBOLIC = True
             self.SIP.EQ_CONCRETISATION = False
             self.SIP.SIMPLIFY_FORMULA = True
@@ -359,7 +359,7 @@ class Config:
             self.SOLVER.INTER_DEP_CONSTRS = True
             self.VERIFIER.COMPLETE = True
             self.VERIFIER.PGD = True
-            self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.INPUT
+            self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.NONE
             self.SIP.ONE_STEP_SYMBOLIC = True
             self.SIP.EQ_CONCRETISATION = True
             self.SIP.SLOPE_OPTIMISATION = True

@@ -308,6 +308,6 @@ class Splitter:
             bool expresssing whether or not there are currently running
             splitting processs
         """
-        return Splitter.process_count > 0 
+        return Splitter.process_count > 0
         
 
