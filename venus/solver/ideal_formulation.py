@@ -147,10 +147,10 @@ class IdealFormulation(Cuts):
             else:
                 s2 += node.edge_weight(unit, p_unit) * u * _delta[unit]
            
-            if node.has_bias() is True:
-                p = node.get_bias(unit) * _delta[unit]
-            else:
-                p = 0
+        if node.has_bias() is True:
+            p = node.get_bias(unit) * _delta[unit]
+        else:
+            p = 0
         
         return bool(_out[unit] > p + s1 + s2)
 

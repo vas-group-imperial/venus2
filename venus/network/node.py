@@ -126,7 +126,31 @@ class Node:
         self.out_vars = torch.empty(0)
         self.delta_vars = torch.empty(0)
 
-    def get_milp_var_indices(self, var_type: str='out'):
+    def get_milp_var_indices(self):
+        """
+        Returns the starting and ending indices of the milp variables encoding
+        the node.
+
+        Arguments:
+            var_type: either 'out' for output variables or 'delta' for binary
+            variables.
+        """
+        return self._milp_var_indices
+
+    def set_milp_var_indices(
+            self, out_start=None, out_end=None, delta_start=None, delta_end=None
+    ):
+        """
+        Returns the starting and ending indices of the milp variables encoding
+        the node.
+
+        Arguments:
+            var_type: either 'out' for output variables or 'delta' for binary
+            variables.
+        """
+        self._milp_var_indices = (out_start, out_end, delta_start, delta_end)
+
+    def __get_milp_var_indices(self, var_type: str='out'):
         """
         Returns the starting and ending indices of the milp variables encoding
         the node.
@@ -139,7 +163,7 @@ class Node:
             return self._milp_var_indices
 
         if len(self.from_node) > 0:
-            start = self.from_node[-1].get_milp_var_indices()[0]
+            start = self.from_node[0].get_milp_var_indices()[0]
         else:
             start = 0
         end = start + self.output_size
@@ -449,11 +473,11 @@ class Node:
         self.bounds.detach()
 
     def cache_bounds(self):
-        self._cache_bounds = self.bounds.copy()
+        self.cache_bounds = self.bounds.clone()
 
     def use_cache_bounds(self):
-        self.bounds = self._cache_bounds.copy()
-        self._cache_bounds = None
+        self.bounds = self.cache_bounds.clone()
+        self.cache_bounds = None
         if self.has_relu_activation():
             self.to_node[0].reset_state_flags()
 
@@ -494,7 +518,7 @@ class Constant(Node):
             id=self.id
         )
 
-    def get_milp_var_indices(self, var_type: str):
+    def __get_milp_var_indices(self, var_type: str):
         """
         Returns the starting and ending indices of the milp variables encoding
         the node.
@@ -3003,6 +3027,17 @@ class Relu(Node):
 
         return self.unstable_flag
 
+    def get_cache_unstable_flag(self) -> torch.Tensor:
+        """
+        Returns an array of instability statuses for each ReLU node.
+        """
+        return torch.logical_and(
+            self.from_node[0].cache_bounds.lower < 0,
+            self.from_node[0].cache_bounds.upper > 0
+        )
+
+        return self.unstable_flag
+
     def get_unstable_indices(self) -> torch.Tensor:
         """
         Returns an array of indices of unstable ReLU units.
@@ -3139,7 +3174,7 @@ class Relu(Node):
         """
         return self._custom_relaxation_slope is True
 
-    def get_milp_var_indices(self, var_type: str='all'):
+    def __get_milp_var_indices(self, var_type: str='all'):
         """
         Returns the starting and ending indices of the milp variables encoding
         the node.
@@ -3150,8 +3185,8 @@ class Relu(Node):
         """
         if self._milp_var_indices is None:
             if len(self.from_node) > 0:
-                start_out = self.from_node[-1].get_milp_var_indices()[0]
-                start_delta = self.from_node[-1].get_milp_var_indices()[0] + self.output_size
+                start_out = self.from_node[0].get_milp_var_indices()[0]
+                start_delta = self.from_node[0].get_milp_var_indices()[0] + self.output_size
             else:
                 start_out = 0
                 start_delta = self.output_size 
@@ -3252,7 +3287,7 @@ class Reshape(Node):
 
         return output
 
-    def get_milp_var_indices(self, var_type: str):
+    def __get_milp_var_indices(self, var_type: str):
         """
         Returns the starting and ending indices of the milp variables encoding
         the node.
@@ -3330,7 +3365,7 @@ class Flatten(Node):
             id=self.id
         )
 
-    def get_milp_var_indices(self, var_type: str='out'):
+    def __get_milp_var_indices(self, var_type: str='out'):
         """
         Returns the starting and ending indices of the milp variables encoding
         the node.
@@ -3339,7 +3374,7 @@ class Flatten(Node):
             var_type: either 'out' for output variables or 'delta' for binary
             variables.
         """
-        return self.from_node[-1].get_milp_var_indices()
+        return self.from_node[0].get_milp_var_indices()
 
     def forward(self, inp: torch.Tensor=None, save_output=False) -> torch.Tensor:
         """
@@ -3700,7 +3735,7 @@ class Add(Node):
             id=self.id
         )
 
-    def get_milp_var_indices(self, var_type: str):
+    def __get_milp_var_indices(self, var_type: str):
         """
         Returns the starting and ending indices of the milp variables encoding
         the node.
@@ -4087,7 +4122,7 @@ class Slice(Node):
         super().set_batch_size(size)
         self.slices[0] = slice(0, size, 1)
                     
-    def get_milp_var_indices(self, var_type: str):
+    def __get_milp_var_indices(self, var_type: str):
         """
         Returns the starting and ending indices of the milp variables encoding
         the node.
@@ -4284,7 +4319,7 @@ class Unsqueeze(Node):
             id=self.id
         )
 
-    def get_milp_var_indices(self, var_type: str):
+    def __get_milp_var_indices(self, var_type: str):
         """
         Returns the starting and ending indices of the milp variables encoding
         the node.
@@ -4465,7 +4500,7 @@ class Concat(Node):
         self.input_size = np.prod(self.input_shape)
         self.output_size = np.prod(self.output_shape)
 
-    def get_milp_var_indices(self, var_type: str):
+    def __get_milp_var_indices(self, var_type: str):
         """
         Returns the starting and ending indices of the milp variables encoding
         the node.

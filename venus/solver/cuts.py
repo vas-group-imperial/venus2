@@ -68,21 +68,21 @@ class Cuts:
         Returns:
             Pair of tensor of variables and tensor of their values.
         """
-        start, end = node.get_milp_var_indices(var_type)
-        delta_temp = self.gmodel._vars[start: end]
+        out_start, out_end, delta_start, delta_end = node.get_milp_var_indices()
+
         if isinstance(node, Relu) and var_type=='delta':
-            delta_temp = node.delta_vars
+            delta_temp = self.gmodel._vars[delta_start: delta_end]
             _delta = np.empty(node.output_size)     
-            _delta[node.get_unstable_flag()] = np.asarray(
+            _delta[node.get_cache_unstable_flag().flatten()] = np.asarray(
                 self.gmodel.cbGetNodeRel(delta_temp)
             )
             _delta = _delta.reshape(node.output_shape)
             delta = np.empty(node.output_size, dtype=Var)
-            delta[node.get_unstable_flag()] = np.asarray(delta_temp)
+            delta[node.get_unstable_flag().flatten()] = np.asarray(delta_temp)
             delta = delta.reshape(node.output_shape)
 
         else:
-            delta_temp = node.out_vars
+            delta_temp = self.gmodel._vars[out_start: out_end]
             _delta = np.asarray(
                 self.gmodel.cbGetNodeRel(delta_temp)
             ).reshape(node.output_shape)

@@ -54,7 +54,7 @@ class MILPEncoder:
         """
         start = timer()
 
-        self.test = True
+        self._idx_count = 0
 
         with gurobipy.Env(empty=True) as env:
             env.setParam('OutputFlag', 0)
@@ -160,6 +160,11 @@ class MILPEncoder:
                         (node.output_size,), lb=-GRB.INFINITY, ub=GRB.INFINITY
                     ).values()
                 ).reshape(node.output_shape)
+
+        new_idx = self._idx_count + node.output_size.item()
+        node.set_milp_var_indices(out_start=self._idx_count, out_end=new_idx)
+        self._idx_count = new_idx
+        
  
     def add_relu_delta_vars(self, node: Relu, gmodel: Model):
         """
@@ -184,6 +189,10 @@ class MILPEncoder:
                 ).values()
             )
         node.delta_vars = node.delta_vars.reshape(node.output_shape)
+
+        new_idx = self._idx_count + node.get_unstable_count()
+        node.set_milp_var_indices(delta_start=self._idx_count, delta_end=new_idx)
+        self._idx_count = new_idx
 
     def add_node_constrs(self, gmodel, linear_approx: bool=False):
         """
