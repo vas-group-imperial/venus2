@@ -76,12 +76,15 @@ class Splitter:
                 time.sleep(self.config.SPLITTER.SLEEPING_INTERVAL)
             else:
                 prob  = self.split_queue.pop()
-                split_method = self._select_split_method(prob)
-                subprobs = split_method(prob)
-                if len(subprobs) > 0:
-                    self.process_subprobs(subprobs)
-                else:
+                if prob.depth > self.config.SPLITTER.MAX_SPLIT_DEPTH:
                     self.add_to_job_queue(prob)
+                else:
+                    split_method = self._select_split_method(prob)
+                    subprobs = split_method(prob)
+                    if len(subprobs) > 0:
+                        self.process_subprobs(subprobs)
+                    else:
+                        self.add_to_job_queue(prob)
 
     def _select_split_method(self, prob=None):
         """

@@ -47,8 +47,12 @@ class InputSplitter:
         Returns:
             list of VerificationProblem
         """
-        if self.prob.stability_ratio < self.config.SPLITTER.STABILITY_RATIO_CUTOFF:
-            subprobs = self.soft_split()
+        if self.prob.stability_ratio <= self.config.SPLITTER.STABILITY_RATIO_CUTOFF:
+            try:
+                subprobs = self.soft_split()
+            except Exception as error:
+                return []
+
             worth = self.prob.worth_split(subprobs, self.init_st_ratio)
             if worth is True:
                 return subprobs
@@ -78,9 +82,11 @@ class InputSplitter:
             # If the number of input dimensions is not big, choose the best
             # dimension to split
             for dim in prob.spec.input_node.get_outputs():
-                prob1, prob2 = self.split_dimension(prob, dim)
+                try:
+                    prob1, prob2 = self.split_dimension(prob, dim)
+                except Exception as error:
+                    raise error
                 ratio = (prob1.stability_ratio + prob2.stability_ratio) / 2
-                print(ratio, best_ratio)
                 if ratio >= best_ratio:
                     best_ratio = ratio
                     best_prob1 = prob1
@@ -88,7 +94,10 @@ class InputSplitter:
         else:
             # Otherwise split randomly
             dim = random.choice(prob.spec.input_node.get_outputs())
-            best_prob1, best_prob2 =  self.split_dimension(prob, dim)
+            try:
+                best_prob1, best_prob2 =  self.split_dimension(prob, dim)
+            except Exception as error:
+                raise error
 
         return [best_prob1, best_prob2]
 
@@ -122,8 +131,11 @@ class InputSplitter:
             prob.depth + 1,
             self.config
         )
-        prob1.bound_analysis()
-        prob1.detach()
+        try:
+            prob1.bound_analysis()
+            prob1.detach()
+        except Exception as error:
+            return None, None
 
         u[dim] = split_point
         prob2 = VerificationProblem(
@@ -134,8 +146,11 @@ class InputSplitter:
             prob.depth + 1,
             self.config
         )
-        prob2.bound_analysis()
-        prob2.detach()
+        try:
+            prob2.bound_analysis()
+            prob2.detach()
+        except Exception as error:
+            return None, None
 
         return prob1, prob2
 
@@ -163,9 +178,35 @@ class InputSplitter:
         while split_depth < split_depth_cutoff:
             subprobs = []
             for p in probs:
-                subprobs.extend(self.soft_split(p))
+                splits = []
+                try:
+                    splits = self.soft_split(p)
+                except Exception as error:
+                    splits = []
+                subprobs.extend(splits)
             split_depth += 1
             probs = subprobs
 
         return probs
 
+    def worth_split(self, subprobs):
+        pscore0 = self.score(self.init_st_ratio)
+        pscore1 = subprobs[0].score()
+        pscore2 = subprobs[1].score()
+
+        _max = max(pscore1, pscore2)
+        _min = min(pscore1, pscore2) 
+
+        if pscore0 >= _max:
+            return False
+        elif _min > pscore0:
+            return True
+        elif  (pscore1 + pscore2)/2 > pscore0:
+            return True
+        else:
+            return False
+ 
+    def score(self, prob):
+        
+        return (prob.stability_ratio - self.init_st_ratio)
+ 

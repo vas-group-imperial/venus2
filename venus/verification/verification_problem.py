@@ -93,26 +93,6 @@ class VerificationProblem(object):
 
         return sip
 
-    def score(self, initial_fixed_ratio):
-        return (self.stability_ratio - initial_fixed_ratio) 
-
-    def worth_split(self, subprobs, initial_fixed_ratio):
-        pscore0 = self.score(initial_fixed_ratio)
-        pscore1 = subprobs[0].score(initial_fixed_ratio)
-        pscore2 = subprobs[1].score(initial_fixed_ratio)
-
-        _max = max(pscore1, pscore2)
-        _min = min(pscore1, pscore2) 
-
-        if pscore0 >= _max:
-            return False
-        elif _min > pscore0:
-            return True
-        elif  (pscore1 + pscore2)/2 > pscore0:
-            return True
-        else:
-            return False
- 
     def check_bound_tightness(self, subprobs):
         out0 = self.nn.layers[-1]
         for sp in subprobs:

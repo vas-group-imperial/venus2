@@ -100,7 +100,7 @@ class Splitter():
     SLEEPING_INTERVAL: int = 3
     # the number of input dimensions still considered to be small
     # so that the best split can be chosen exhaustively
-    SMALL_N_INPUT_DIMENSIONS: int = 8
+    SMALL_N_INPUT_DIMENSIONS: int = 16
     # splitting strategy
     SPLIT_STRATEGY: SplitStrategy = SplitStrategy.NONE
     # the stability ratio weight for computing the difficulty of a problem
@@ -112,7 +112,7 @@ class Splitter():
     # number of the parameter
     SPLIT_PROC_NUM: int = 2
     # macimum splitting depth
-    MAX_SPLIT_DEPTH: int = 1000
+    MAX_SPLIT_DEPTH: int = 7
 
 class SIP():
 
@@ -368,7 +368,7 @@ class Config:
             self.SIP.ONE_STEP_SYMBOLIC = True
             self.SIP.EQ_CONCRETISATION = True
             self.SIP.SLOPE_OPTIMISATION = True
-            self.SIP.STABILITY_RATIO_CUTOFF = 0.95
+            self.SPLITTER.STABILITY_RATIO_CUTOFF = 0.95
             self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.INPUT
 
         elif self.BENCHMARK == 'reach_prob_density':
@@ -384,7 +384,7 @@ class Config:
             self.SIP.EQ_CONCRETISATION = True
             self.SIP.SIMPLIFY_FORMULA = True
             self.SIP.SLOPE_OPTIMISATION = True
-            self.SIP.STABILITY_RATIO_CUTOFF = 0.75
+            self.SPLITTER.STABILITY_RATIO_CUTOFF = 0.75
 
         elif self.BENCHMARK == 'rl_benchmarks':
             self.SOLVER.IDEAL_CUTS = True
@@ -406,7 +406,7 @@ class Config:
             self.SIP.EQ_CONCRETISATION = True
             self.SIP.SIMPLIFY_FORMULA = True
             self.SIP.SLOPE_OPTIMISATION = True
-            self.SIP.STABILITY_RATIO_CUTOFF = 0.75
+            self.SPLITTER.STABILITY_RATIO_CUTOFF = 0.75
 
         elif self.BENCHMARK in ['collins_rul_cnn', 'oval']:
             self.SOLVER.IDEAL_CUTS = True
@@ -452,5 +452,5 @@ class Config:
             self.SIP.EQ_CONCRETISATION = True
             self.SIP.SIMPLIFY_FORMULA = True
             self.SIP.SLOPE_OPTIMISATION = True
-            self.SIP.STABILITY_RATIO_CUTOFF = 0.75
+            self.SPLITTER.STABILITY_RATIO_CUTOFF = 0.75
 
