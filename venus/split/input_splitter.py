@@ -51,9 +51,9 @@ class InputSplitter:
             try:
                 subprobs = self.soft_split()
             except Exception as error:
-                return []
+                raise error
 
-            worth = self.prob.worth_split(subprobs, self.init_st_ratio)
+            worth = self.worth_split(subprobs)
             if worth is True:
                 return subprobs
 
@@ -135,7 +135,7 @@ class InputSplitter:
             prob1.bound_analysis()
             prob1.detach()
         except Exception as error:
-            return None, None
+            raise error
 
         u[dim] = split_point
         prob2 = VerificationProblem(
@@ -150,7 +150,7 @@ class InputSplitter:
             prob2.bound_analysis()
             prob2.detach()
         except Exception as error:
-            return None, None
+            raise error
 
         return prob1, prob2
 
@@ -190,9 +190,9 @@ class InputSplitter:
         return probs
 
     def worth_split(self, subprobs):
-        pscore0 = self.score(self.init_st_ratio)
-        pscore1 = subprobs[0].score()
-        pscore2 = subprobs[1].score()
+        pscore0 = self.score(self.prob)
+        pscore1 = self.score(subprobs[0])
+        pscore2 = self.score(subprobs[1])
 
         _max = max(pscore1, pscore2)
         _min = min(pscore1, pscore2) 
@@ -206,7 +206,6 @@ class InputSplitter:
         else:
             return False
  
-    def score(self, prob):
-        
+    def score(self, prob):        
         return (prob.stability_ratio - self.init_st_ratio)
  

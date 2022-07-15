@@ -203,7 +203,12 @@ class Splitter:
             self.config
         )
 
-        subprobs = isplitter.split()
+        try:
+            subprobs = isplitter.split()
+        except Exception as error:
+            Splitter.logger.info(f"{str(error)}")
+            self.add_to_split_queue(prob)
+            return []
 
         Splitter.logger.info(f"Finished input splitting - {len(subprobs)} subproblems")
         if len(subprobs) > 0:
