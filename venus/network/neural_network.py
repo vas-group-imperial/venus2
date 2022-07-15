@@ -88,14 +88,14 @@ class NeuralNetwork:
 
         nn.head =  [nn.node[i.id] for i in self.head]
         nn.tail = nn.node[self.tail.id]
-
-        for i in self.node:
+ 
+        for i, j in self.node.items():
             nn.node[i].from_node = [
-                nn.node[j.id] 
-                for j in self.node[i].from_node 
-                if isinstance(j, Input) is not True
+                nn.node[k.id]
+                for k in j.from_node
+                if isinstance(k, Input) is not True
             ]
-            nn.node[i].to_node = [nn.node[j.id] for j in self.node[i].to_node]
+            nn.node[i].to_node = [nn.node[k.id] for k in j.to_node]
 
         nn.input_simplified = self.input_simplified
 

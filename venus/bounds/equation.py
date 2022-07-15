@@ -208,10 +208,10 @@ class Equation():
                     dtype=self.config.PRECISION,
                     device=self.config.DEVICE
                 )
-                sl[node.to_node[0].get_inactive_flag().flatten()] = 0.0
-                idxs = node.to_node[0].get_unstable_flag().flatten()
+                sl[node.get_next_relu().get_inactive_flag().flatten()] = 0.0
+                idxs = node.get_next_relu().get_unstable_flag().flatten()
                 if slopes is None:
-                    slopes = node.to_node[0].get_lower_relaxation_slope()
+                    slopes = node.get_next_relu().get_lower_relaxation_slope()
                     sl[idxs] = slopes[0] if bound == 'lower' else slopes[1]
                 else:
                     sl[idxs] = slopes
@@ -222,11 +222,11 @@ class Equation():
                     dtype=self.config.PRECISION,
                     device=self.config.DEVICE
                 )
-                idxs = node.to_node[0].get_unstable_flag().flatten()
+                idxs = node.get_next_relu().get_unstable_flag().flatten()
                 lower = node.bounds.lower.flatten()[idxs] 
                 upper = node.bounds.upper.flatten()[idxs]
                 sl[idxs] =  upper / (upper - lower)
-                sl[node.to_node[0].get_active_flag().flatten()] = 1
+                sl[node.get_next_relu().get_active_flag().flatten()] = 1
 
             else:
                 raise Exception(f"Slope type {slope_type} is not recognised.")
@@ -296,7 +296,7 @@ class Equation():
                 relu_const = const * relu_slope
 
             elif const_type == 'upper':
-                idxs = node.to_node[0].get_unstable_flag().flatten()
+                idxs = node.get_next_relu().get_unstable_flag().flatten()
                 lower  = node.bounds.lower.flatten()[idxs]
                 relu_const = const * relu_slope
                 relu_const[idxs]  -= relu_slope[idxs] * lower

@@ -75,10 +75,10 @@ class ONNXParser:
         head = [nodes[i] for i in nodes if len(nodes[i].from_node) == 0]
         [tail] = [nodes[i] for i in nodes if len(nodes[i].to_node) == 0]
         self.update_depth(head)
+
         if self.config.BENCHMARK == 'carvana':
             for _, i in nodes.items():
                 i.depth -= 1
-
 
         return head, tail, nodes
 
@@ -416,21 +416,22 @@ class ONNXParser:
 
         if const0 is not None and const1 is not None:
             const = const0 - const1
-            input_shape = None
+            node = Constant([], const, self.config)
 
         elif const0 is not None and const1 is None:
-            const = const0
             input_shape = venus_nodes[node.input[1]].output_shape
+            node = Sub([], [], input_shape, self.config, const=const0)
 
         elif const1 is not None and const0 is None:
-            const = const1
             input_shape = venus_nodes[node.input[0]].output_shape
+            node = Sub([], [], input_shape, self.config, const=const1)
 
         else:
             const = None
             input_shape = venus_nodes[node.input[0]].output_shape
+            node = Sub([], [], input_shape, self.config)
 
-        return Sub([], [], input_shape, self.config, const=const)
+        return  node
 
     def parse_add(self, node: NodeProto, venus_nodes: list, init: list) -> Node:
         const0, const1 = None, None
@@ -441,21 +442,22 @@ class ONNXParser:
 
         if const0 is not None and const1 is not None:
             const = const0 + const1
-            input_shape = None
+            node = Constant([], const, self.config)
 
         elif const0 is not None and const1 is None:
-            const = const0
             input_shape = venus_nodes[node.input[1]].output_shape
+            node = Add([], [], input_shape, self.config, const=const0)
 
         elif const1 is not None and const0 is None:
-            const = const1
             input_shape = venus_nodes[node.input[0]].output_shape
+            node = Add([], [], input_shape, self.config, const=const1)
 
         else:
             const = None
             input_shape = venus_nodes[node.input[0]].output_shape
+            node = Add([], [], input_shape, self.config)
 
-        return Add([], [], input_shape, self.config, const=const)
+        return node
 
     def parse_div(
         self, node: NodeProto, input_shape: tuple, venus_nodes: list, init: list
@@ -750,6 +752,8 @@ class ONNXParser:
             data = torch.cat(data, axis=axis)
             return Constant([], data, self.config)
 
+        print(input_shapes, output_shape, axis)
+        input()
         return Concat([], [], input_shapes, output_shape, axis, self.config)
 
     def parse_pad(

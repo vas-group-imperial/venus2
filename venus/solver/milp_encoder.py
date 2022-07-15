@@ -42,6 +42,8 @@ class MILPEncoder:
         if MILPEncoder.logger is None:
             MILPEncoder.logger = get_logger(__name__, config.LOGGER.LOGFILE)
 
+        self._idx_count = 0
+
     def encode(self, linear_approx=False):
         """
         Builds a Gurobi Model encoding the  verification problem.
@@ -53,8 +55,6 @@ class MILPEncoder:
             Gurobi Model.
         """
         start = timer()
-
-        self._idx_count = 0
 
         with gurobipy.Env(empty=True) as env:
             env.setParam('OutputFlag', 0)
@@ -106,7 +106,11 @@ class MILPEncoder:
             nodes = self.prob.nn.get_node_by_depth(i)
             for j in nodes:
                 if j.has_relu_activation() is True:
-                    continue
+                    p_idx = j.from_node[-1].get_milp_var_indices()
+                    if p_idx[2] is None:
+                        j.set_milp_var_indices(out_start=p_idx[0], out_end=p_idx[1])
+                    else:
+                        j.set_milp_var_indices(out_start=p_idx[2], out_end=p_idx[3])
 
                 elif isinstance(j, Relu):
                     self.add_output_vars(j, gmodel)
@@ -115,6 +119,11 @@ class MILPEncoder:
 
                 elif type(j) in [Flatten, Slice, Unsqueeze, Reshape]:
                     j.out_vars = j.forward(j.from_node[0].out_vars)
+                    p_idx = j.from_node[0].get_milp_var_indices()
+                    if p_idx[2] is None:
+                        j.set_milp_var_indices(out_start=p_idx[0], out_end=p_idx[1])
+                    else:
+                        j.set_milp_var_indices(out_start=p_idx[2], out_end=p_idx[3])
 
                 elif isinstance(j, Concat):
                     j.out_vars = j.forward([k.out_vars for k in j.from_node])
@@ -160,7 +169,7 @@ class MILPEncoder:
                         (node.output_size,), lb=-GRB.INFINITY, ub=GRB.INFINITY
                     ).values()
                 ).reshape(node.output_shape)
-
+        
         new_idx = self._idx_count + node.output_size.item()
         node.set_milp_var_indices(out_start=self._idx_count, out_end=new_idx)
         self._idx_count = new_idx
@@ -190,7 +199,7 @@ class MILPEncoder:
             )
         node.delta_vars = node.delta_vars.reshape(node.output_shape)
 
-        new_idx = self._idx_count + node.get_unstable_count()
+        new_idx = self._idx_count + node.get_unstable_count().item()
         node.set_milp_var_indices(delta_start=self._idx_count, delta_end=new_idx)
         self._idx_count = new_idx
 
@@ -244,7 +253,7 @@ class MILPEncoder:
                 Gurobi model.
         """
         if type(node) not in [Gemm, Conv, ConvTranspose, MatMul, Sub, Add, BatchNormalization]:
-            raise TypeError(f"Cannot compute sub onstraints for {type(node)} nodes.")
+            raise TypeError(f"Cannot compute affine onstraints for {type(node)} nodes.")
 
         if type(node) in ['Sub', 'Add'] and node.const is not None:
             output = node.forward(
@@ -270,8 +279,16 @@ class MILPEncoder:
                 Gurobi model.
         """
         assert(isinstance(node, Relu)), "Cannot compute relu constraints for non-relu nodes."
-         
-        inp = node.from_node[0].forward(node.from_node[0].from_node[0].out_vars)
+        
+        if type(node.from_node[0]) in [Add, Sub] and \
+        node.from_node[0].const is None:
+            inp = node.from_node[0].forward(
+                node.from_node[0].from_node[0].out_vars,
+                node.from_node[0].from_node[1].out_vars
+            )
+        else:
+            inp = node.from_node[0].forward(node.from_node[0].from_node[0].out_vars)
+
         out, delta = node.out_vars, node.delta_vars
         l, u = node.from_node[0].bounds.lower, node.from_node[0].bounds.upper
 

@@ -15,7 +15,7 @@ from venus.bounds.os_sip import OSSIP
 from venus.bounds.equation import Equation
 from venus.common.logger import get_logger
 from venus.common.configuration import Config
-from venus.specification.formula import  * 
+from venus.specification.formula import  *
 
 torch.set_num_threads(1)
 
@@ -36,7 +36,7 @@ class BSSIP:
         self.config = config
         if BSSIP.logger is None and config.LOGGER.LOGFILE is not None:
             BSSIP.logger = get_logger(__name__, config.LOGGER.LOGFILE)
- 
+
 
     def calc_bounds(
         self, node: Node, slopes: tuple=None, os_sip: OSSIP=None
@@ -174,9 +174,15 @@ class BSSIP:
         if bound not in ['lower', 'upper']:
             raise ValueError("Bound type {bound} not recognised.")
 
-        equation, i_flag = self._back_substitution(
-            equation, node, node, bound, i_flag, slopes, os_sip
-        )
+
+        if node.is_sip_branching_node() is True:
+            equation, i_flag = self._back_substitution_branching(
+                equation, node, node, bound, i_flag, slopes, os_sip
+            )
+        else:
+            equation, i_flag = self._back_substitution_linear(
+                equation, node, node.from_node[0], bound, i_flag, slopes, os_sip
+            )
 
         if equation is None:
             return None, i_flag
@@ -207,21 +213,31 @@ class BSSIP:
         bound: str,
         i_flag: torch.Tensor=None,
         slopes: dict=None,
-        os_sip: OSSIP=None
+        os_sip: OSSIP=None,
+        branch_node: Node=None
     ):
         """
         Helper function for back_substitution
         """
-        if cur_node.is_sip_branching_node() is True:
-            equation, i_flag = self._back_substitution_branching(
-                equation, base_node, cur_node, bound, i_flag, slopes, os_sip
-            )
-        else:
-            equation, i_flag = self._back_substitution_linear(
-                equation, base_node, cur_node.from_node[0], bound, i_flag, slopes, os_sip
-            )
 
-        return equation, i_flag
+        if cur_node.branches_to_node(branch_node) is True:
+            return equation, i_flag
+
+        if cur_node.is_sip_branching_node() is True:
+            bs_method = self._back_substitution_branching
+        else:
+            bs_method = self._back_substitution_linear
+
+        return bs_method(
+            equation,
+            base_node,
+            cur_node,
+            bound,
+            i_flag=i_flag,
+            slopes=slopes,
+            os_sip=os_sip,
+            branch_node=branch_node
+        )
 
     def _back_substitution_linear(
         self,
@@ -231,13 +247,12 @@ class BSSIP:
         bound: str,
         i_flag: torch.Tensor=None,
         slopes: dict=None,
-        os_sip: OSSIP=None
+        os_sip: OSSIP=None,
+        branch_node: Node=None
     ):
         """
         Helper function for back_substitution
         """
-        # if base_node.id == 21:
-            # print('linear', cur_node,  cur_node.id, cur_node.output_shape, equation.matrix.shape)
         if isinstance(cur_node, Input):
             return  equation, i_flag
 
@@ -254,10 +269,20 @@ class BSSIP:
 
             if non_linear_cond is True:
                 equation = self._int_backward(
-                    equation, cur_node, bound, in_flag, out_flag, slopes
+                    equation,
+                    cur_node,
+                    bound,
+                    out_flag=out_flag,
+                    in_flag=in_flag,
+                    slopes=slopes
                 )
             else:
-                equation = self._backward(equation, cur_node, in_flag, out_flag)
+                equation = self._backward(
+                    equation,
+                    cur_node,
+                    out_flag=out_flag, 
+                    in_flag=in_flag
+                )
  
             tranposed = True
 
@@ -267,20 +292,18 @@ class BSSIP:
             )
             if torch.sum(i_flag) == 0:
                 return None, i_flag
-        
-        if cur_node.from_node[0].is_sip_branching_node() is True:
-            equation, i_flag = self._back_substitution_branching(
-                equation, base_node, cur_node.from_node[0], bound, i_flag, slopes, os_sip
-            )
-        else:
-            equation, i_flag = self._back_substitution_linear(
-                equation, base_node, cur_node.from_node[0], bound, i_flag, slopes, os_sip
-            )
 
-        return equation, i_flag
-        # return self._back_substitution(
-            # equation, base_node, cur_node, bound, i_flag, slopes, os_sip
-        # )
+        return self._back_substitution(
+            equation,
+            base_node,
+            cur_node.from_node[0],
+            bound,
+            i_flag=i_flag,
+            slopes=slopes,
+            os_sip=os_sip,
+            branch_node=branch_node
+        )
+
 
     def _back_substitution_branching(
         self,
@@ -290,65 +313,69 @@ class BSSIP:
         bound: str,
         i_flag: torch.Tensor=None,
         slopes: torch.Tensor=None,
-        os_sip: OSSIP=None
+        os_sip: OSSIP=None,
+        branch_node: Node=None
     ):
         """
         Helper function for back_substitution
-        """
-        # if base_node.id == 23:
-            # print('branching', cur_node,  cur_node.id, cur_node.output_shape, equation.matrix.shape)
-            # input()
+        """ 
         if isinstance(cur_node, Add):
-            prev_node = cur_node.from_node[0].get_prv_non_relu()
-            if prev_node.is_sip_branching_node() is True:
-                eq1, i_flag = self._back_substitution_branching(
-                    equation, base_node, prev_node, bound, i_flag, slopes, os_sip
-                )
+            if base_node is cur_node:
+                add_eq = equation
             else:
-                eq1, i_flag = self._back_substitution_linear(
-                    equation, base_node, prev_node, bound, i_flag, slopes, os_sip
-                )
+                if cur_node.has_relu_activation() is True:
+                    add_eq = self._int_backward_relu(
+                        equation, 
+                        cur_node, 
+                        bound, 
+                        slopes=slopes
+                    )
+                else:
+                    add_eq = Equation.derive(cur_node, self.config)
+
+            prev_node = cur_node.from_node[0].get_prv_non_relu()
+            eq1, _ = self._back_substitution(
+                add_eq,
+                base_node,
+                prev_node,
+                bound,
+                i_flag=i_flag,
+                slopes=slopes,
+                os_sip=None,
+                branch_node=cur_node
+            )
 
             prev_node = cur_node.from_node[1].get_prv_non_relu()
-            if prev_node.is_sip_branching_node() is True:
-                eq2, i_flag = self._back_substitution_branching(
-                    equation, base_node, prev_node, bound, i_flag, slopes, os_sip
-                )
-            else:
-                eq2, i_flag = self._back_substitution_linear(
-                    equation, base_node, prev_node, bound, i_flag, slopes, os_sip
-                )
-            
-            return eq1.add(eq2), i_flag
+            eq2 = add_eq.copy()
+            eq2.const = torch.zeros_like(eq2.const)
+            eq2, _ = self._back_substitution(
+                eq2,
+                base_node,
+                prev_node,
+                bound,
+                i_flag=i_flag,
+                slopes=slopes,
+                os_sip=None,
+                branch_node=cur_node
+            )
 
-        # if isinstance(cur_node, Add):
-            # prev_node = cur_node.from_node[0].get_prv_non_relu()
-            # if equation.zero() is True:
-                # eq1 = self._derive_symb_eq(prev_node)
-            # else:
-                # eq1 = equation.copy()
-            # print('1', cur_node.id, prev_node, prev_node.output_size, eq1.matrix.shape)
-            # eq1, i_flag = self._back_substitution(
-                # eq1, base_node, prev_node, bound, i_flag, slopes, os_sip
-            # )
-            # prev_node = cur_node.from_node[1].get_prv_non_relu()
-            # print('2', cur_node.id, prev_node, prev_node.output_size, eq1.matrix.shape)
-            # if equation.zero() is True:
-                # eq2 = self._derive_symb_eq(prev_node)
-            # else:
-                # eq2 = equation
-            # print('3', cur_node.id, prev_node, prev_node.output_size, eq2.matrix.shape)
-            # eq2, i_flag = self._back_substitution(
-                # eq2, base_node, prev_node, bound, i_flag, slopes, os_sip
-            # )
-            # print('4', cur_node.id, prev_node, prev_node.output_size, eq2.matrix.shape)
-            # input()
-            
-            # return eq1.add(eq2), i_flag
+            add_eq = eq1.add(eq2)
+            lca = Node.least_common_ancestor(cur_node.from_node)
+
+            return self._back_substitution(
+                add_eq,
+                base_node,
+                lca,
+                bound,
+                i_flag=i_flag,
+                slopes=slopes,
+                os_sip=os_sip
+            )
 
 
         # elif isinstance(cur_node, Concat):
             # raise NotImplementedError('Concat branching bs')
+
             # idx = cur_node.from_node[0].output_size
             # b_eq = Equation(
                 # eq.matrix[:, torch.arange(0, cur_node.from_node[0].output_size)],
@@ -752,12 +779,12 @@ class BSSIP:
         return b_matrix
  
     def _backward_add_matrix(self, matrix: torch.Tensor, node:Node) -> torch.Tensor:
-        if node.const is None:
-            b_matrix = torch.hstack([matrix, matrix])
-        else:
-            matrix = matrix.clone()
+        # if node.const is None:
+            # b_matrix = torch.hstack([matrix, matrix])
+        # else:
+            # matrix = matrix.clone()
 
-        return b_matrix
+        return matrix.clone()
 
     def _backward_batch_normalization_matrix(
         self, matrix: torch.Tensor, node: Node, in_flag: torch.Tensor=None
@@ -906,7 +933,7 @@ class BSSIP:
         in_flag: torch.Tensor=None,
         slopes: torch.tensor=None
     ):
-        if node.has_relu_activation():
+        if node.has_fwd_relu_activation():
             b_equation = self._int_backward_relu(
                 equation, node, bound, out_flag, in_flag, slopes
             )

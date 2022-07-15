@@ -80,6 +80,7 @@ class InputSplitter:
             for dim in prob.spec.input_node.get_outputs():
                 prob1, prob2 = self.split_dimension(prob, dim)
                 ratio = (prob1.stability_ratio + prob2.stability_ratio) / 2
+                print(ratio, best_ratio)
                 if ratio >= best_ratio:
                     best_ratio = ratio
                     best_prob1 = prob1

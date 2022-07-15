@@ -59,7 +59,6 @@ class SIP:
         Sets the bounds.
         """
         start = timer()
-
         if self.config.DEVICE == torch.device('cuda'):
             self.prob.cuda()
 
@@ -81,10 +80,8 @@ class SIP:
         ) is not True:
             bs_sip = BSSIP(self.prob, self.config)
             slopes = bs_sip.optimise(self.prob.nn.tail)
-            # starting_depth = self.prob.nn.get_non_linear_starting_depth()
-            starting_depth = 1
             self.init()
-            self._set_bounds(slopes=slopes, depth=starting_depth)
+            self._set_bounds(slopes=slopes, depth=1)
             # this should be after _set_bounds as the unstable nodes may change
             # - to refactor
             self.prob.nn.set_lower_relaxation_slopes(slopes[0], slopes[1])
@@ -92,7 +89,8 @@ class SIP:
         # print(self.prob.nn.tail.bounds.lower)
         # print(self.prob.nn.tail.bounds.upper)
 
-        if self.config.SIP.SIMPLIFY_FORMULA is True:
+        if self.config.SIP.SIMPLIFY_FORMULA is True \
+        and self.config.SIP.SYMBOLIC is True:
             self.prob.spec.output_formula = self.simplify_formula(
                 self.prob.spec.output_formula
             )
@@ -125,18 +123,13 @@ class SIP:
     def _set_bounds_for_node(
         self, node: Node, slopes: tuple=None, delta_flag: torch.Tensor=None
     ):
-        # print(node, node.id, node.input_shape, node.output_shape, node.output_size)
-        # input()
+        # print(node, node.id, node.input_shape, node.output_shape)
 
         # set interval propagation bounds
         bounds = self.ibp.calc_bounds(node)
         slopes = self._update_bounds(node, bounds, slopes, delta_flag)
-        if node.has_fwd_relu_activation():
-            ia_count = node.get_next_relu().get_unstable_count()
-
-        # print('     ia', ia_count, torch.mean(node.bounds.lower))
-        # if node.has_relu_activation():
-            # print('   unst', node.to_node[0].get_unstable_count())
+        if node.has_relu_activation():
+            ia_count = node.to_node[0].get_unstable_count()
             
         # check eligibility for symbolic equations
         symb_elg = self.is_symb_eq_eligible(node)
@@ -149,8 +142,7 @@ class SIP:
                 bounds =  self.os_sip.calc_bounds(node)
                 slopes = self._update_bounds(node, bounds, slopes, delta_flag)
                 if node.has_fwd_relu_activation():
-                    os_count = node.get_next_relu().get_unstable_count()
-                # print('     os', os_count, torch.mean(node.bounds.lower))
+                    os_count = node.to_node[0].get_unstable_count()
  
         # recheck eligibility for symbolic equations
         non_linear_depth = self.prob.nn.get_non_linear_starting_depth()
@@ -174,7 +166,6 @@ class SIP:
             )
             slopes = self._update_bounds(node, bounds, slopes=slopes, out_flag=flag)
 
-            # print('     bs', bs_count, torch.mean(node.bounds.lower))
 
     def _update_bounds(
         self,
@@ -258,7 +249,7 @@ class SIP:
 
     def _get_delta_for_node(self, node: Node, delta_flags: torch.Tensor) -> torch.Tensor:
         if delta_flags is not None and node.has_relu_activation() is True:
-            return delta_flags[j.to_node[0].id]
+            return delta_flags[node.to_node[0].id]
             
         return None
 

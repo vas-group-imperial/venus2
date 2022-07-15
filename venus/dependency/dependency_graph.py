@@ -28,7 +28,7 @@ class DependencyGraph:
     """
 
     logger = None
-    DEP_DEGREE_THRESHOLD = 3
+    DEP_DEGREE_THRESHOLD = 2
 
     def __init__(self, nn, intra, inter, config):
         """

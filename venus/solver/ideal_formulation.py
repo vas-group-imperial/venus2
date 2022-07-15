@@ -12,6 +12,7 @@
 
 from venus.solver.cuts import Cuts
 from venus.common.logger import get_logger
+from venus.network.node import Gemm, Conv, MatMul
 from timeit import default_timer as timer
 from gurobipy import *
 import numpy as np
@@ -61,7 +62,8 @@ class IdealFormulation(Cuts):
         cuts = [] 
         p_l = self.prob.spec.input_node
         for _, i in self.prob.nn.node.items():
-            if i.has_relu_activation() is not True or \
+            if type(i) not in [Gemm, Conv, MatMul] or \
+            i.has_relu_activation() is not True or \
             len(i.from_node) != 1 or \
             self.freq_check(i.depth) is not True:
                 continue

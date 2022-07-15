@@ -334,7 +334,7 @@ class Specification:
             
         return constrs
 
-    def copy(self, input_node=None):
+    def copy(self, inp_node=None):
         """
         Returns a copy of the specificaton
 
@@ -344,9 +344,10 @@ class Specification:
         Returns:
             Specification
         """
-        innode = input_node if input_node is not None else self.input_node.copy()
-
-        return Specification(innode, self.output_formula, self.config, self.name)
+        inp = inp_node if inp_node is not None else self.input_node.copy()
+        return Specification(
+            inp, self.output_formula, self.config, self.name
+        )
 
     def is_satisfied(self, lower_bounds, upper_bounds):
         """

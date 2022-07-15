@@ -217,6 +217,7 @@ class OSSIP:
         lower = self.lower_eq[node.from_node[0].id]
         upper = self.upper_eq[node.from_node[0].id]
         in_equation = lower if bound == 'lower' else upper
+
         if isinstance(node, Relu): 
             equation = self._int_forward_relu(
                 in_equation, node, bound, slopes
@@ -479,7 +480,7 @@ class OSSIP:
                 summand = self.upper_eq[node.from_node[1].id]
             else:
                 raise ValueError(f"Bound type {bound} could not be recognised.")
-
+            
             matrix = equation.matrix + summand.matrix
             const = equation.const + summand.const
 
@@ -487,4 +488,4 @@ class OSSIP:
             matrix = equation.matrix.clone()  
             const = equation.const + node.const
 
-        return equation
+        return Equation(matrix, const, self.config)

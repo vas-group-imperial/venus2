@@ -72,7 +72,7 @@ class Node:
         self.bounds = bounds
         self.cached_bounds = None
         self.device = device
-        self._milp_var_indices = None
+        self._milp_var_indices = None, None, None, None
 
     def cuda(self):
         """
@@ -149,7 +149,12 @@ class Node:
             var_type: either 'out' for output variables or 'delta' for binary
             variables.
         """
-        self._milp_var_indices = (out_start, out_end, delta_start, delta_end)
+        sout = self._milp_var_indices[0] if out_start is None else out_start
+        eout = self._milp_var_indices[1] if out_end is None else out_end
+        sdelta = self._milp_var_indices[2] if delta_start is None else delta_start
+        edelta = self._milp_var_indices[3] if delta_end is None else delta_end
+        
+        self._milp_var_indices = (sout, eout, sdelta, edelta)
 
     def __get_milp_var_indices(self, var_type: str='out'):
         """
@@ -348,6 +353,11 @@ class Node:
             self.to_node[0].reset_state_flags()
             if slopes is not None:
                 self.to_node[0].set_lower_relaxation_slope(slopes[0], slopes[1])
+        
+        switch_idxs = self.bounds.upper < self.bounds.lower
+        temp = self.bounds.lower[switch_idxs]
+        self.bounds.lower[switch_idxs] = self.bounds.upper[switch_idxs]
+        self.bounds.upper[switch_idxs] = temp
 
     def clear_bounds(self) -> None:
         """
@@ -482,6 +492,69 @@ class Node:
         if self.has_relu_activation():
             self.to_node[0].reset_state_flags()
 
+    def dfs(self):
+        if self.is_head_node():
+            return []
+
+        nodes = []
+        for i in self.from_node:
+            nodes.append(i)
+            nodes.extend(i.dfs())
+
+        return nodes
+
+    def branches_to_node(self, node):
+        if isinstance(node, Node) is not True:
+            return False
+        
+        if len(self.to_node) == 1:
+            if self.has_relu_activation() is True:
+                return self.to_node[0].branches_to_node(node)
+            return False
+
+        if len(self.to_node) < 2:
+            return False
+
+        branches = [i.is_ancestor(node) for i in self.to_node]
+        if len(branches) >= 2:
+            return True
+
+        return False
+        
+    def is_ancestor(self, node):
+        if self is node:
+            return True
+
+        if len(self.to_node) == 0:
+            return False
+
+        for i in self.to_node:
+            if i.is_ancestor(node) is True:
+                return True
+        
+        return False
+
+    @staticmethod
+    def least_common_ancestor(nodes):
+        dfs = [set(i.dfs()) for i in nodes]
+        inter = dfs[0]
+        for i in dfs[1:]:
+            inter = inter & i
+        lca = [
+            i for i in inter if np.all([
+                j not in inter for j in i.to_node
+            ]).item
+        ]
+
+        deepest = lca[0]
+        for i in lca[1:]:
+            if i.depth > deepest.depth:
+                deepest = i
+
+        if isinstance(deepest, Relu):
+            return deepest.from_node[0]
+
+        return deepest
 
 
 class Constant(Node):
@@ -609,6 +682,8 @@ class Input(Node):
                 self._simplified_unpert_idx,
                 self._simplified_consts
             )
+
+        return inp
 
     def get_milp_var_size(self):
         """
@@ -1622,7 +1697,7 @@ class Conv(ConvBase):
         """
         assert self.has_bias() is True
 
-        return self.bias[index[-1]]
+        return self.bias[index[0]]
 
     def edge_weight(self, index1: tuple, index2: tuple):
         """
@@ -3571,12 +3646,13 @@ class Sub(Node):
         Returns:
             the output of the node.
         """
-
         assert inp1 is not None or self.from_node[0].output is not None
-        assert inp2 is not None or self.const is not None
-
         inp1 = self.from_node[0].output if inp1 is None else inp1
-        inp2 = self.const if inp2 is None else inp2
+        if self.const is  None:
+            assert inp2 is not None or self.from_node[1].output is not None 
+            inp2 = self.from_node[1].output if inp2 is None else inp2
+        else:
+            inp2 = self.const
 
         if isinstance(inp1, torch.Tensor):
             return self._forward_torch(inp1, inp2, save_output)
@@ -3776,10 +3852,12 @@ class Add(Node):
             the output of the node.
         """
         assert inp1 is not None or self.from_node[0].output is not None
-        assert inp2 is not None or self.const is not None
-
-        inp1 = self.from_node[0].output if inp is None else inp1
-        inp2 = self.const if inp2 is None else inp2
+        inp1 = self.from_node[0].output if inp1 is None else inp1
+        if self.const is  None:
+            assert inp2 is not None or self.from_node[1].output is not None 
+            inp2 = self.from_node[1].output if inp2 is None else inp2
+        else:
+            inp2 = self.const
 
         if isinstance(inp1, torch.Tensor):
             return self._forward_torch(inp1, inp2, save_output)

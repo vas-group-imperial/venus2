@@ -106,6 +106,7 @@ class NodeSplitter(object):
         """
         subprobs = []
 
+        x = prob.spec.copy()
         prob1 = VerificationProblem(
             prob.nn.copy(),
             prob.spec.copy(),

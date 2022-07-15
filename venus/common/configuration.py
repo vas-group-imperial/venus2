@@ -100,7 +100,7 @@ class Splitter():
     SLEEPING_INTERVAL: int = 3
     # the number of input dimensions still considered to be small
     # so that the best split can be chosen exhaustively
-    SMALL_N_INPUT_DIMENSIONS: int = 10
+    SMALL_N_INPUT_DIMENSIONS: int = 8
     # splitting strategy
     SPLIT_STRATEGY: SplitStrategy = SplitStrategy.NONE
     # the stability ratio weight for computing the difficulty of a problem
@@ -165,9 +165,10 @@ class Config:
         # self.BENCHMARK = 'nn4sys'
         # self.BENCHMARK = 'carvana'
         # self.BENCHMARK = 'mnistfc'
-        # self.BENCHMARK = 'cifar_biasfield'
+        self.BENCHMARK = 'cifar_biasfield'
         # self.BENCHMARK = 'rl_benchmarks'
-        self.BENCHMARK = 'collins_rul_cnn'
+        # self.BENCHMARK = 'collins_rul_cnn'
+        # self.BENCHMARK = 'sri_resnet_a'
 
     def set_param(self, param, value):
         if value is None: return
@@ -334,7 +335,6 @@ class Config:
 
         
     def set_vnncomp_params(self, n_relus, i_size):
-
         if i_size > 10:
             self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.NODE
         else:
@@ -344,7 +344,7 @@ class Config:
             self.SOLVER.IDEAL_CUTS = True
             self.SOLVER.INTER_DEP_CUTS = True
             self.SOLVER.INTER_DEP_CONSTRS = True
-            self.MONITOR_SPLIT = True
+            self.SOLVER.MONITOR_SPLIT = True
             if n_relus < 1000:
                 self.SPLITTER.BRANCHING_DEPTH = 2
                 self.SOLVER.BRANCH_THRESHOLD = 10000
@@ -357,7 +357,7 @@ class Config:
             self.VERIFIER.COMPLETE = True
             self.VERIFIER.PGD = True
             self.SIP.ONE_STEP_SYMBOLIC = True
-            self.SIP.EQ_CONCRETISATION = False
+            self.SIP.EQ_CONCRETISATION = True
             self.SIP.SIMPLIFY_FORMULA = True
             self.SIP.SLOPE_OPTIMISATION = True
 
@@ -369,18 +369,19 @@ class Config:
             self.SIP.EQ_CONCRETISATION = True
             self.SIP.SLOPE_OPTIMISATION = True
             self.SIP.STABILITY_RATIO_CUTOFF = 0.95
+            self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.INPUT
 
         elif self.BENCHMARK == 'reach_prob_density':
             self.SOLVER.IDEAL_CUTS = True
             self.SOLVER.INTER_DEP_CUTS = True
             self.SOLVER.INTER_DEP_CONSTRS = True
-            self.MONITOR_SPLIT = True
+            self.SOLVER.MONITOR_SPLIT = True
             self.SPLITTER.BRANCHING_DEPTH = 2
             self.SOLVER.BRANCH_THRESHOLD = 20000
             self.VERIFIER.COMPLETE = True
             self.VERIFIER.PGD = True
             self.SIP.ONE_STEP_SYMBOLIC = True
-            self.SIP.EQ_CONCRETISATION = False
+            self.SIP.EQ_CONCRETISATION = True
             self.SIP.SIMPLIFY_FORMULA = True
             self.SIP.SLOPE_OPTIMISATION = True
             self.SIP.STABILITY_RATIO_CUTOFF = 0.75
@@ -389,7 +390,7 @@ class Config:
             self.SOLVER.IDEAL_CUTS = True
             self.SOLVER.INTER_DEP_CUTS = True
             self.SOLVER.INTER_DEP_CONSTRS = True
-            self.MONITOR_SPLIT = True
+            self.SOLVER.MONITOR_SPLIT = True
             if n_relus < 1000:
                 self.SPLITTER.BRANCHING_DEPTH = 2
                 self.SOLVER.BRANCH_THRESHOLD = 10000
@@ -402,7 +403,7 @@ class Config:
             self.VERIFIER.COMPLETE = True
             self.VERIFIER.PGD = True
             self.SIP.ONE_STEP_SYMBOLIC = True
-            self.SIP.EQ_CONCRETISATION = False
+            self.SIP.EQ_CONCRETISATION = True
             self.SIP.SIMPLIFY_FORMULA = True
             self.SIP.SLOPE_OPTIMISATION = True
             self.SIP.STABILITY_RATIO_CUTOFF = 0.75
@@ -411,7 +412,7 @@ class Config:
             self.SOLVER.IDEAL_CUTS = True
             self.SOLVER.INTER_DEP_CUTS = True
             self.SOLVER.INTER_DEP_CONSTRS = True
-            self.MONITOR_SPLIT = True
+            self.SOLVER.MONITOR_SPLIT = True
             self.SPLITTER.BRANCHING_DEPTH = 7
             self.SOLVER.BRANCH_THRESHOLD = 300
             self.VERIFIER.COMPLETE = True
@@ -422,4 +423,34 @@ class Config:
             self.SIP.SIMPLIFY_FORMULA = True
             self.SIP.SLOPE_OPTIMISATION = True
 
+        elif self.BENCHMARK == 'sri_resnet_a':
+            self.VERIFIER.COMPLETE = True
+            self.VERIFIER.PGD = True
+            self.SIP.SYMBOLIC = True
+            self.SIP.ONE_STEP_SYMBOLIC = True
+            self.SIP.EQ_CONCRETISATION = True
+            self.SIP.SIMPLIFY_FORMULA = True
+            self.SIP.SLOPE_OPTIMISATION = True
+
+        elif self.BENCHMARK == 'tllverifybench':
+            self.SOLVER.IDEAL_CUTS = True
+            self.SOLVER.INTER_DEP_CUTS = True
+            self.SOLVER.INTER_DEP_CONSTRS = True
+            self.SOLVER.MONITOR_SPLIT = True
+            if n_relus < 1000:
+                self.SPLITTER.BRANCHING_DEPTH = 2
+                self.SOLVER.BRANCH_THRESHOLD = 10000
+            elif n_relus < 2000:
+                self.SPLITTER.BRANCHING_DEPTH = 2
+                self.SOLVER.BRANCH_THRESHOLD = 5000
+            else:
+                self.SPLITTER.BRANCHING_DEPTH = 7
+                self.SOLVER.BRANCH_THRESHOLD = 300
+            self.VERIFIER.COMPLETE = True
+            self.VERIFIER.PGD = True
+            self.SIP.ONE_STEP_SYMBOLIC = True
+            self.SIP.EQ_CONCRETISATION = True
+            self.SIP.SIMPLIFY_FORMULA = True
+            self.SIP.SLOPE_OPTIMISATION = True
+            self.SIP.STABILITY_RATIO_CUTOFF = 0.75
 

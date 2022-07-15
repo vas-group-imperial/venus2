@@ -85,7 +85,7 @@ class IBP:
     def _calc_branching_bounds(self, node: Node):
         inp_lower = [i.bounds.lower for i in node.from_node]
         inp_upper = [i.bounds.upper for i in node.from_node]
-        
+    
         return node.forward(inp_lower), node.forward(inp_upper)
 
     def _calc_sub_bounds(self, node: Node):
