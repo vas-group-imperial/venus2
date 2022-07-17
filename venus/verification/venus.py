@@ -22,6 +22,7 @@ from venus.specification.specification import Specification
 
 
 import torch
+import numpy as np
 from venus.verification.verification_problem import VerificationProblem
 from venus.verification.verification_report import VerificationReport
 from timeit import default_timer as timer
@@ -156,7 +157,31 @@ class Venus:
             results.append(ver_report)
     
             with open(self.config.LOGGER.SUMFILE, 'a') as f:
-                f.write('{:<12}{:6.4f}\n'.format(ver_report.result.value, ver_report.runtime))
+                if verification_report.result == SolveResult.UNSAFE:
+                    res = 'sat\n' 
+                    cex = verification_report.cex.flatten()
+                    res += f'((X_0 {cex[0]})'
+                    for i, j in enumerate(cex[1:]):
+                        res += f'\n (X_{i - 1} j)'
+                    res += ')'                        
+                elif verification_report.result == SolveResult.SAFE:
+                    res = 'sat\n' 
+                elif verification_report.result == SolveResult.TIMEOUT:
+                    res = 'timeout\n'
+                else:
+                    res = 'unknown'
+                
+                f.write(res)
+                # if res == SolveResult.SATISFIED:
+                    # if.write('holds\n')
+                # elif res == SolveResult.UNSATISFIED:
+                    # f.write('violated\n')
+                # elif res == SolveResult.TIMEOUT:
+                    # f.write('timeout\n')
+                # else:
+                    # f.write('unknown\n')
+
+                # f.write('{:<12}{:6.4f}\n'.format(ver_report.result.value, ver_report.runtime))
      
         avg_safe_time = 0 if safe == 0 else total_safe_time / safe
         avg_unsafe_time = 0 if unsafe == 0 else total_unsafe_time / unsafe
@@ -248,6 +273,8 @@ class Venus:
                 )
             )
             input_node.bounds = Bounds(batch_lower, batch_upper)
+            input_node.input_shape = input_node.output_shape = batch_lower.shape
+            input_node.input_size = input_node.output_size = np.prod(batch_lower.shape)
             batch_formula = [j.output_formula for j in spec[i: until]]
             batch_spec = Specification(
                 spec[0].input_node, batch_formula, self.config

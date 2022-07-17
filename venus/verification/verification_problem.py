@@ -233,7 +233,7 @@ class VerificationProblem(object):
         pert_inputs = torch.sum(pert_idxs)
         org_input_shape =  self.nn.head[0].input_shape
         
-        if pert_inputs > 8:
+        if pert_inputs > 8 and isinstance(self.spec.output_formula, list) is not True:
             return self
     
         # new head node
@@ -249,12 +249,13 @@ class VerificationProblem(object):
             device=torch.device('cpu')
         )
         const[unpert_idxs.flatten()] = self.spec.input_node.bounds.lower[unpert_idxs].flatten()
+
         if len(org_input_shape) > 2: 
             gemm = Gemm(
                 [],
                 [],
-                (pert_inputs,),
-                (self.spec.input_node.output_size,),
+                (1, pert_inputs.item()),
+                (1, self.spec.input_node.output_size),
                 matrix,
                 const,
                 self.config,
@@ -283,13 +284,14 @@ class VerificationProblem(object):
             gemm = Gemm(
                 [],
                 [i for i in self.nn.head],
-                (pert_inputs,),
+                (pert_inputs.item(),),
                 (self.spec.input_node.output_size,),
                 matrix,
                 const,
                 self.config,
                 depth=1
             )
+            input()
             # couple new head node with old
             for i in self.nn.head:
                 i.from_node = [gemm]
@@ -316,10 +318,10 @@ class VerificationProblem(object):
             self.spec.input_node.bounds.lower[pert_idxs],
             self.spec.input_node.bounds.upper[pert_idxs]
         )
-        self.spec.input_node.input_shape = (pert_inputs,)
-        self.spec.input_node.input_size = pert_inputs
-        self.spec.input_node.output_shape = (pert_inputs,)
-        self.spec.input_node.output_size = pert_inputs
+        self.spec.input_node.input_shape = (pert_inputs.item(),)
+        self.spec.input_node.input_size = pert_inputs.item()
+        self.spec.input_node.output_shape = (pert_inputs.item(),)
+        self.spec.input_node.output_size = pert_inputs.item()
             
 
         

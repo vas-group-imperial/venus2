@@ -71,9 +71,10 @@ class Verifier:
                 Configuration.
         """
         self.prob = VerificationProblem(nn, spec, 0, config)
-        self.prob.simplify_input()
         if batch > 1:
             self.prob.set_batch_size(batch)
+
+        self.prob.simplify_input()
         self.config = config
         self.config.set_vnncomp_params(
             self.prob.nn.get_n_relu_nodes(), self.prob.nn.head[0].input_size, batch=batch

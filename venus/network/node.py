@@ -4836,7 +4836,7 @@ class Sigmoid(Node):
         """
         Copies the node.
         """
-        return ReduceSum(
+        return Sigmoid(
             self.from_node,
             self.to_node,
             self.input_shape,

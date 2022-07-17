@@ -11,6 +11,7 @@
 """
 
 import random
+import numpy as np
 
 from venus.verification.verification_problem import VerificationProblem
 from venus.split.split_strategy import SplitStrategy
@@ -83,6 +84,14 @@ class InputSplitter:
             # If the number of input dimensions is not big, choose the best
             # dimension to split
             for dim in prob.spec.input_node.get_outputs():
+                if isinstance(prob.spec.output_formula, list):
+                    idx = np.prod(dim)
+                    if prob.spec.is_form_satisfied(
+                        prob.spec.output_formula[idx],
+                        prob.nn.tail.bounds.lower[idx, ...],
+                        prob.nn.tail.bounds.lower[idx, ...]
+                    ) is True:
+                        continue
                 try:
                     prob1, prob2 = self.split_dimension(prob, dim)
                 except Exception as error:
@@ -96,16 +105,19 @@ class InputSplitter:
             # Otherwise split randomly
             dim = random.choice(prob.spec.input_node.get_outputs())
             if isinstance(prob.spec.output_formula, list):
+                idx = np.prod(dim)
                 while prob.spec.is_form_satisfied(
-                    prob.spec.output_formula[dim],
-                    prob.nn.tail.bounds.lower[dim, ...],
-                    prob.nn.tail.bounds.lower[dim, ...]
+                    prob.spec.output_formula[idx],
+                    prob.nn.tail.bounds.lower[idx, ...],
+                    prob.nn.tail.bounds.lower[idx, ...]
                 ) is True:
                     dim = random.choice(prob.spec.input_node.get_outputs())
-            try:
-                best_prob1, best_prob2 =  self.split_dimension(prob, dim)
-            except Exception as error:
-                raise error
+                    idx = np.prod(dim)
+
+            # try:
+            best_prob1, best_prob2 =  self.split_dimension(prob, dim)
+            # except Exception as error:
+                # raise error
 
         return [best_prob1, best_prob2]
 
@@ -139,6 +151,7 @@ class InputSplitter:
             prob.depth + 1,
             self.config
         )
+
         prob1.last_split_strategy = SplitStrategy.INPUT
         try:
             prob1.bound_analysis()

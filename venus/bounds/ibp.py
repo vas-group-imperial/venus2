@@ -64,7 +64,7 @@ class IBP:
 
         else:
             raise TypeError(f"IA Bounds computation for {type(node)} is not supported")
-        
+       
         bounds = Bounds(
             lower.reshape(node.output_shape), upper.reshape(node.output_shape)
         )
