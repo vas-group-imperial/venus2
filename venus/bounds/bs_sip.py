@@ -115,7 +115,7 @@ class BSSIP:
         # node.update_bounds(bounds, flag=out_flag)
 
     def _get_out_prop_flag(self, node: Node):
-        if node.has_fwd_relu_activation():
+        if node.has_relu_activation():
             return node.get_next_relu().get_unstable_flag()
 
         elif len(node.to_node) == 0:
@@ -418,7 +418,8 @@ class BSSIP:
         os_sip: OSSIP
     ) -> Equation:
 
-        if base_node.has_fwd_relu_activation() is not True:
+        if base_node.has_relu_activation() is not True \
+        or isinstance(input_node, Input):
             return equation, instability_flag
      
         if bound == 'lower':
@@ -933,7 +934,7 @@ class BSSIP:
         in_flag: torch.Tensor=None,
         slopes: torch.tensor=None
     ):
-        if node.has_fwd_relu_activation():
+        if node.has_relu_activation():
             b_equation = self._int_backward_relu(
                 equation, node, bound, out_flag, in_flag, slopes
             )

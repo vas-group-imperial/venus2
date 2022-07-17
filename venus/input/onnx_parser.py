@@ -752,8 +752,6 @@ class ONNXParser:
             data = torch.cat(data, axis=axis)
             return Constant([], data, self.config)
 
-        print(input_shapes, output_shape, axis)
-        input()
         return Concat([], [], input_shapes, output_shape, axis, self.config)
 
     def parse_pad(

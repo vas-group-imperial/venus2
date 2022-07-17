@@ -15,7 +15,7 @@ class ProjectedGradientDescent:
     def __init__(self, config):
         self.config = config
 
-    def start(self, prob, init_adv: torch.tensor=None, device=torch.device('cpu'), specs=None):
+    def start(self, prob, init_adv: torch.tensor=None, device=torch.device('cpu')):
         """
         PGD (see Madry et al. 2017): https://arxiv.org/pdf/1706.06083.pdf
         
@@ -56,14 +56,8 @@ class ProjectedGradientDescent:
 
             output = prob.nn.forward(adv)
             # to edit code
-            if specs is not None: 
-                for i, j in enumerate(specs):
-                    if i.is_satisfied(output[j,...], output[j,...]) is not True:
-                        return adv[i, ...].detach()
-
-            else:
-                if prob.spec.is_satisfied(output, output) is not True:
-                    return adv.detach()
+            if prob.spec.is_satisfied(output, output) is not True:
+                return adv.detach()
 
             i += 1
 
@@ -110,17 +104,12 @@ class ProjectedGradientDescent:
         true_label = prob.spec.is_adversarial_robustness()
 
         if true_label == -1:
-            output = prob.nn.forward(x).flatten()
-            if specs is not None:
-                loss = torch.mean([
-                    specs[i].get_mse_loss(output[i, ...]) for i, _ in enumerate(specs)
-                ])
-            else:
-                loss = prob.spec.get_mse_loss(output)
+            output = prob.nn.forward(x, save_gradient=True).flatten()
+            loss = prob.spec.get_mse_loss(output)
 
         else:
             output_flag =  prob.spec.get_output_flag(prob.nn.tail.output_shape)
-            output = prob.nn.forward(x)[output_flag].flatten()[None, :]
+            output = prob.nn.forward(x, save_gradient=True)[output_flag].flatten()[None, :]
             true_label = torch.sum(output_flag.flatten()[0: true_label])
             y = torch.tensor([true_label], device=device)
             loss_fn = torch.nn.CrossEntropyLoss()

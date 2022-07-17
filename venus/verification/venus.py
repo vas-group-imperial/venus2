@@ -17,6 +17,8 @@ from venus.network.neural_network import NeuralNetwork
 from venus.verification.verifier import Verifier
 from venus.solver.solve_result import SolveResult
 from venus.common.configuration import Config
+from venus.bounds.bounds import Bounds
+from venus.specification.specification import Specification
 
 
 import torch
@@ -79,7 +81,6 @@ class Venus:
             # load model
             nn = NeuralNetwork(query[0], self.config)
             nn.load()
-            self.config.set_vnncomp_params(nn.get_n_relu_nodes(), nn.head[0].input_size)
 
             # import numpy as np
             # from venus.bounds.bounds import Bounds
@@ -232,30 +233,41 @@ class Venus:
         ver_report = VerificationReport()
         start = timer()
 
-        for i in range(0, math.ceil(size / batch)):
+        input_node = spec[0].input_node
+
+        for i in range(0, size, batch):
             until = min(size, i + batch)
-            prob = VerificationProblem(nn, spec[i], 0, self.config)
-            prob.spec.input_node.bounds.lower = torch.vstack(
+            batch_lower = torch.vstack(
                 tuple(
                     j.input_node.bounds.lower for j in spec[i: until]
                 )
             ) 
-            prob.spec.input_node.bounds.upper = torch.vstack(
+            batch_upper = torch.vstack(
                 tuple(
                     j.input_node.bounds.upper for j in spec[i: until]
                 )
             )
-            prob.set_batch_size(batch)
-            
-            sip = SIP(prob, self.config, batch=True)
-            sip.set_bounds()
-            for j, k in enumerate(spec[i: until]):
-                if k.is_satisfied(
-                    prob.nn.tail.bounds.lower[j], prob.nn.tail.bounds.upper[j]
-                ) is not True:
-                    ver_report.runtime = timer() - start
+            input_node.bounds = Bounds(batch_lower, batch_upper)
+            batch_formula = [j.output_formula for j in spec[i: until]]
+            batch_spec = Specification(
+                spec[0].input_node, batch_formula, self.config
+            )
+           
+            verifier = Verifier(nn, batch_spec, self.config, batch=until-i)
+            sub_ver_report = verifier.verify()
+            ver_report.runtime += sub_ver_report.runtime
+            if sub_ver_report.result == SolveResult.UNSAFE:
+                ver_report.result = SolveResult.UNSAFE
+                return ver_report
+            else:
+                time_left = self.config.SOLVER.TIME_LIMIT - sub_ver_report.runtime
+                if time_left <= 0:
+                    ver_report.result = SolveResult.TIMEOUT
                     return ver_report
+                else:
+                    self.config.SOLVER.TIME_LIMIT =  time_left
 
+        ver_report.result = SolveResult.SAFE
         ver_report.result = SolveResult.SATISFIED
         return ver_report
 
@@ -282,4 +294,5 @@ class Venus:
                     else:
                         self.config.SOLVER.TIME_LIMIT =  time_left
 
+        ver_report.result = SolveResult.SAFE
         return ver_report

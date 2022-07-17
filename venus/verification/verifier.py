@@ -57,7 +57,7 @@ class Verifier:
     
     logger = None
 
-    def __init__(self, nn, spec, config):
+    def __init__(self, nn, spec, config, batch=1):
         """
         Arguments:
 
@@ -72,7 +72,12 @@ class Verifier:
         """
         self.prob = VerificationProblem(nn, spec, 0, config)
         self.prob.simplify_input()
+        if batch > 1:
+            self.prob.set_batch_size(batch)
         self.config = config
+        self.config.set_vnncomp_params(
+            self.prob.nn.get_n_relu_nodes(), self.prob.nn.head[0].input_size, batch=batch
+        )
 
         self._mp_context = mp.get_context('spawn')
         self._manager = self._mp_context.Manager()
@@ -97,13 +102,12 @@ class Verifier:
         start = timer()
 
         slv_report = SubVerifier(self.config).verify_incomplete(self.prob)
-
-        if slv_report.result != SolveResult.UNDECIDED:
-            ver_report = VerificationReport(
-                slv_report.result, slv_report.cex, slv_report.runtime
-            )
-
-        elif self.config.VERIFIER.COMPLETE is True:
+        ver_report = VerificationReport(
+            slv_report.result, slv_report.cex, slv_report.runtime
+        )
+    
+        if slv_report.result == SolveResult.UNDECIDED and \
+        self.config.VERIFIER.COMPLETE is True:
             if self.config.SPLITTER.SPLIT_STRATEGY != SplitStrategy.NONE:
                 if self.config.SOLVER.MONITOR_SPLIT is True:
                     slv_report = SubVerifier(self.config).verify_complete(self.prob)

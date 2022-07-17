@@ -47,8 +47,8 @@ class VerificationProblem(object):
         self.pgd_ver_done = False
         self.lp_ver_done = False
         self._sip_bounds_computed = False
+        self.last_split_strategy = None
         self.device = torch.device('cpu')
-
 
     def bound_analysis(self, delta_flags=None):
         """
@@ -226,7 +226,6 @@ class VerificationProblem(object):
         return self.nn.model_path  + ' against ' + self.spec.to_string()
 
     def simplify_input(self):
-        assert len(self.nn.head) == 1
         pert_idxs =  self.spec.input_node.bounds.lower != \
             self.spec.input_node.bounds.upper
         unpert_idxs =  self.spec.input_node.bounds.lower == \
@@ -241,13 +240,13 @@ class VerificationProblem(object):
         matrix = torch.zeros(
             (pert_inputs, self.spec.input_node.output_size),
             dtype=self.config.PRECISION,
-            device=self.config.DEVICE
+            device=torch.device('cpu')
         )
         matrix[range(pert_inputs), pert_idxs.flatten()] = 1
         const = torch.zeros(
             self.spec.input_node.output_size,
             dtype=self.config.PRECISION,
-            device=self.config.DEVICE
+            device=torch.device('cpu')
         )
         const[unpert_idxs.flatten()] = self.spec.input_node.bounds.lower[unpert_idxs].flatten()
         if len(org_input_shape) > 2: 

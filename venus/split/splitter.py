@@ -107,13 +107,12 @@ class Splitter:
         elif self.config.SPLITTER.SPLIT_STRATEGY == SplitStrategy.INPUT_NODE:
             return self.input_node_split
         elif self.config.SPLITTER.SPLIT_STRATEGY == SplitStrategy.INPUT_NODE_ALT:
-            if prob.split_strategy == SplitStrategy.INPUT:
-                return self.node_input_split
-            else:
+            if prob.last_split_strategy == SplitStrategy.NODE:
                 return self.input_node_split
+            else:
+                return self.node_input_split
         elif self.config.SPLITTER.STRATEGY == SplitStrategy.NONE:
             return self.no_split
-
 
     def no_split(self, prob):
         """

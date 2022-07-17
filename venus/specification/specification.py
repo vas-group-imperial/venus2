@@ -18,7 +18,7 @@ from venus.common.configuration import Config
 
 class Specification:
 
-    def __init__(self, input_node, output_formula, config: Config, name=None):
+    def __init__(self, input_node, output_formula, config: Config, name='not_named'):
         """
         Arguments:
             input_node:
@@ -33,7 +33,7 @@ class Specification:
         self.config = config
         self.name = name
 
-    def get_output_constrs(self, gmodel, output_vars):
+    def get_output_constrs(self, gmodel, output_vars, idx=0):
         """
         Encodes the output constraints of the spec into MILP
 
@@ -47,9 +47,13 @@ class Specification:
         """
         if self.output_formula is None:
             return []
-   
-        negated_output_formula = NegationFormula(self.output_formula).to_NNF()
-        return self.get_constrs(negated_output_formula, gmodel, output_vars)
+
+        if isinstance(self.output_formula, list): 
+            negated_output_formula = NegationFormula(self.output_formula).to_NNF()
+            return self.get_constrs(negated_output_formula, gmodel, output_vars)
+        else:
+            negated_output_formula = NegationFormula(self.output_formula[idx]).to_NNF()
+            return self.get_constrs(negated_output_formula, gmodel, output_vars)
 
     def get_constrs(self, formula, gmodel, output_vars):
         """
@@ -369,13 +373,25 @@ class Specification:
                     self.carvana_out_vals.bool()
                 )
             )
-            return self._is_satisfied(self.output_formula, output, output)
+            return self.is_form_satisfied(self.output_formula, output, output)
 
-        return self._is_satisfied(
+        if isinstance(self.output_formula, list):
+            assert lower_bounds.shape[0] == len(self.output_formula)
+            assert upper_bounds.shape[0] == len(self.output_formula)
+
+            for j, k in enumerate(self.output_formula):
+                if self.is_form_satisfied(
+                    k, lower_bounds[j], upper_bounds[j]
+                ) is not True:
+                    return False
+
+            return True
+
+        return self.is_form_satisfied(
             self.output_formula, lower_bounds.flatten(), upper_bounds.flatten()
         )
 
-    def _is_satisfied(self, formula, lower_bounds, upper_bounds):
+    def is_form_satisfied(self, formula, lower_bounds, upper_bounds):
         """
         Helper function for is_satisfied.
 
@@ -406,25 +422,26 @@ class Specification:
             else:
                 raise Exception('Unexpected sense', formula.sense)
         elif isinstance(formula, ConjFormula):
-            return self._is_satisfied(formula.left, lower_bounds, upper_bounds) and \
-                   self._is_satisfied(formula.right, lower_bounds, upper_bounds)
+            return self.is_form_satisfied(formula.left, lower_bounds, upper_bounds) and \
+                   self.is_form_satisfied(formula.right, lower_bounds, upper_bounds)
         elif isinstance(formula, NAryConjFormula):
             for clause in formula.clauses:
-                if not self._is_satisfied(clause, lower_bounds, upper_bounds):
+                if not self.is_form_satisfied(clause, lower_bounds, upper_bounds):
                     return False
             return True
         elif isinstance(formula, DisjFormula):
-            return self._is_satisfied(formula.left, lower_bounds, upper_bounds) or \
-                   self._is_satisfied(formula.right, lower_bounds, upper_bounds)
+            return self.is_form_satisfied(formula.left, lower_bounds, upper_bounds) or \
+                   self.is_form_satisfied(formula.right, lower_bounds, upper_bounds)
         elif isinstance(formula, NAryDisjFormula):
             for clause in formula.clauses:
-                if self._is_satisfied(clause, lower_bounds, upper_bounds):
+                if self.is_form_satisfied(clause, lower_bounds, upper_bounds):
                     return True
             return False
         else:
             raise Exception("Unexpected type of formula", type(formula))
 
-    def get_mse_loss(self, output):
+
+    def _get_mse_loss(self, output):
         """
         Computes the mean squared error of the output. 
 
@@ -434,10 +451,32 @@ class Specification:
         Returns:
             MSE of the output.
         """
+        if isinstance(self.output_formula, list):
+            loss = torch.mean(
+                self._get_formula_mse_loss(output[i, ...], j) 
+                for i, j in enumerate(self.output_formula)
+            )
+        
+        else:
+            loss  = self._get_formula_mse_loss(output, self.output_formula)
+
+        return loss
+
+    def _get_formula_mse_loss(self, output, formula):
+        """
+        Computes the mean squared error of the output as per the given formula.
+
+        Arguments:
+            output:
+                The output.
+            formula
+                The formula.
+        Returns:
+            MSE of the output.
+        """
         padded_output = torch.hstack((torch.zeros(1), output))
         pos_dims, neg_dims, consts = self._get_mse_loss(
-            self.output_formula,
-            padded_output
+            formula, padded_output
         )
         pos_dims = torch.tensor(pos_dims, dtype=torch.long)
         neg_dims = torch.tensor(neg_dims, dtype=torch.long)
@@ -503,6 +542,12 @@ class Specification:
         Checks whether the output constraints of the specificaton refer to an
         adversarial robustness property.
         """
+        if isinstance(self.output_formula, list):
+            for i in self.output_formula:
+                if self._is_adversarial_robustness(i) is not True:
+                    return False
+            return True
+
         return self._is_adversarial_robustness(self.output_formula)
 
     def _is_adversarial_robustness(self, formula):
@@ -548,7 +593,42 @@ class Specification:
         else:
             raise Exception("Unexpected type of formula", type(formula))
 
+
     def get_output_flag(
+            self, output_shape: tuple, formula: Formula=None, device=torch.device('cpu')
+    ):
+        """
+        Creates a boolean flag of the outputs units that the specification refers to.
+
+        Arguments:
+            output_shape:
+                the output shape of the network.
+            formula:
+                the formula for which to get the output flag. 
+        Returns:
+            Boolean flag of whether each output concerns the specification.
+        """
+        output_formula = self.output_formula if formula is None else formula
+
+        if isinstance(output_formula, list):
+            form_shape = np.prod(output_shape[1:])
+            flag = torch.zeros(
+                (output_shape[0], form_shape),
+                dtype=torch.bool,
+                device=device
+            )
+            for i, j in enumerate(output_formula):
+                flag[i, :] = self._get_formula_output_flag(form_shape,  j)
+
+        else:
+            flag = self._get_formula_output_flag(
+                output_shape, output_formula
+            )
+
+        return flag.reshape(output_shape)
+
+
+    def _get_formula_output_flag(
             self, output_shape: tuple, formula: Formula=None, device=torch.device('cpu')
     ):
         """

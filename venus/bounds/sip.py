@@ -63,7 +63,8 @@ class SIP:
             self.prob.cuda()
 
         # get relaxation slopes
-        if self.prob.nn.has_custom_relaxation_slope() is True:
+        if self.prob.nn.has_custom_relaxation_slope() is True and \
+        self.delta_flags is None:
             slopes = self.prob.nn.get_lower_relaxation_slopes(gradient=False)
         else:
             slopes = None
@@ -71,13 +72,27 @@ class SIP:
         # set bounds using area approximations
         self._set_bounds(slopes, depth=1)
  
+        # print(
+            # self.prob.id,
+            # self.prob.nn.tail.bounds.lower,
+            # self.prob.nn.tail.bounds.upper
+        # )
         # optimise the relaxation slopes using pgd
-        if self.config.SIP.SLOPE_OPTIMISATION is True and \
-        self.prob.nn.has_custom_relaxation_slope() is not True \
-        and self.prob.spec.is_satisfied(
-            self.prob.nn.tail.bounds.lower,
-            self.prob.nn.tail.bounds.upper
-        ) is not True:
+        # if self.config.SIP.SLOPE_OPTIMISATION is True and \
+        # self.prob.nn.has_custom_relaxation_slope() is not True \
+        # and self.prob.spec.is_satisfied(
+            # self.prob.nn.tail.bounds.lower,
+            # self.prob.nn.tail.bounds.upper
+        # ) is not True:
+        opt_cond1 = self.config.SIP.SLOPE_OPTIMISATION
+        opt_cond2 = self.prob.depth < 2
+        opt_cond = opt_cond1 and opt_cond2
+        if opt_cond is True:
+            opt_cond = self.prob.spec.is_satisfied(
+                self.prob.nn.tail.bounds.lower,
+                self.prob.nn.tail.bounds.upper
+            ) is not True
+        if opt_cond is True:
             bs_sip = BSSIP(self.prob, self.config)
             slopes = bs_sip.optimise(self.prob.nn.tail)
             self.init()
@@ -86,7 +101,12 @@ class SIP:
             # - to refactor
             self.prob.nn.set_lower_relaxation_slopes(slopes[0], slopes[1])
 
-        # print(self.prob.nn.tail.bounds.lower)
+        # print(
+            # 'aft',
+            # self.prob.id,
+            # self.prob.nn.tail.bounds.lower,
+            # self.prob.nn.tail.bounds.upper
+        # )
         # print(self.prob.nn.tail.bounds.upper)
 
         if self.config.SIP.SIMPLIFY_FORMULA is True \
@@ -123,7 +143,7 @@ class SIP:
     def _set_bounds_for_node(
         self, node: Node, slopes: tuple=None, delta_flag: torch.Tensor=None
     ):
-        # print(node, node.id, node.input_shape, node.output_shape)
+        print(node, node.id, node.input_shape, node.output_shape, node.is_non_symbolically_connected())
 
         # set interval propagation bounds
         bounds = self.ibp.calc_bounds(node)
@@ -141,19 +161,23 @@ class SIP:
             if symb_elg is True:
                 bounds =  self.os_sip.calc_bounds(node)
                 slopes = self._update_bounds(node, bounds, slopes, delta_flag)
-                if node.has_fwd_relu_activation():
+                if node.has_relu_activation():
                     os_count = node.to_node[0].get_unstable_count()
  
         # recheck eligibility for symbolic equations
         non_linear_depth = self.prob.nn.get_non_linear_starting_depth()
         symb_elg = self.is_symb_eq_eligible(node) and node.depth >= non_linear_depth
- 
+        
+        if self.config.BENCHMARK == 'vgg16_2022' and node.depth >= 13:
+            return
+
         # set back substitution symbolic bounds
-        if self.config.SIP.SYMBOLIC is True and symb_elg is True:
+        if self.config.SIP.SYMBOLIC is True and \
+        symb_elg is True and node.is_non_symbolically_connected() is not True:
             if self.config.SIP.ONE_STEP_SYMBOLIC is True and \
             self.config.SIP.EQ_CONCRETISATION is True and \
             node.depth > 2:
-                if node.has_fwd_relu_activation() and os_count * 5 > ia_count:
+                if node.has_relu_activation() and os_count * 5 > ia_count:
                     concretisations = self.os_sip
                 else:
                     self.os_sip.clear_equations()
@@ -180,13 +204,24 @@ class SIP:
                 # relu node with custom slopes - leave slopes as are but remove
                 # slopes from newly stable nodes.
                 old_fl = node.get_next_relu().get_unstable_flag()
-           
+
+                switch_idxs = bounds.upper < bounds.lower
+                temp = bounds.lower[switch_idxs]
+                bounds.lower[switch_idxs] = bounds.upper[switch_idxs]
+                bounds.upper[switch_idxs] = temp
+
                 if out_flag is None:
                     bounds = Bounds(
                         torch.max(node.bounds.lower, bounds.lower),
                         torch.min(node.bounds.upper, bounds.upper)
                     )
+                else:
+                    bounds = Bounds(
+                        torch.max(node.bounds.lower[out_flag], bounds.lower),
+                        torch.min(node.bounds.upper[out_flag], bounds.upper)
+                    )
 
+                if out_flag is None:
                     if delta_flags is not None:
                         bounds.lower[delta_flags[0]] = 0.0
                         bounds.upper[delta_flags[0]] = 0.0
@@ -208,11 +243,6 @@ class SIP:
                         slopes[1][node.get_next_relu().id][new_fl]
 
                 else:
-                    bounds = Bounds(
-                        torch.max(node.bounds.lower[out_flag], bounds.lower),
-                        torch.min(node.bounds.upper[out_flag], bounds.upper)
-                    )
-
                     if delta_flags is not None:
                         bounds.lower[delta_flags[0][out_flag]] = 0.0
                         bounds.upper[delta_flags[0][out_flag]] = 0.0

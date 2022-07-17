@@ -107,10 +107,7 @@ class MILPEncoder:
             for j in nodes:
                 if j.has_relu_activation() is True:
                     p_idx = j.from_node[-1].get_milp_var_indices()
-                    if p_idx[2] is None:
-                        j.set_milp_var_indices(out_start=p_idx[0], out_end=p_idx[1])
-                    else:
-                        j.set_milp_var_indices(out_start=p_idx[2], out_end=p_idx[3])
+                    j.set_milp_var_indices(out_start=p_idx[0], out_end=p_idx[1])
 
                 elif isinstance(j, Relu):
                     self.add_output_vars(j, gmodel)
@@ -120,17 +117,14 @@ class MILPEncoder:
                 elif type(j) in [Flatten, Slice, Unsqueeze, Reshape]:
                     j.out_vars = j.forward(j.from_node[0].out_vars)
                     p_idx = j.from_node[0].get_milp_var_indices()
-                    if p_idx[2] is None:
-                        j.set_milp_var_indices(out_start=p_idx[0], out_end=p_idx[1])
-                    else:
-                        j.set_milp_var_indices(out_start=p_idx[2], out_end=p_idx[3])
+                    j.set_milp_var_indices(out_start=p_idx[0], out_end=p_idx[1])
 
                 elif isinstance(j, Concat):
                     j.out_vars = j.forward([k.out_vars for k in j.from_node])
 
                 elif type(j) in [
-                    Gemm, MatMul, Conv, ConvTranspose, Sub, BatchNormalization, MaxPool,
-                    AveragePool
+                    Gemm, MatMul, Conv, ConvTranspose, Add, Sub, BatchNormalization, 
+                    MaxPool, AveragePool
                 ]:
                     self.add_output_vars(j, gmodel)
 
@@ -160,13 +154,13 @@ class MILPEncoder:
             if isinstance(node, Relu):
                 node.out_vars = np.array(
                     gmodel.addVars(
-                        (node.output_size,), lb=0, ub=GRB.INFINITY
+                        (node.output_size.item(),), lb=0, ub=GRB.INFINITY
                     ).values()
                 ).reshape(node.output_shape)
             else:
                 node.out_vars = np.array(
                     gmodel.addVars(
-                        (node.output_size,), lb=-GRB.INFINITY, ub=GRB.INFINITY
+                        (node.output_size.item(),), lb=-GRB.INFINITY, ub=GRB.INFINITY
                     ).values()
                 ).reshape(node.output_shape)
         

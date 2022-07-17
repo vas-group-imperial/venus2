@@ -52,6 +52,7 @@ class DepCuts(Cuts):
         delta, _delta = self._get_current_delta()
         _delta_flags = {i: [_delta[i] == 0, _delta[i] == 1] for i in _delta}
         self.prob.nn.cache_bounds()
+        self.prob.nn.clear_relaxation_slope()
         self.prob.set_bounds(delta_flags=_delta_flags)
         # get linear desctiption of the current stabilised binary variables
         le = self._get_lin_descr(delta, _delta)
@@ -73,6 +74,8 @@ class DepCuts(Cuts):
                 rhs_node, rhs_idx = dg.nodes[j].nodeid, dg.nodes[j].index
                 delta2 = self.prob.nn.node[rhs_node].delta_vars[rhs_idx]
                 dep = dg.nodes[i].adjacent[j]
+                if delta1 is None or delta2 is None:
+                    continue
                 # add the constraint as per the type of the dependency
                 if dep == DependencyType.INACTIVE_INACTIVE:
                     self.gmodel.cbCut(delta2 <= le + delta1)

@@ -72,6 +72,7 @@ class Node:
         self.bounds = bounds
         self.cached_bounds = None
         self.device = device
+        self.grads = None
         self._milp_var_indices = None, None, None, None
 
     def cuda(self):
@@ -91,6 +92,47 @@ class Node:
         self.device = torch.device('cpu')
         if self.output is not None:
             self.output = self.output.cpu()
+
+
+    def forward(
+        self, inp: torch.Tensor=None, save_output=False, save_gradient=False
+    ) -> torch.Tensor:
+        """
+        Computes the output of the node given an input.
+
+        Arguments:
+            inp:
+                the input.
+            save_output:
+                Whether to save the output in the node. 
+            save_gradient:
+                Whether to save the gradient of the node. 
+        Returns: 
+            the output of the node.
+        """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0].output if inp is None else inp
+
+        if isinstance(inp, torch.Tensor):
+            output = self._forward_torch(inp)
+
+            if save_gradient is True:
+                output.register_hook(self.grad_hook)
+
+        elif isinstance(inp, np.ndarray):
+            output = self._forward_numpy(inp)
+
+        else:
+            raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
+
+        if save_output:
+            self.output = output
+
+        return output
+
+    def grad_hook(self, grad_output):
+        self.grads = grad_output.detach().clone()
+        self.grads = torch.argsort(self.grads, descending=True).tolist()
 
     def set_batch_size(self, size: int=1):
         """
@@ -354,11 +396,6 @@ class Node:
             if slopes is not None:
                 self.to_node[0].set_lower_relaxation_slope(slopes[0], slopes[1])
         
-        switch_idxs = self.bounds.upper < self.bounds.lower
-        temp = self.bounds.lower[switch_idxs]
-        self.bounds.lower[switch_idxs] = self.bounds.upper[switch_idxs]
-        self.bounds.upper[switch_idxs] = temp
-
     def clear_bounds(self) -> None:
         """
         Nulls out the bounds of the node.
@@ -472,8 +509,10 @@ class Node:
             return False
     
         for i in self.from_node:
-            if i.is_non_symbolically_connected():
-                return True
+            dfs = i.dfs()
+            for j in dfs:
+                if type(j) in [Mul, Div, ReduceSum, Sigmoid]:
+                    return True
 
         return False
 
@@ -484,10 +523,10 @@ class Node:
         self.bounds.detach()
 
     def set_cache_bounds(self):
-        self.cached_bounds = self.bounds.clone()
+        self.cached_bounds = self.bounds.copy()
 
     def use_cache_bounds(self):
-        self.bounds = self.cached_bounds.clone()
+        self.bounds = self.cached_bounds.copy()
         self.cached_bounds = None
         if self.has_relu_activation():
             self.to_node[0].reset_state_flags()
@@ -822,7 +861,8 @@ class Gemm(Node):
         inp: torch.Tensor=None,
         clip: str=None,
         add_bias: bool=True,
-        save_output=False
+        save_output=False,
+        save_gradient=False
     ) -> torch.Tensor:
         """
         Computes the output of the node given an input.
@@ -837,6 +877,8 @@ class Gemm(Node):
                 whether to add bias
             save_output:
                 Whether to save the output in the node. 
+            save_gradient:
+                Whether to save the gradient in the node. 
         Returns: 
             the output of the node.
         """
@@ -844,20 +886,27 @@ class Gemm(Node):
         inp = self.from_node[0].output if inp is None else inp
 
         if isinstance(inp, torch.Tensor):
-            return self._forward_torch(inp, clip, add_bias, save_output)
+            output =  self._forward_torch(inp, clip, add_bias)
+
+            if save_gradient is True:
+                output.register_hook(self.grad_hook)
 
         elif isinstance(inp, np.ndarray):
-            return self._forward_numpy(inp, save_output)
+            output = self._forward_numpy(inp)
 
         else:
             raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
+
+        if save_output is True:
+            self.output = output
+
+        return output
 
     def _forward_torch(
         self,
         inp: torch.Tensor=None,
         clip: str=None,
-        add_bias: bool=True,
-        save_output=False
+        add_bias: bool=True
     ) -> torch.Tensor:
         """
         Torch implementation of forward.
@@ -870,8 +919,6 @@ class Gemm(Node):
                 negatives if set to '-'
             add_bias:
                 whether to add bias
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
@@ -887,31 +934,20 @@ class Gemm(Node):
         else:
             raise ValueError(f'Kernel clip value {clip} not recognised')
     
-        # if self.has_batch_dimension(inp) is True:
-            # output = torch.tensordot(weights, inp, dims=([1], [1])).T
-        # else:  
         output = torch.tensordot(inp, weights, dims=([len(inp.shape) - 1], [0]))
 
         if add_bias is True and self.has_bias() is True:
-            # if self.has_batch_dimension(inp) is True:
-                # output += torch.tile(self.bias, (self.input_shape[0], 1)) 
-            # else:
             output += self.bias
-
-        if save_output:
-            self.output = output
 
         return output
 
-    def _forward_numpy(self, inp: np.array=None, save_output=False) -> np.array:
+    def _forward_numpy(self, inp: np.array=None) -> np.array:
         """
         Numpy implementation of forward.
 
         Arguments:
             inp:
                 the input.
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
@@ -928,9 +964,6 @@ class Gemm(Node):
                 # output += np.tile(self.bias.numpy(), (self.input_shape[0], 1)) 
             # else:
             output += self.bias.numpy()
-
-        if save_output is True:
-            self.output = output
 
         return output
 
@@ -1062,7 +1095,7 @@ class MatMul(Node):
         return self.weights[index2, index1].item()
     
     def forward(
-        self, inp: torch.Tensor=None, clip: str=None, save_output=False
+        self, inp: torch.Tensor=None, clip: str=None, save_output=False, save_gradient=False
     ) -> torch.Tensor:
         """
         Computes the output of the node given an input.
@@ -1075,6 +1108,8 @@ class MatMul(Node):
                 negatives if set to '-'
             save_output:
                 Whether to save the output in the node. 
+            save_gradient:
+                Whether to save the gradient of the node. 
         Returns: 
             the output of the node.
         """
@@ -1082,17 +1117,24 @@ class MatMul(Node):
         inp = self.from_node[0].output if inp is None else inp
 
         if isinstance(inp, torch.Tensor):
-            return self._forward_torch(inp, clip, save_output)
+            output = self._forward_torch(inp, clip)
+
+            if save_gradient is True:
+                output.register_hook(self.grad_hook)
 
         elif isinstance(inp, np.ndarray):
-            return self._forward_numpy(inp, save_output)
+            output = self._forward_numpy(inp)
 
         else:
             raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
 
+        if save_output is True:
+            self.output = output
+
+        return output
 
     def _forward_torch(
-        self, inp: torch.Tensor=None, clip: str=None, save_output=False
+        self, inp: torch.Tensor=None, clip: str=None
     ) -> torch.Tensor:
         """
         Torch implementation of forward.
@@ -1103,8 +1145,6 @@ class MatMul(Node):
             clip:
                 clips the weights to positive values if set to '+' and to
                 negatives if set to '-'
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
@@ -1122,23 +1162,15 @@ class MatMul(Node):
 
         output = torch.tensordot(inp, weights, dims=([len(inp.shape) - 1], [0]))
 
-        # output = weights @ inp
-
-
-        if save_output:
-            self.output = output
-
         return output
 
-    def _forward_numpy(self, inp: np.array=None, save_output=False) -> np.array:
+    def _forward_numpy(self, inp: np.array=None) -> np.array:
         """
         Numpy implementation of forward.
 
         Arguments:
             inp:
                 the input.
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
@@ -1146,10 +1178,6 @@ class MatMul(Node):
         output = np.tensordot(
             inp, self.weights.numpy(), dims=([len(inp.shape) - 1], [0])
         )
-        # output = self.weights.cpu().numpy() @ inp 
-
-        if save_output is True:
-            self.output = output
 
         return output
 
@@ -1261,34 +1289,7 @@ class Pad(Node):
         """
         return self.from_node[-1].get_milp_var_indices()
     
-    def forward(
-        self, inp: torch.Tensor=None, save_output=False
-    ) -> torch.Tensor:
-        """
-        Computes the output of the node given an input.
-
-        Arguments:
-            inp:
-                the input.
-            save_output:
-                Whether to save the output in the node. 
-        Returns: 
-            the output of the node.
-        """
-        assert inp is not None or self.from_node[0].output is not None
-        inp = self.from_node[0].output if inp is None else inp
-
-        if isinstance(inp, torch.Tensor):
-            return self._forward_torch(inp, save_output)
-
-        elif isinstance(inp, np.ndarray):
-            return self._forward_numpy(inp, save_output)
-
-        else:
-            raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
-
-
-    def _forward_torch(self, inp: torch.Tensor=None, save_output=False) -> torch.Tensor:
+    def _forward_torch(self, inp: torch.Tensor=None) -> torch.Tensor:
         """
         Torch implementation of forward.
 
@@ -1302,12 +1303,9 @@ class Pad(Node):
         """
         output = torch.nn.functional.pad(inp, self.pads)
 
-        if save_output:
-            self.output = output
-
         return output
 
-    def _forward_numpy(self, inp: np.array=None, save_output=False) -> np.array:
+    def _forward_numpy(self, inp: np.array=None) -> np.array:
         """
         Numpy implementation of forward.
 
@@ -1320,9 +1318,6 @@ class Pad(Node):
             the output of the node.
         """
         output = np.pad(inp, self.pads)
-
-        if save_output is True:
-            self.output = output
 
         return output
 
@@ -1381,6 +1376,52 @@ class ConvBase(Node):
         self.strides = strides
         self.in_height, self.in_width = input_shape[-2:]
 
+
+    def forward(
+        self,
+        inp: torch.Tensor=None,
+        clip=None,
+        add_bias=True,
+        save_output=False,
+        save_gradient=False
+    ) -> torch.Tensor:
+        """
+        Computes the output of the node given an input.
+
+        Arguments:
+            inp:
+                the input.
+            clip:
+                clips the weights to positive values if set to '+' and to
+                negatives if set to '-'
+            add_bias:
+                whether to add bias
+            save_output:
+                Whether to save the output in the node. 
+            save_gradient:
+                Whether to save the gradient of the node. 
+        Returns: 
+            the output of the node.
+        """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0].output if inp is None else inp
+
+        if isinstance(inp, torch.Tensor):
+            output = self._forward_torch(inp, clip)
+
+            if save_gradient is True:
+                output.register_hook(self.grad_hook)
+
+        elif isinstance(inp, np.ndarray):
+            output = self._forward_numpy(inp)
+
+        else:
+            raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
+
+        if save_output:
+            self.output = output
+
+        return output
 
     def has_bias(self):
         """
@@ -1719,49 +1760,11 @@ class Conv(ConvBase):
 
         return self.kernels[index1[0]][index2[0]][height][width].item()
 
-
-    def forward(
-        self,
-        inp: torch.Tensor=None,
-        clip=None,
-        add_bias=True,
-        save_output=False
-    ) -> torch.Tensor:
-        """
-        Computes the output of the node given an input.
-
-        Arguments:
-            inp:
-                the input.
-            clip:
-                clips the weights to positive values if set to '+' and to
-                negatives if set to '-'
-            add_bias:
-                whether to add bias
-            save_output:
-                Whether to save the output in the node. 
-        Returns: 
-            the output of the node.
-        """
-        assert inp is not None or self.from_node[0].output is not None
-        inp = self.from_node[0].output if inp is None else inp
-
-        if isinstance(inp, torch.Tensor):
-            return self._forward_torch(inp, clip, add_bias, save_output)
-
-        elif isinstance(inp, np.ndarray):
-            return self._forward_numpy(inp, save_output)
-
-        else:
-            raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
-
-
     def _forward_torch(
         self,
         inp: torch.Tensor=None,
         clip=None,
-        add_bias=True,
-        save_output=False
+        add_bias=True
     ) -> torch.Tensor:
         """
         Torch implementation of forward.
@@ -1774,8 +1777,6 @@ class Conv(ConvBase):
                 negatives if set to '-'
             add_bias:
                 whether to add bias
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
@@ -1799,12 +1800,9 @@ class Conv(ConvBase):
             padding=self.pads
         )
             
-        if save_output:
-            self.output = output
-
         return output
 
-    def _forward_numpy(self, inp: np.array=None, save_output=False) -> np.array:
+    def _forward_numpy(self, inp: np.array=None) -> np.array:
         """
         Numpy implementation of forward.
 
@@ -1834,11 +1832,7 @@ class Conv(ConvBase):
             ).T.flatten()
         output = output.reshape(self.output_shape)
 
-        if save_output is True:
-            self.output = output
-
         return output
-
 
     def transpose(
         self,
@@ -1852,7 +1846,7 @@ class Conv(ConvBase):
             batch = inp.shape[0]
             filled_inp = torch.zeros(
                 (batch, self.output_size), dtype=inp.dtype, device=self.device
-            ) 
+            )
             filled_inp[:, out_flag.flatten()] = inp
             filled_inp = filled_inp.reshape((batch,) + self.output_shape_no_batch())
 
@@ -2111,47 +2105,11 @@ class ConvTranspose(ConvBase):
             id=self.id
         )
     
-    def forward(
-        self,
-        inp: torch.Tensor=None,
-        clip=None,
-        add_bias=True,
-        save_output=False
-    ) -> torch.Tensor:
-        """
-        Computes the output of the node given an input.
-
-        Arguments:
-            inp:
-                the input.
-            clip:
-                clips the weights to positive values if set to '+' and to
-                negatives if set to '-'
-            add_bias:
-                whether to add bias
-            save_output:
-                Whether to save the output in the node. 
-        Returns: 
-            the output of the node.
-        """ 
-        assert inp is not None or self.from_node[0].output is not None
-        inp = self.from_node[0].output if inp is None else inp
-
-        if isinstance(inp, torch.Tensor):
-            return self._forward_torch(inp, clip, add_bias, save_output)
-
-        elif isinstance(inp, np.ndarray):
-            return self._forward_numpy(inp, save_output)
-
-        else:
-            raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
-
     def _forward_torch(
         self,
         inp: torch.Tensor=None,
         clip=None,
-        add_bias=True,
-        save_output=False
+        add_bias=True
     ) -> torch.Tensor:
         """
         Torch implementation of forward.
@@ -2164,8 +2122,6 @@ class ConvTranspose(ConvBase):
                 negatives if set to '-'
             add_bias:
                 whether to add bias
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
@@ -2190,20 +2146,15 @@ class ConvTranspose(ConvBase):
             output_padding=self.output_pads
         )
 
-        if save_output:
-            self.output = output
-
         return output
 
-    def _forward_numpy(self, inp: np.ndarray=None, save_output=False) -> np.ndarray:
+    def _forward_numpy(self, inp: np.ndarray=None) -> np.ndarray:
         """
         Numpy implementation of forward.
 
         Arguments:
             inp:
                 the input.
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
@@ -2251,9 +2202,6 @@ class ConvTranspose(ConvBase):
                 self.bias.cpu().numpy(), (self.out_ch_sz, 1)
             ).T.flatten()
         output = output.reshape(self.output_shape)
-
-        if save_output is True:
-            self.output = output
 
         return output
 
@@ -2474,9 +2422,11 @@ class MaxPool(Node):
         """
         return self.output_size
 
-
     def forward(
-        self, inp: torch.Tensor=None, return_indices=False, save_output=False
+        self, inp: torch.Tensor=None,
+        return_indices: bool=False,
+        save_output: bool=False,
+        save_gradient: bool=False
     ) -> np.array:
         """
         Computes the output of the node given an input.
@@ -2488,6 +2438,8 @@ class MaxPool(Node):
                 Whether to return the indices of the max units.
             save_output:
                 Whether to save the output in the node. 
+            save_gradient:
+                Whether to save the gradient of the node. 
         Returns: 
             the output of the node.
         """
@@ -2495,17 +2447,24 @@ class MaxPool(Node):
         inp = self.from_node[0].output if inp is None else inp
 
         if isinstance(inp, torch.Tensor):
-            return self._forward_torch(inp, return_indices, save_output)
+            output = self._forward_torch(inp, return_indices, save_output)
+
+            if save_gradient is True:
+                output.register_hook(self.grad_hook)
 
         elif isinstance(inp, np.ndarray):
-            return self._forward_numpy(inp, save_output)
+            output = self._forward_numpy(inp, save_output)
 
         else:
             raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
 
+        if save_output:
+            self.output = output if return_indices is not True else output[0]
+
+        return output
 
     def _forward_torch(
-        self, inp: torch.Tensor=None, return_indices=False, save_output=False
+        self, inp: torch.Tensor=None, return_indices=False
     ) -> np.array:
         """
         Torch implementation of forward.
@@ -2528,13 +2487,9 @@ class MaxPool(Node):
             return_indices=return_indices
         )
 
-        if save_output:
-            self.output = output if return_indices is not True else output[0]
-
         return output
 
-
-    def _forward_numpy(self, inp: torch.Tensor=None, save_output=False) -> np.array:
+    def _forward_numpy(self, inp: torch.Tensor=None) -> np.array:
         """
         Numpy implementation of forward.
 
@@ -2558,9 +2513,6 @@ class MaxPool(Node):
         ).transpose(2, 0, 1)
         if self.has_batch_dimension() is True:
             output = np.expand_dims(output, 0)
-
-        if save_output is True:
-            self.output = output
 
         return output
 
@@ -2696,35 +2648,8 @@ class AveragePool(Node):
         """
         return self.output_size
 
-    def forward(
-        self, inp: torch.Tensor=None, save_output=False
-    ) -> np.array:
-        """
-        Computes the output of the node given an input.
-
-        Arguments:
-            inp:
-                The input.
-            save_output:
-                Whether to save the output in the node. 
-        Returns: 
-            the output of the node.
-        """
-        assert inp is not None or self.from_node[0].output is not None
-        inp = self.from_node[0].output if inp is None else inp
-
-        if isinstance(inp, torch.Tensor):
-            return self._forward_torch(inp, save_output)
-
-        elif isinstance(inp, np.ndarray):
-            return self._forward_numpy(inp, save_output)
-
-        else:
-            raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
-
-
     def _forward_torch(
-        self, inp: torch.Tensor=None, save_output=False
+        self, inp: torch.Tensor=None
     ) -> np.array:
         """
         Torch implementation of forward.
@@ -2732,8 +2657,6 @@ class AveragePool(Node):
         Arguments:
             inp:
                 The input.
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
@@ -2744,21 +2667,15 @@ class AveragePool(Node):
             padding=self.pads
         )
 
-        if save_output:
-            self.output = output
-
         return output
 
-
-    def _forward_numpy(self, inp: torch.Tensor=None, save_output=False) -> np.array:
+    def _forward_numpy(self, inp: torch.Tensor=None) -> np.array:
         """
         Numpy implementation of forward.
 
         Arguments:
             inp:
                 The input.
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
@@ -2774,9 +2691,6 @@ class AveragePool(Node):
         ).transpose(2, 0, 1)
         if self.has_batch_dimension() is True:
             output = np.expand_dims(output, 0)
-
-        if save_output is True:
-            self.output = output
 
         return output
 
@@ -2886,6 +2800,24 @@ class Relu(Node):
                 self._lower_relaxation_slope[1].cpu()
             )
 
+    def set_cache_bounds(self):
+        self.cached_bounds = self.bounds.copy()
+        if self._lower_relaxation_slope != (None, None):
+            self._cached_lower_relaxation_slope = (
+                self._lower_relaxation_slope[0].clone(),
+                self._lower_relaxation_slope[1].clone()
+            )
+
+    def use_cache_bounds(self):
+        self.bounds = self.cached_bounds.copy()
+        self.cached_bounds = None
+        self.reset_state_flags()
+        self._lower_relaxation_slope = (
+            self._cached_lower_relaxation_slope[0].clone(),
+            self._cached_lower_relaxation_slope[1].clone()
+        )
+
+
     def set_state(self, unit: tuple, state: ReluState):
         """
         Forces the state of a relu unit.
@@ -2911,32 +2843,7 @@ class Relu(Node):
         """
         self.dep_root[unit] = root_status
        
-
-    def forward(self, inp: torch.Tensor=None, save_output=None) -> torch.Tensor:
-        """
-        Computes the output of the node given an input.
-
-        Arguments:
-            inp:
-                the input.
-            save_output:
-                Whether to save the output in the node.
-        Returns:
-            the output of the node.
-        """
-        assert inp is not None or self.from_node[0].output is not None
-        inp = self.from_node[0].output if inp is None else inp
-
-        if isinstance(inp, torch.Tensor):
-            return self._forward_torch(inp, save_output)
-
-        elif isinstance(inp, np.ndarray):
-            return self._forward_numpy(inp, save_output)
-
-        else:
-            raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
-
-    def _forward_torch(self, inp: torch.Tensor=None, save_output=None) -> torch.Tensor:
+    def _forward_torch(self, inp: torch.Tensor=None) -> torch.Tensor:
         """
         Torch implementation of forward.
 
@@ -2950,20 +2857,15 @@ class Relu(Node):
         """
         output = torch.clamp(inp, 0, math.inf)
 
-        if save_output:
-            self.output = output
-
         return output
 
-    def _forward_numpy(self, inp: np.array=None, save_output=None) -> np.array:
+    def _forward_numpy(self, inp: np.array=None) -> np.array:
         """
         Numpy implementation of forward.
 
         Arguments:
             inp:
                 the input.
-            save_output:
-                Whether to save the output in the node.
         Returns:
             the output of the node.
         """
@@ -2971,9 +2873,6 @@ class Relu(Node):
         inp = self.from_node[0].output if inp is None else inp
 
         output = np.clip(inp, 0, math.inf)
-
-        if save_output:
-            self.output = output
 
         return output
 
@@ -3218,6 +3117,14 @@ class Relu(Node):
             
         return self._lower_relaxation_slope
 
+
+    def clear_lower_relaxation_slope(self) -> torch.Tensor:
+        """
+        Returns the lower bound relaxation slopes.
+        """
+        self._lower_relaxation_slope == (None, None)
+        self._custom_relaxation_slope = False
+
     def set_lower_relaxation_slope(
         self,
         lower: torch.Tensor=None,
@@ -3245,6 +3152,7 @@ class Relu(Node):
                 slope[idxs] = upper[idxs] / (upper[idxs] - lower[idxs])
  
             self._lower_relaxation_slope = (slope, slope)
+            self._custom_relaxation_slope = False
 
 
     def has_custom_relaxation_slope(self):
@@ -3343,26 +3251,37 @@ class Reshape(Node):
             id=self.id
         )
 
-    def forward(self, inp: torch.Tensor=None, save_output=None) -> torch.Tensor:
+    def _forward_torch(self, inp: torch.Tensor=None) -> torch.Tensor:
         """
         Computes the output of the node given an input.
 
         Arguments:
             inp:
                 the input.
-            save_output:
-                Whether to save the output in the node.
         Returns:
             the output of the node.
         """
         assert inp is not None or self.from_node[0].output is not None
         inp = self.from_node[0].output if inp is None else inp
 
-
         output = inp.reshape(self.output_shape)
 
-        if save_output is True:
-            self.output = output
+        return output
+    
+    def _forward_numpy(self, inp: np.ndarray=None) -> np.ndarray:
+        """
+        Computes the output of the node given an input.
+
+        Arguments:
+            inp:
+                the input.
+        Returns:
+            the output of the node.
+        """
+        assert inp is not None or self.from_node[0].output is not None
+        inp = self.from_node[0].output if inp is None else inp
+
+        output = inp.reshape(self.output_shape)
 
         return output
 
@@ -3455,59 +3374,27 @@ class Flatten(Node):
         """
         return self.from_node[0].get_milp_var_indices()
 
-    def forward(self, inp: torch.Tensor=None, save_output=False) -> torch.Tensor:
-        """
-        Computes the output of the node given an input.
-
-        Arguments:
-            inp:
-                the input.
-            save_output:
-                Whether to save the output in the node.
-        Returns: 
-            the output of the node.
-        """
-        assert inp is not None or self.from_node[0].output is not None
-        inp = self.from_node[0].output if inp is None else inp
-        
-        if isinstance(inp, torch.Tensor):
-            return self._forward_torch(inp, save_output)
-
-        elif isinstance(inp, np.ndarray):
-            return self._forward_numpy(inp, save_output)
-
-        else:
-            raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
-
-
-    def _forward_torch(self, inp: torch.Tensor=None, save_output=False) -> torch.Tensor:
+    def _forward_torch(self, inp: torch.Tensor=None) -> torch.Tensor:
         """
         Torch implementation of forward.
 
         Arguments:
             inp:
                 the input.
-            save_output:
-                Whether to save the output in the node.
         Returns: 
             the output of the node.
         """
         output = inp.flatten()
 
-        if save_output:
-            self.output = output
-
         return output
 
-    def _forward_numpy(self, inp: np.ndarray=None, save_output=False) -> np.ndarray:
+    def _forward_numpy(self, inp: np.ndarray=None) -> np.ndarray:
         """
         Numpy implementation of forward.
 
         Arguments:
             inp:
                 the input.
-            save_output:
-                Whether to save the output in the node. 
         Returns:
             the output of the node.
         """
@@ -3515,9 +3402,6 @@ class Flatten(Node):
         inp = self.from_node[1].output if inp is None else inp
 
         output = inp.flatten()
-
-        if save_output is True:
-            self.output = output
 
         return output
 
@@ -3589,7 +3473,7 @@ class Sub(Node):
             self.config,
             const=None if self.const is None else self.const.detach().clone(),
             depth=self.depth,
-            bounds=self.bounds,
+            bounds=self.bounds.copy(),
             id=self.id
         )
 
@@ -3631,7 +3515,13 @@ class Sub(Node):
         """
         return self.output_size
 
-    def forward(self, inp1: torch.Tensor=None, inp2: torch.Tensor=None, save_output=False) -> torch.Tensor:
+    def forward(
+        self,
+        inp1: torch.Tensor=None,
+        inp2: torch.Tensor=None,
+        save_output: bool=False,
+        save_gradient: bool=False
+    ) -> torch.Tensor:
         """
         Computes the output of the node given an input.
 
@@ -3643,11 +3533,14 @@ class Sub(Node):
                 taken as second input.
             save_output:
                 Whether to save the output in the node.
+            save_gradient:
+                Whether to save the gradient of the node.
         Returns:
             the output of the node.
         """
         assert inp1 is not None or self.from_node[0].output is not None
         inp1 = self.from_node[0].output if inp1 is None else inp1
+
         if self.const is  None:
             assert inp2 is not None or self.from_node[1].output is not None 
             inp2 = self.from_node[1].output if inp2 is None else inp2
@@ -3655,15 +3548,23 @@ class Sub(Node):
             inp2 = self.const
 
         if isinstance(inp1, torch.Tensor):
-            return self._forward_torch(inp1, inp2, save_output)
+            output = self._forward_torch(inp1, inp2)
+
+            if save_gradient is True:
+                output.register_hook(self.grad_hook)
 
         elif isinstance(inp1, np.ndarray):
-            return self._forward_numpy(inp1, inp2, save_output)
+            output = self._forward_numpy(inp1, inp2)
 
         else:
             raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
 
-    def _forward_torch(self, inp1: torch.Tensor=None, inp2: torch.Tensor=None, save_output=False) -> torch.Tensor:
+        if save_output is True:
+            self.output = output
+
+        return output
+
+    def _forward_torch(self, inp1: torch.Tensor=None, inp2: torch.Tensor=None) -> torch.Tensor:
         """
         Torch implementation of forward.
 
@@ -3673,20 +3574,15 @@ class Sub(Node):
             inp2:
                 the second input. If not set then the const of the node is
                 taken as second input.
-            save_output:
-                Whether to save the output in the node.
         Returns:
             the output of the node.
         """
         output = inp1 - inp2
 
-        if save_output:
-            self.output = output
-
         return output
 
     def _forward_numpy(
-        self, inp1: np.array=None, inp2: np.array=None, save_output=False
+        self, inp1: np.array=None, inp2: np.array=None
     ) -> np.array:
         """
         Numpy implementation of forward.
@@ -3697,15 +3593,10 @@ class Sub(Node):
             inp2:
                 the second input. If not set then the const of the node is
                 taken as second input.
-            save_output:
-                Whether to save the output in the node.
         Returns:
             the output of the node.
         """
         output = inp1 - inp2
-
-        if save_output is True:
-            self.output = output
 
         return output
 
@@ -3835,7 +3726,11 @@ class Add(Node):
 
 
     def forward(
-        self, inp1: torch.Tensor=None, inp2: torch.Tensor=None, save_output=False
+        self,
+        inp1: torch.Tensor=None,
+        inp2: torch.Tensor=None,
+        save_output: bool=False, 
+        save_gradient: bool=True
     ) -> torch.Tensor:
         """
         Computes the output of the node given an input.
@@ -3848,11 +3743,14 @@ class Add(Node):
                 taken as second input.
             save_output:
                 Whether to save the output in the node. 
+            save_gradient:
+                Whether to save the gradient of the node.
         Returns: 
             the output of the node.
         """
         assert inp1 is not None or self.from_node[0].output is not None
         inp1 = self.from_node[0].output if inp1 is None else inp1
+
         if self.const is  None:
             assert inp2 is not None or self.from_node[1].output is not None 
             inp2 = self.from_node[1].output if inp2 is None else inp2
@@ -3860,17 +3758,25 @@ class Add(Node):
             inp2 = self.const
 
         if isinstance(inp1, torch.Tensor):
-            return self._forward_torch(inp1, inp2, save_output)
+            output = self._forward_torch(inp1, inp2)
+
+            if save_gradient is True:
+                output.register_hook(self.grad_hook)
 
         elif isinstance(inp1, np.ndarray):
-            return self._forward_numpy(inp1, inp2, save_output)
+            output = self._forward_numpy(inp1, inp2)
 
         else:
             raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
 
+        if save_output is True:
+            self.output = output
+
+        return output
+
 
     def _forward_torch(
-        self, inp1: torch.Tensor=None, inp2: torch.Tensor=None, save_output=False
+        self, inp1: torch.Tensor=None, inp2: torch.Tensor=None
     ) -> torch.Tensor:
         """
         Torch implementation of forward.
@@ -3881,20 +3787,15 @@ class Add(Node):
             inp2:
                 the second input. If not set then the const of the node is
                 taken as second input.
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
         output = inp1 + inp2
 
-        if save_output:
-            self.output = output
-
         return output
 
     def _forward_numpy(
-        self, inp1: np.array=None, inp2: np.array=None, save_output=False
+        self, inp1: np.array=None, inp2: np.array=None
     ) -> np.array:
         """
         Numpy implementation of forward.
@@ -3905,8 +3806,6 @@ class Add(Node):
             inp2:
                 the second input. If not set then the const of the node is
                 taken as second input.
-            save_output:
-                Whether to save the output in the node.
         Returns:
             the output of the node.
         """
@@ -3916,9 +3815,6 @@ class Add(Node):
         inp2 = self.const.cpu().numpy() if inp2 is None else inp2
 
         output = inp1 + inp2
-
-        if save_output is True:
-            self.output = output
 
         return output
 
@@ -4045,40 +3941,13 @@ class BatchNormalization(Node):
         """
         return self.output_size
 
-
-    def forward(self, inp: torch.Tensor=None, save_output=False) -> torch.Tensor:
-        """
-        Computes the output of the node given an input.
-
-        Arguments:
-            inp:
-                the input.
-            save_output:
-                Whether to save the output in the node. 
-        Returns: 
-            the output of the node.
-        """
-        assert inp is not None or self.from_node[0].output is not None
-        inp = self.from_node[0].output if inp is None else inp
-
-        if isinstance(inp, torch.Tensor):
-            return self._forward_torch(inp, save_output)
-
-        elif isinstance(inp, np.ndarray):
-            return self._forward_numpy(inp, save_output)
-
-        else:
-            raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
-
-    def _forward_torch(self, inp: torch.Tensor=None, save_output=False) -> torch.Tensor:
+    def _forward_torch(self, inp: torch.Tensor=None) -> torch.Tensor:
         """
         Torch implementation of forward.
 
         Arguments:
             inp:
                 the input.
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
@@ -4091,20 +3960,15 @@ class BatchNormalization(Node):
             eps=self.epsilon
         )
 
-        if save_output:
-            self.output = output
-
         return output
 
-    def _forward_numpy(self, inp: np.ndarray=None, save_output=False) -> np.ndarray:
+    def _forward_numpy(self, inp: np.ndarray=None) -> np.ndarray:
         """
         Numpy implementation of forward.
 
         Arguments:
             inp:
                 the input.
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
@@ -4118,9 +3982,6 @@ class BatchNormalization(Node):
 
         output = (inp.flatten() - input_mean) / var * scale + bias
         output = output.reshape(self.output_shape)
-
-        if save_output is True:
-            self.output = output
 
         return output
 
@@ -4215,66 +4076,31 @@ class Slice(Node):
         """
         raise NotImplementedError('get milp var indices for Slice')
 
-
-    def forward(self, inp: torch.Tensor=None, save_output=False) -> torch.Tensor:
-        """
-        Computes the output of the node given an input.
-
-        Arguments:
-            inp:
-                the input.
-            save_output:
-                Whether to save the output in the node. 
-        Returns: 
-            the output of the node.
-        """
-        assert inp is not None or self.from_node[0].output is not None
-        inp = self.from_node[0].output if inp is None else inp
-
-        if isinstance(inp, torch.Tensor):
-            return self._forward_torch(inp, save_output)
-
-        elif isinstance(inp, np.ndarray):
-            return self._forward_numpy(inp, save_output)
-
-        else:
-            raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
-
-    def _forward_torch(self, inp: torch.Tensor=None, save_output=False) -> torch.Tensor:
+    def _forward_torch(self, inp: torch.Tensor=None) -> torch.Tensor:
         """
         Torch implementation of forward.
 
         Arguments:
             inp:
                 the input.
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
         output = inp[self.slices]
 
-        if save_output:
-            self.output = output
-
         return output
 
-    def _forward_numpy(self, inp: np.ndarray=None, save_output=False) -> np.ndarray:
+    def _forward_numpy(self, inp: np.ndarray=None) -> np.ndarray:
         """
         Numpy implementation of forward.
 
         Arguments:
             inp:
                 the input.
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
         output = inp[tuple(self.slices)]
-
-        if save_output is True:
-            self.output = output
 
         return output
 
@@ -4411,50 +4237,14 @@ class Unsqueeze(Node):
             variables.
         """
         raise NotImplementedError('get milp var indices for Unsqueeze')
-
-
-        if isinstance(inp, torch.Tensor):
-            return self._forward_torch(inp, save_output)
-
-        elif isinstance(inp1, np.ndarray):
-            return self._forward_numpy(inp, save_output)
-
-        else:
-            raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
-    
-    def forward(self, inp: torch.Tensor=None, save_output=False) -> torch.Tensor:
-        """
-        Computes the output of the node given an input.
-
-        Arguments:
-            inp:
-                the input.
-            save_output:
-                Whether to save the output in the node. 
-        Returns: 
-            the output of the node.
-        """
-        assert inp is not None or self.from_node[0].output is not None
-        inp = self.from_node[0].output if inp is None else inp
-
-        if isinstance(inp, torch.Tensor):
-            return self._forward_torch(inp, save_output)
-
-        elif isinstance(inp1, np.ndarray):
-            return self._forward_numpy(inp, save_output)
-
-        else:
-            raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
-
-    def _forward_torch(self, inp: torch.Tensor=None, save_output=False) -> torch.Tensor:
+ 
+    def _forward_torch(self, inp: torch.Tensor=None) -> torch.Tensor:
         """
         Torch implementation of forward.
 
         Arguments:
             inp:
                 the input.
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
@@ -4462,29 +4252,21 @@ class Unsqueeze(Node):
         for i, j in enumerate(self.axes):
             output = torch.unsqueeze(output, j + i)
 
-        if save_output:
-            self.output = output
-
         return output
 
-    def _forward_numpy(self, inp: np.ndarray=None, save_output=False) -> np.ndarray:
+    def _forward_numpy(self, inp: np.ndarray=None) -> np.ndarray:
         """
         Numpy implementation of forward.
 
         Arguments:
             inp:
                 the input.
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
         output = inp.copy()
         for i, j in enumerate(self.axes):
             output = np.expand_dims(output, j + i)
-
-        if save_output is True:
-            self.output = output
 
         return output
 
@@ -4594,7 +4376,9 @@ class Concat(Node):
         raise NotImplementedError('get milp var indices for Slice')
 
 
-    def forward(self, inp: list=None, save_output=False) -> torch.Tensor:
+    def forward(
+        self, inp: list=None, save_output: bool=False, save_gradient: bool=False
+    ) -> torch.Tensor:
         """
         Computes the output of the node given an input.
 
@@ -4603,6 +4387,8 @@ class Concat(Node):
                 list of inputs to the node.
             save_output:
                 Whether to save the output in the node. 
+            save_gradient:
+                Whether to save the gradient of the node. 
         Returns: 
             the output of the node.
         """
@@ -4610,52 +4396,49 @@ class Concat(Node):
         inp = [i.output for i in self.from_node] if inp is None else inp
 
         if np.all([isinstance(i, torch.Tensor) for i in inp]):
-            return self._forward_torch(inp, save_output)
+            output =  self._forward_torch(inp)
+
+            if save_gradient is True:
+                output.register_hook(self.grad_hook)
 
         elif np.all([isinstance(i, np.ndarray) for i in inp]):
-            return self._forward_numpy(inp, save_output)
+            output = self._forward_numpy(inp)
 
         else:
             raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
 
-    def _forward_torch(self, inp: list=None, save_output=False) -> torch.Tensor:
+        if save_output is True:
+            self.output = output
+
+        return output
+
+    def _forward_torch(self, inp: list=None) -> torch.Tensor:
         """
         Torch implementation of forward.
 
         Arguments:
             inp:
                 list of inputs to the node.
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
         output = torch.cat(inp, self.axis)
 
-        if save_output is True:
-            self.output = output
-
         return output
 
-    def _forward_numpy(self, inp: list=None, save_output=False) -> np.ndarray:
+    def _forward_numpy(self, inp: list=None) -> np.ndarray:
         """
         Numpy implementation of forward.
 
         Arguments:
             inp:
                 list of inputs to the node.
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
         output = np.concatenate(inp, self.axis)
 
-        if save_output is True:
-            self.output = output
-
         return output
-
 
 class Mul(Node):
     def __init__(
@@ -4709,7 +4492,12 @@ class Mul(Node):
             id=self.id
         )
 
-    def forward(self, inp: list=None, save_output=False) -> torch.Tensor:
+    def forward(
+        self,
+        inp: list=None,
+        save_output: bool=False,
+        save_gradient: bool=False
+    ) -> torch.Tensor:
         """
         Computes the output of the node given an input.
 
@@ -4718,26 +4506,36 @@ class Mul(Node):
                 list of inputs to the node.
             save_output:
                 Whether to save the output in the node. 
+            save_gradient:
+                Whether to save the gradient of the node. 
         Returns: 
             the output of the node.
         """
         assert inp is not None or \
         (self.from_node[0].output is not None and self.from_node[0].output is not None)
 
-        inp_0 = self.from_node[0] if inp is None else inp[0]
-        inp_1 = self.from_node[1] if inp is None else inp[1]
+        inp_0 = self.from_node[0].output if inp is None else inp[0]
+        inp_1 = self.from_node[1].output if inp is None else inp[1]
 
         if isinstance(inp_0, torch.Tensor) and isinstance(inp_1, torch.Tensor):
-            return self._forward_torch(inp_0, inp_1, save_output)
+            output = self._forward_torch(inp_0, inp_1)
+            
+            if save_gradient is True:
+                output.register_hook(self.grad_hook)
 
         elif isinstance(inp_0, np.ndarray) and isinstance(inp_1, np.ndarray):
-            return self._forward_numpy(inp_0, inp_1, save_output)
+            output = self._forward_numpy(inp_0, inp_1)
 
         else:
             raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
 
+        if save_output is True:
+            self.output = output
+
+        return output
+
     def _forward_torch(
-        self, inp_0: torch.Tensor, inp_1: torch.Tensor, save_output=False
+        self, inp_0: torch.Tensor, inp_1: torch.Tensor
     ) -> torch.Tensor:
         """
         Torch implementation of forward.
@@ -4747,19 +4545,14 @@ class Mul(Node):
                 first input.
             inp_1:
                 second: input.
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
         output = torch.mul(inp_0, inp_1)
 
-        if save_output is True:
-            self.output = output
-
         return output
 
-    def _forward_numpy(self, inp: list=None, save_output=False) -> np.ndarray:
+    def _forward_numpy(self, inp_0: torch.Tensor, inp_1: torch.Tensor) -> np.ndarray:
         """
         Numpy implementation of forward.
 
@@ -4772,9 +4565,6 @@ class Mul(Node):
             the output of the node.
         """
         output = np.multiply(inp_0, inp_1)
-
-        if save_output is True:
-            self.output = output
 
         return output
 
@@ -4831,7 +4621,12 @@ class Div(Node):
             id=self.id
         )
 
-    def forward(self, inp=None, save_output=False) -> torch.Tensor:
+    def forward(
+        self,
+        inp: torch.Tensor=None,
+        save_output: bool=False,
+        save_gradient: bool=False
+    ) -> torch.Tensor:
         """
         Computes the output of the node given an input.
 
@@ -4840,26 +4635,36 @@ class Div(Node):
                 list of inputs to the node.
             save_output:
                 Whether to save the output in the node. 
+            save_gradient:
+                Whether to save the gradient of the node. 
         Returns: 
             the output of the node.
         """
         assert inp is not None or \
         (self.from_node[0].output is not None and self.from_node[0].output is not None)
 
-        inp_0 = self.from_node[0] if inp is None else inp[0]
-        inp_1 = self.from_node[1] if inp is None else inp[1]
+        inp_0 = self.from_node[0].output if inp is None else inp[0]
+        inp_1 = self.from_node[1].output if inp is None else inp[1]
 
         if isinstance(inp_0, torch.Tensor) and isinstance(inp_1, torch.Tensor):
-            return self._forward_torch(inp_0, inp_1, save_output)
+            output = self._forward_torch(inp_0, inp_1)
+
+            if save_gradient is True:
+                output.register_hook(self.grad_hook)
 
         elif isinstance(inp_0, np.ndarray) and isinstance(inp_1, np.ndarray):
-            return self._forward_numpy(inp_0, inp_1, save_output)
+            return self._forward_numpy(inp_0, inp_1)
 
         else:
             raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
 
+        if save_output is True:
+            self.output = output
+
+        return output
+
     def _forward_torch(
-        self, inp_0: torch.Tensor, inp_1: torch.Tensor, save_output=False
+        self, inp_0: torch.Tensor, inp_1: torch.Tensor
     ) -> torch.Tensor:
         """
         Torch implementation of forward.
@@ -4869,34 +4674,24 @@ class Div(Node):
                 first input.
             inp_1:
                 second: input.
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
         output = torch.div(inp_0, inp_1)
 
-        if save_output is True:
-            self.output = output
-
         return output
 
-    def _forward_numpy(self, inp: list=None, save_output=False) -> np.ndarray:
+    def _forward_numpy(self, inp_0: torch.Tensor, inp_1: torch.Tensor) -> np.ndarray:
         """
         Numpy implementation of forward.
 
         Arguments:
             inp:
                 list of inputs to the node.
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
         output = np.divide(inp_0, inp_1)
-
-        if save_output is True:
-            self.output = output
 
         return output
 
@@ -4971,65 +4766,31 @@ class ReduceSum(Node):
             id=self.id
         )
 
-    def forward(self, inp=None, save_output=False) -> torch.Tensor:
-        """
-        Computes the output of the node given an input.
-
-        Arguments:
-            inp:
-                list of inputs to the node.
-            save_output:
-                Whether to save the output in the node. 
-        Returns: 
-            the output of the node.
-        """
-        assert inp is not None or self.from_node[0].output is not None
-        inp = self.from_node[0] if inp is None else inp
-
-        if isinstance(inp, torch.Tensor):
-            return self._forward_torch(inp, save_output)
-
-        elif isinstance(inp, np.ndarray):
-            return self._forward_numpy(inp, save_output)
-
-        else:
-            raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
-
-    def _forward_torch(self, inp: torch.Tensor, save_output=False) -> torch.Tensor:
+    def _forward_torch(self, inp: torch.Tensor) -> torch.Tensor:
         """
         Torch implementation of forward.
 
         Arguments:
             inp:
                 the input.
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
         output = torch.sum(inp, self.axes, keepdim=self.keepdims)
 
-        if save_output is True:
-            self.output = output
-
         return output
 
-    def _forward_numpy(self, inp: np.ndarray, save_output=False) -> np.ndarray:
+    def _forward_numpy(self, inp: np.ndarray) -> np.ndarray:
         """
         Numpy implementation of forward.
 
         Arguments:
             inp:
                 the input.
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
         output = np.sum(inp, axis=self.axes, keepdims=self.keepdims)
-
-        if save_output is True:
-            self.output = output
 
         return output
 
@@ -5085,46 +4846,17 @@ class Sigmoid(Node):
             id=self.id
         )
 
-    def forward(self, inp=None, save_output=False) -> torch.Tensor:
-        """
-        Computes the output of the node given an input.
-
-        Arguments:
-            inp:
-                list of inputs to the node.
-            save_output:
-                Whether to save the output in the node. 
-        Returns: 
-            the output of the node.
-        """
-        assert inp is not None or self.from_node[0].output is not None
-        inp = self.from_node[0] if inp is None else inp
-
-        if isinstance(inp, torch.Tensor):
-            return self._forward_torch(inp, save_output)
-
-        elif isinstance(inp, np.ndarray):
-            return self._forward_numpy(inp, save_output)
-
-        else:
-            raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
-
-    def _forward_torch(self, inp: torch.Tensor, save_output=False) -> torch.Tensor:
+    def _forward_torch(self, inp: torch.Tensor) -> torch.Tensor:
         """
         Torch implementation of forward.
 
         Arguments:
             inp:
                 the input.
-            save_output:
-                Whether to save the output in the node. 
         Returns: 
             the output of the node.
         """
         output = torch.sigmoid(inp)
-
-        if save_output is True:
-            self.output = output
 
         return output
 

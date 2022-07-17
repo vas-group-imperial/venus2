@@ -13,6 +13,7 @@
 import random
 
 from venus.verification.verification_problem import VerificationProblem
+from venus.split.split_strategy import SplitStrategy
 from venus.network.node import Input
 from venus.bounds.bounds import Bounds
 
@@ -94,6 +95,13 @@ class InputSplitter:
         else:
             # Otherwise split randomly
             dim = random.choice(prob.spec.input_node.get_outputs())
+            if isinstance(prob.spec.output_formula, list):
+                while prob.spec.is_form_satisfied(
+                    prob.spec.output_formula[dim],
+                    prob.nn.tail.bounds.lower[dim, ...],
+                    prob.nn.tail.bounds.lower[dim, ...]
+                ) is True:
+                    dim = random.choice(prob.spec.input_node.get_outputs())
             try:
                 best_prob1, best_prob2 =  self.split_dimension(prob, dim)
             except Exception as error:
@@ -131,6 +139,7 @@ class InputSplitter:
             prob.depth + 1,
             self.config
         )
+        prob1.last_split_strategy = SplitStrategy.INPUT
         try:
             prob1.bound_analysis()
             prob1.detach()
@@ -146,6 +155,7 @@ class InputSplitter:
             prob.depth + 1,
             self.config
         )
+        prob1.last_split_strategy = SplitStrategy.INPUT
         try:
             prob2.bound_analysis()
             prob2.detach()

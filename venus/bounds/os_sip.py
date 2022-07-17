@@ -449,7 +449,7 @@ class OSSIP:
         not_lower_max = torch.logical_not(lower_max)
 
         matrix = torch.zeros(
-            (node.output_size, node.input_size),
+            (node.output_size, equation.coeffs_size),
             dtype=node.config.PRECISION, 
             device=node.config.DEVICE
         )

@@ -85,6 +85,8 @@ class NeuralNetwork:
 
         for i in self.node:
             nn.node[i] = self.node[i].copy()
+            # to edit
+            nn.node[i].grads = self.node[i].grads
 
         nn.head =  [nn.node[i.id] for i in self.head]
         nn.tail = nn.node[self.tail.id]
@@ -98,6 +100,7 @@ class NeuralNetwork:
             nn.node[i].to_node = [nn.node[k.id] for k in j.to_node]
 
         nn.input_simplified = self.input_simplified
+
 
         return nn
 
@@ -166,7 +169,7 @@ class NeuralNetwork:
 
     def cache_bounds(self):
         for _, i in self.node.items():
-            i.cache_bounds()
+            i.set_cache_bounds()
 
     def use_cache_bounds(self):
         for _, i in self.node.items():
@@ -240,7 +243,6 @@ class NeuralNetwork:
             self.node[i].output_size for i in self.node if isinstance(self.node[i], Relu)
         ])
 
-
     def get_n_stabilised_nodes(self):
         """
         Computes the number of stabilised ReLU nodes in the network.
@@ -250,7 +252,21 @@ class NeuralNetwork:
             int of the number of stabilised ReLU nodes.
         """
         return sum([
-            self.node[i].get_stable_count() for i in self.node if isinstance(self.node[i], Relu)
+            self.node[i].get_stable_count() 
+            for i in self.node if isinstance(self.node[i], Relu)
+        ])
+
+    def get_n_non_stabilised_nodes(self):
+        """
+        Computes the number of non-stabilised ReLU nodes in the network.
+
+        Returns:
+
+            int of the number of stabilised ReLU nodes.
+        """
+        return sum([
+            self.node[i].get_unstable_count() 
+            for i in self.node if isinstance(self.node[i], Relu)
         ])
 
     def get_stability_ratio(self):
@@ -312,13 +328,15 @@ class NeuralNetwork:
 
             return list(itertools.product(*shape))
 
-    def forward(self, inp):
+    def forward(self, inp, save_gradient: bool=False):
         """
         Computes the output of the network given an input.
 
         Arguments:
             inp:
                 The input.
+            save_gradient:
+                whether to save the gradients of the nodes.
         Returns
             The output given inp.
         """
@@ -327,7 +345,7 @@ class NeuralNetwork:
         for i in range(self.tail.depth + 1):
             nodes = self.get_node_by_depth(i)
             for j in nodes:
-                j.forward(save_output=True)     
+                j.forward(save_output=True, save_gradient=save_gradient)    
 
         output = self.tail.output
         self.clean_outputs()
@@ -345,6 +363,23 @@ class NeuralNetwork:
 
         return False
 
+    def reset_relaxation_slope(self):
+        """
+        Resets to default the relu relaxation slopes in the network.
+        """
+        for _, i in self.node.items():
+            if isinstance(i, Relu) and i.has_custom_relaxation_slope():
+                i.set_lower_relaxation_slope(
+                    approx=self.config.SIP.RELU_APPROXIMATION
+                )
+
+    def clear_relaxation_slope(self):
+        """
+        Clears the relu relaxation slope.
+        """
+        for _, i in self.node.items():
+            if isinstance(i, Relu) and i.has_custom_relaxation_slope():
+                i.clear_lower_relaxation_slope()
 
     def get_non_linear_starting_depth(self):
         """

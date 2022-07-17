@@ -9,7 +9,7 @@
 # Description: configuration class
 # ************
 
-from venus.split.split_strategy import SplitStrategy
+from venus.split.split_strategy import SplitStrategy, NodeSplitStrategy
 from venus.common.utils import ReluApproximation, OSIPMode
 import multiprocessing
 import torch
@@ -103,6 +103,10 @@ class Splitter():
     SMALL_N_INPUT_DIMENSIONS: int = 16
     # splitting strategy
     SPLIT_STRATEGY: SplitStrategy = SplitStrategy.NONE
+
+    NODE_SPLIT_STRATEGY: NodeSplitStrategy = NodeSplitStrategy.MULTIPLE_SPLITS 
+    # branching heuristic, either deps or grad
+    BRANCHING_HEURISTIC: str = 'deps'
     # the stability ratio weight for computing the difficulty of a problem
     STABILITY_RATIO_WEIGHT: float = 1
     # the value of fixed ratio above which the splitting can stop in any
@@ -111,7 +115,7 @@ class Splitter():
     # the number of parallel splitting processes is 2^d where d is the
     # number of the parameter
     SPLIT_PROC_NUM: int = 2
-    # macimum splitting depth
+    # maximum splitting depth
     MAX_SPLIT_DEPTH: int = 7
 
 class SIP():
@@ -162,13 +166,14 @@ class Config:
         self.PRECISION = torch.float32
         self.DEVICE = torch.device('cpu')
         self._user_set_params = set()
-        # self.BENCHMARK = 'nn4sys'
+        self.BENCHMARK = 'nn4sys'
         # self.BENCHMARK = 'carvana'
         # self.BENCHMARK = 'mnistfc'
-        self.BENCHMARK = 'cifar_biasfield'
+        # self.BENCHMARK = 'cifar_biasfield'
         # self.BENCHMARK = 'rl_benchmarks'
         # self.BENCHMARK = 'collins_rul_cnn'
         # self.BENCHMARK = 'sri_resnet_a'
+        # self.BENCHMARK = 'cifar100_tinyimagenet_resnet'
 
     def set_param(self, param, value):
         if value is None: return
@@ -334,7 +339,7 @@ class Config:
         self.set_param('console_output', u_params.console_output)
 
         
-    def set_vnncomp_params(self, n_relus, i_size):
+    def set_vnncomp_params(self, n_relus, i_size, batch=1):
         if i_size > 10:
             self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.NODE
         else:
@@ -368,8 +373,11 @@ class Config:
             self.SIP.ONE_STEP_SYMBOLIC = True
             self.SIP.EQ_CONCRETISATION = True
             self.SIP.SLOPE_OPTIMISATION = True
-            self.SPLITTER.STABILITY_RATIO_CUTOFF = 0.95
+            self.SPLITTER.STABILITY_RATIO_CUTOFF = 1
             self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.INPUT
+            self.SPLITTER.MAX_SPLIT_DEPTH = 100
+            self.SPLITTER.SPLIT_PROC_NUM = 2
+
 
         elif self.BENCHMARK == 'reach_prob_density':
             self.SOLVER.IDEAL_CUTS = True
@@ -438,7 +446,7 @@ class Config:
             self.SOLVER.INTER_DEP_CONSTRS = True
             self.SOLVER.MONITOR_SPLIT = True
             if n_relus < 1000:
-                self.SPLITTER.BRANCHING_DEPTH = 2
+                self.SPLITTER.BRANCHING_DaEPTH = 2
                 self.SOLVER.BRANCH_THRESHOLD = 10000
             elif n_relus < 2000:
                 self.SPLITTER.BRANCHING_DEPTH = 2
@@ -453,4 +461,55 @@ class Config:
             self.SIP.SIMPLIFY_FORMULA = True
             self.SIP.SLOPE_OPTIMISATION = True
             self.SPLITTER.STABILITY_RATIO_CUTOFF = 0.75
+        
+        elif self.BENCHMARK == 'vgg16_2022':
+            self.VERIFIER.COMPLETE = True
+            self.VERIFIER.PGD = True
+            self.SIP.SYMBOLIC = False
+            self.SIP.ONE_STEP_SYMBOLIC = False
+            self.SIP.EQ_CONCRETISATION = False
+            self.PRECISION = torch.float64
+
+        elif self.BENCHMARK == 'cifar100_tinyimagenet_resnet':
+            self.SOLVER.IDEAL_CUTS = True
+            self.SOLVER.INTER_DEP_CUTS = True
+            self.SOLVER.INTER_DEP_CONSTRS = True
+            self.SOLVER.MONITOR_SPLIT = False
+            self.SPLITTER.BRANCHING_DEPTH = 4
+            self.VERIFIER.COMPLETE = True
+            self.VERIFIER.PGD = True
+            self.SIP.EQ_CONCRETISATION = True
+            self.SIP.SIMPLIFY_FORMULA = True
+            self.SIP.SLOPE_OPTIMISATION = True
+            self.SPLITTER.BRANCHING_HEURISTIC = 'grad' 
+            self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.NONE
+
+        elif self.BENCHMARK == 'nn4sys':
+            self.SPLITTER.BRANCHING_DEPTH = 10
+            self.VERIFIER.COMPLETE = True
+            self.VERIFIER.PGD = True
+            self.SIP.EQ_CONCRETISATION = True
+            self.SIP.SIMPLIFY_FORMULA = True
+            self.SIP.SLOPE_OPTIMISATION = False
+            self.SPLITTER.BRANCHING_HEURISTIC = 'grad' 
+            if batch > 1:
+                self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.INPUT
+                self.SPLITTER.STABILITY_RATIO_CUTOFF = 1
+
+        elif self.BENCHMARK == 'test':
+            self.SOLVER.IDEAL_CUTS = True
+            self.SOLVER.INTER_DEP_CUTS = True
+            self.SOLVER.INTER_DEP_CONSTRS = True
+            self.SOLVER.MONITOR_SPLIT = True
+            self.SPLITTER.BRANCHING_DEPTH = 4
+            self.SOLVER.BRANCH_THRESHOLD = 100
+            self.VERIFIER.COMPLETE = True
+            self.VERIFIER.PGD = True
+            self.SIP.ONE_STEP_SYMBOLIC = True
+            self.SIP.EQ_CONCRETISATION = True
+            self.SIP.SIMPLIFY_FORMULA = True
+            self.SIP.SLOPE_OPTIMISATION = True
+            self.SPLITTER.BRANCHING_HEURISTIC = 'grad' 
+            self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.INPUT
+
 
