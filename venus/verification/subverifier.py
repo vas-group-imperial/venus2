@@ -85,7 +85,7 @@ class SubVerifier:
 
         if prob.inc_ver_done is not True:
             slv_report = self.verify_incomplete(prob)
-            if slv.result != SolveResult.UNDECIDED:
+            if slv_report.result != SolveResult.UNDECIDED:
                 return slv_report
 
         if self.config.VERIFIER.MILP is True:
@@ -226,7 +226,7 @@ class SubVerifier:
             'LP analysis done. Verification problem could not be solved'
         )
 
-        return SolveReport(SolveResult.UNDECIDED, timer() - start, cex)
+        return SolveReport(SolveResult.UNDECIDED, timer() - start, None)
 
     def verify_complete(self, prob: VerificationProblem):
         """

@@ -49,6 +49,7 @@ class VerificationProblem(object):
         self._sip_bounds_computed = False
         self.last_split_strategy = None
         self.device = torch.device('cpu')
+        self.split_dim = 0
 
     def bound_analysis(self, delta_flags=None):
         """

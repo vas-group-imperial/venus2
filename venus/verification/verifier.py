@@ -166,6 +166,10 @@ class Verifier:
                         Verifier.logger.info('Read UNSATisfied result. Terminating ...')
                         break
 
+                    elif report.result == SolveResult.UNDECIDED:
+                        Verifier.logger.info('Read UNDECIDED result. Terminating ...')
+                        break
+
                 else:
                         raise Exception(
                             f'Unexpected report read from queue {type(report)}'
@@ -235,7 +239,8 @@ class Verifier:
             if self.config.SPLITTER.SPLIT_PROC_NUM > 0 and \
             self.config.SPLITTER.SPLIT_STRATEGY in [
                 SplitStrategy.INPUT,
-                SplitStrategy.INPUT_NODE
+                SplitStrategy.INPUT_NODE,
+                SplitStrategy.INPUT_NODE_ALT
             ]:
                 isplitter = InputSplitter(
                     self.prob,

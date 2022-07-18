@@ -126,7 +126,7 @@ class ProjectedGradientDescent:
 
         # compute perturbation
         perturbation = eps * torch.sign(x.grad)
-
+        
         if torch.all(perturbation == 0):
             adv = self.generate_random_adv(prob.spec.input_node.bounds)
 

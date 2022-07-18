@@ -103,8 +103,8 @@ class InputSplitter:
                     best_prob2 = prob2
         else:
             # Otherwise split randomly
-            dim = random.choice(prob.spec.input_node.get_outputs())
             if isinstance(prob.spec.output_formula, list):
+                dim = random.choice(prob.spec.input_node.get_outputs())
                 idx = np.prod(dim)
                 while prob.spec.is_form_satisfied(
                     prob.spec.output_formula[idx],
@@ -113,6 +113,9 @@ class InputSplitter:
                 ) is True:
                     dim = random.choice(prob.spec.input_node.get_outputs())
                     idx = np.prod(dim)
+            else:
+                dim = (prob.split_dim + 1) % prob.spec.input_node.output_size
+                dim = prob.spec.input_node.get_outputs()[dim]
 
             # try:
             best_prob1, best_prob2 =  self.split_dimension(prob, dim)
@@ -151,7 +154,7 @@ class InputSplitter:
             prob.depth + 1,
             self.config
         )
-
+        prob1.split_dim = dim
         prob1.last_split_strategy = SplitStrategy.INPUT
         try:
             prob1.bound_analysis()

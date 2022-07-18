@@ -132,16 +132,13 @@ class Node:
         return output
 
     def grad_hook(self, grad_output):
-        if self.has_relu_activation() is True:
+        if self.has_relu_activation() is True or isinstance(self, Input):
             outputs = self.get_outputs()
             self.grads = grad_output.detach().clone()
             self.grads = sorted(
                 outputs, 
                 key=lambda x: self.grads[x].item()
             )
-        # if self.batched is True:
-            # self.grads = torch.mean(self.grads, dim=0)
-        # self.grads = torch.argsort(self.grads, descending=True).flatten().tolist()
 
     def set_batch_size(self, size: int=1):
         """

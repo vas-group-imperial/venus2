@@ -383,6 +383,7 @@ class Config:
             self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.INPUT
             self.SPLITTER.MAX_SPLIT_DEPTH = 100
             self.SPLITTER.SPLIT_PROC_NUM = 2
+            self.VERIFIER.MILP = False
 
 
         elif self.BENCHMARK == 'reach_prob_density':
@@ -477,7 +478,7 @@ class Config:
             self.SIP.ONE_STEP_SYMBOLIC = False
             self.SIP.EQ_CONCRETISATION = False
             self.PRECISION = torch.float64
-            self.MILP = False
+            self.VERIFIER.MILP = False
             self.SPLITTER.STABILITY_RATIO_CUTOFF = 1.1
 
 
