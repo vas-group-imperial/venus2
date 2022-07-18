@@ -142,13 +142,13 @@ class Venus:
                 unsafe += 1
                 total_unsafe_time += ver_report.runtime
                 
-                import onnx
-                import onnxruntime.backend as rt
-                m = onnx.load(query[0])
-                runnable = rt.prepare(m, 'CPU')
-                cex = np.expand_dims(ver_report.cex.numpy(), 0)
-                pred = runnable.run(cex)
-                print('*****', pred)
+                # import onnx
+                # import onnxruntime.backend as rt
+                # m = onnx.load(query[0])
+                # runnable = rt.prepare(m, 'CPU')
+                # cex = np.expand_dims(ver_report.cex.numpy(), 0)
+                # pred = runnable.run(cex)
+                # print('*****', pred)
                 # import sys
                 # sys.exit()
 
@@ -168,7 +168,7 @@ class Venus:
                         res += f'\n (X_{i + 1} {j})'
                     res += ')'                        
                 elif ver_report.result == SolveResult.SAFE:
-                    res = 'sat\n' 
+                    res = 'unsat\n' 
                 elif ver_report.result == SolveResult.TIMEOUT:
                     res = 'timeout\n'
                 else:
@@ -332,5 +332,4 @@ class Venus:
                     else:
                         self.config.SOLVER.TIME_LIMIT =  time_left
 
-        ver_report.result = SolveResult.SAFE
         return ver_report

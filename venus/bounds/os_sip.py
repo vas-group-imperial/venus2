@@ -152,7 +152,7 @@ class OSSIP:
 
     def _forward_conv(self, equation: Equation, node: Node):
         shape = (equation.coeffs_size,) + node.input_shape_no_batch()
-        matrix = node.forward(equation.matrix.T.reshape(shape), add_bias=False)
+        matrix = node.forward(inp=equation.matrix.T.reshape(shape), add_bias=False)
         matrix = matrix.reshape(equation.coeffs_size, -1).T
         const = node.forward(
             equation.const.reshape(node.input_shape), add_bias=True
@@ -265,7 +265,6 @@ class OSSIP:
 
         elif type(node) in [Flatten, Reshape, Unsqueeze]:
             equation = in_equation
-
             # new_lower_eq  = self.lower_eq[node.from_node[0].id].forward(node)
  
             # elif type(node) in [BatchNormalization, Conv, Gemm]:

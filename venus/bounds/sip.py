@@ -72,11 +72,11 @@ class SIP:
         # set bounds using area approximations
         self._set_bounds(slopes, depth=1)
  
-        # print(
-            # self.prob.id,
-            # self.prob.nn.tail.bounds.lower,
-            # self.prob.nn.tail.bounds.upper
-        # )
+        print(
+            self.prob.id,
+            self.prob.nn.tail.bounds.lower,
+            self.prob.nn.tail.bounds.upper
+        )
         # optimise the relaxation slopes using pgd
         # if self.config.SIP.SLOPE_OPTIMISATION is True and \
         # self.prob.nn.has_custom_relaxation_slope() is not True \
@@ -150,9 +150,11 @@ class SIP:
         slopes = self._update_bounds(node, bounds, slopes, delta_flag)
         if node.has_relu_activation():
             ia_count = node.to_node[0].get_unstable_count()
-            
+     
+        # print('ia', node, torch.mean(node.bounds.lower))
         # check eligibility for symbolic equations
         symb_elg = self.is_symb_eq_eligible(node)
+
 
         # set one step symbolic bounds
         if self.config.SIP.ONE_STEP_SYMBOLIC is True and \
@@ -190,6 +192,7 @@ class SIP:
             )
             slopes = self._update_bounds(node, bounds, slopes=slopes, out_flag=flag)
 
+        # print(node, 'bs', torch.mean(node.bounds.lower))
 
     def _update_bounds(
         self,

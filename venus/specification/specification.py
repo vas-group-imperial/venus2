@@ -49,10 +49,10 @@ class Specification:
             return []
 
         if isinstance(self.output_formula, list): 
-            negated_output_formula = NegationFormula(self.output_formula).to_NNF()
+            negated_output_formula = NegationFormula(self.output_formula[idx]).to_NNF()
             return self.get_constrs(negated_output_formula, gmodel, output_vars)
         else:
-            negated_output_formula = NegationFormula(self.output_formula[idx]).to_NNF()
+            negated_output_formula = NegationFormula(self.output_formula).to_NNF()
             return self.get_constrs(negated_output_formula, gmodel, output_vars)
 
     def get_constrs(self, formula, gmodel, output_vars):

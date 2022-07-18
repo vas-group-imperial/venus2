@@ -73,7 +73,7 @@ class NodeSplitter(object):
             ]
             avail = self.initial_prob.nn.get_n_non_stabilised_nodes()
 
-        next_node, split_flaf = 0, False
+        next_node, split_flag = 0, False
 
         while len(self.split_queue) > 0:
             prob = self.split_queue.pop()

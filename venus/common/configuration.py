@@ -168,10 +168,10 @@ class Config:
         self.PRECISION = torch.float32
         self.DEVICE = torch.device('cpu')
         self._user_set_params = set()
-        self.BENCHMARK = 'nn4sys'
+        # self.BENCHMARK = 'nn4sys'
         # self.BENCHMARK = 'carvana'
         # self.BENCHMARK = 'mnistfc'
-        # self.BENCHMARK = 'cifar_biasfield'
+        self.BENCHMARK = 'cifar_biasfield'
         # self.BENCHMARK = 'rl_benchmarks'
         # self.BENCHMARK = 'collins_rul_cnn'
         # self.BENCHMARK = 'sri_resnet_a'
@@ -375,6 +375,7 @@ class Config:
             self.SOLVER.INTER_DEP_CONSTRS = True
             self.VERIFIER.COMPLETE = True
             self.VERIFIER.PGD = True
+            self.SIP.SYMBOLIC = True
             self.SIP.ONE_STEP_SYMBOLIC = True
             self.SIP.EQ_CONCRETISATION = True
             self.SIP.SLOPE_OPTIMISATION = True
@@ -440,10 +441,10 @@ class Config:
             self.VERIFIER.COMPLETE = True
             self.VERIFIER.PGD = True
             self.SIP.SYMBOLIC = True
-            self.SIP.ONE_STEP_SYMBOLIC = True
+            self.SIP.ONE_STEP_SYMBOLIC = False
             self.SIP.EQ_CONCRETISATION = True
             self.SIP.SIMPLIFY_FORMULA = True
-            self.SIP.SLOPE_OPTIMISATION = True
+            self.SIP.SLOPE_OPTIMISATION = False
 
         elif self.BENCHMARK == 'tllverifybench':
             self.SOLVER.IDEAL_CUTS = True

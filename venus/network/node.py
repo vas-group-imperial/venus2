@@ -894,7 +894,7 @@ class Gemm(Node):
         inp = self.from_node[0].output if inp is None else inp
 
         if isinstance(inp, torch.Tensor):
-            output =  self._forward_torch(inp, clip, add_bias)
+            output =  self._forward_torch(inp, clip=clip, add_bias=add_bias)
 
             if save_gradient is True:
                 output.register_hook(self.grad_hook)
@@ -1415,7 +1415,7 @@ class ConvBase(Node):
         inp = self.from_node[0].output if inp is None else inp
 
         if isinstance(inp, torch.Tensor):
-            output = self._forward_torch(inp, clip)
+            output = self._forward_torch(inp, clip=clip, add_bias=add_bias)
 
             if save_gradient is True:
                 output.register_hook(self.grad_hook)
@@ -1768,6 +1768,7 @@ class Conv(ConvBase):
 
         return self.kernels[index1[0]][index2[0]][height][width].item()
 
+
     def _forward_torch(
         self,
         inp: torch.Tensor=None,
@@ -1799,7 +1800,7 @@ class Conv(ConvBase):
 
         else:
             raise ValueError(f'Kernel clip value {kernel_clip} not recognised')
-        
+    
         output = torch.nn.functional.conv2d(
             inp,
             kernels,
