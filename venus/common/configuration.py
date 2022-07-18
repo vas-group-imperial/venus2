@@ -108,7 +108,7 @@ class Splitter():
 
     NODE_SPLIT_STRATEGY: NodeSplitStrategy = NodeSplitStrategy.MULTIPLE_SPLITS 
     # branching heuristic, either deps or grad
-    BRANCHING_HEURISTIC: str = 'grad'
+    BRANCHING_HEURISTIC: str = 'deps'
     # the stability ratio weight for computing the difficulty of a problem
     STABILITY_RATIO_WEIGHT: float = 1
     # the value of fixed ratio above which the splitting can stop in any
@@ -170,8 +170,8 @@ class Config:
         self._user_set_params = set()
         # self.BENCHMARK = 'nn4sys'
         # self.BENCHMARK = 'carvana'
-        # self.BENCHMARK = 'mnistfc'
-        self.BENCHMARK = 'cifar_biasfield'
+        self.BENCHMARK = 'mnistfc'
+        # self.BENCHMARK = 'cifar_biasfield'
         # self.BENCHMARK = 'rl_benchmarks'
         # self.BENCHMARK = 'collins_rul_cnn'
         # self.BENCHMARK = 'sri_resnet_a'
@@ -382,9 +382,8 @@ class Config:
             self.SPLITTER.STABILITY_RATIO_CUTOFF = 1.1
             self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.INPUT
             self.SPLITTER.MAX_SPLIT_DEPTH = 100
-            self.SPLITTER.SPLIT_PROC_NUM = 2
+            self.SPLITTER.SPLIT_PROC_NUM = 1
             self.VERIFIER.MILP = False
-
 
         elif self.BENCHMARK == 'reach_prob_density':
             self.SOLVER.IDEAL_CUTS = True
@@ -428,7 +427,7 @@ class Config:
             self.SOLVER.INTER_DEP_CUTS = True
             self.SOLVER.INTER_DEP_CONSTRS = True
             self.SOLVER.MONITOR_SPLIT = True
-            self.SPLITTER.BRANCHING_DEPTH = 7
+            self.SPLITTER.BRANCHING_DEPTH = 3
             self.SOLVER.BRANCH_THRESHOLD = 300
             self.VERIFIER.COMPLETE = True
             self.VERIFIER.PGD = True
@@ -437,12 +436,13 @@ class Config:
             self.SIP.EQ_CONCRETISATION = True
             self.SIP.SIMPLIFY_FORMULA = True
             self.SIP.SLOPE_OPTIMISATION = True
+            self.SPLITTER.BRANCHING_HEURISTIC = 'grad' 
 
         elif self.BENCHMARK == 'sri_resnet_a':
             self.VERIFIER.COMPLETE = True
             self.VERIFIER.PGD = True
             self.SIP.SYMBOLIC = True
-            self.SIP.ONE_STEP_SYMBOLIC = False
+            self.SIP.ONE_STEP_SYMBOLIC = True
             self.SIP.EQ_CONCRETISATION = True
             self.SIP.SIMPLIFY_FORMULA = True
             self.SIP.SLOPE_OPTIMISATION = False
@@ -453,7 +453,7 @@ class Config:
             self.SOLVER.INTER_DEP_CONSTRS = True
             self.SOLVER.MONITOR_SPLIT = True
             if n_relus < 1000:
-                self.SPLITTER.BRANCHING_DaEPTH = 2
+                self.SPLITTER.BRANCHING_DEPTH = 2
                 self.SOLVER.BRANCH_THRESHOLD = 10000
             elif n_relus < 2000:
                 self.SPLITTER.BRANCHING_DEPTH = 2
@@ -480,7 +480,6 @@ class Config:
             self.PRECISION = torch.float64
             self.VERIFIER.MILP = False
             self.SPLITTER.STABILITY_RATIO_CUTOFF = 1.1
-
 
         elif self.BENCHMARK == 'cifar100_tinyimagenet_resnet':
             self.SOLVER.IDEAL_CUTS = True
@@ -509,19 +508,3 @@ class Config:
                 self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.NODE
                 self.SPLITTER.STABILITY_RATIO_CUTOFF = 1.1
             self.SPLITTER.SPLIT_PROC_NUM: int = 0
-
-        elif self.BENCHMARK == 'test':
-            self.SOLVER.IDEAL_CUTS = True
-            self.SOLVER.INTER_DEP_CUTS = True
-            self.SOLVER.INTER_DEP_CONSTRS = True
-            self.SOLVER.MONITOR_SPLIT = True
-            self.SPLITTER.BRANCHING_DEPTH = 4
-            self.SOLVER.BRANCH_THRESHOLD = 100
-            self.VERIFIER.COMPLETE = True
-            self.VERIFIER.PGD = True
-            self.SIP.ONE_STEP_SYMBOLIC = True
-            self.SIP.EQ_CONCRETISATION = True
-            self.SIP.SIMPLIFY_FORMULA = True
-            self.SIP.SLOPE_OPTIMISATION = True
-            self.SPLITTER.BRANCHING_HEURISTIC = 'grad' 
-            self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.INPUT

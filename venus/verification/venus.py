@@ -159,7 +159,7 @@ class Venus:
             total_time += ver_report.runtime
             results.append(ver_report)
     
-            with open(self.config.LOGGER.SUMFILE, 'a') as f:
+            with open(self.config.LOGGER.SUMFILE, 'w') as f:
                 if ver_report.result == SolveResult.UNSAFE:
                     res = 'sat\n' 
                     cex = ver_report.cex.flatten()

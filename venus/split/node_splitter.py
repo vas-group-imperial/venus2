@@ -210,10 +210,8 @@ class NodeSplitter(object):
         if prob.nn.node[dgnode.nodeid].has_custom_relaxation_slope():
             lower, upper = prob.nn.node[dgnode.nodeid].get_lower_relaxation_slope()
             idxs = prob.nn.node[dgnode.nodeid].get_unstable_flag().clone()
-            print(lower.shape, torch.sum(idxs))
             idxs[dgnode.index] = False
             idxs = idxs[prob.nn.node[dgnode.nodeid].get_unstable_flag()]
-            print(idxs.shape, torch.sum(idxs))
             prob1.nn.node[dgnode.nodeid].set_lower_relaxation_slope(lower[idxs], upper[idxs])
             prob2.nn.node[dgnode.nodeid].set_lower_relaxation_slope(lower[idxs], upper[idxs])
 

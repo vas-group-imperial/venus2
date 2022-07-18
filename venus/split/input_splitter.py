@@ -49,17 +49,18 @@ class InputSplitter:
         Returns:
             list of VerificationProblem
         """
-        if self.prob.stability_ratio <= self.config.SPLITTER.STABILITY_RATIO_CUTOFF:
-            try:
-                subprobs = self.soft_split()
-            except Exception as error:
-                raise error
+        # if self.prob.stability_ratio <= self.config.SPLITTER.STABILITY_RATIO_CUTOFF:
+        try:
+            subprobs = self.soft_split()
+        except Exception as error:
+            raise error
 
-            worth = self.worth_split(subprobs)
-            if worth is True:
-                return subprobs
+        return subprobs
+            # worth = self.worth_split(subprobs)
+            # if worth is True:
+                # return subprobs
 
-        return []
+        # return []
 
 
     def soft_split(self, prob=None):

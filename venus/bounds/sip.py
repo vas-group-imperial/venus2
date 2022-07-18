@@ -72,11 +72,11 @@ class SIP:
         # set bounds using area approximations
         self._set_bounds(slopes, depth=1)
  
-        print(
-            self.prob.id,
-            self.prob.nn.tail.bounds.lower,
-            self.prob.nn.tail.bounds.upper
-        )
+        # print(
+            # self.prob.id,
+            # self.prob.nn.tail.bounds.lower,
+            # self.prob.nn.tail.bounds.upper
+        # )
         # optimise the relaxation slopes using pgd
         # if self.config.SIP.SLOPE_OPTIMISATION is True and \
         # self.prob.nn.has_custom_relaxation_slope() is not True \
