@@ -17,6 +17,12 @@ def main():
         help="Vnnlib file of the specification."
     )
     parser.add_argument(
+        "--benchmark", 
+        type=str,
+        required=False, 
+        help="Benchmark."
+    )
+    parser.add_argument(
         "--net", 
         type=str, 
         required=True, 

@@ -143,7 +143,7 @@ class SIP:
     def _set_bounds_for_node(
         self, node: Node, slopes: tuple=None, delta_flag: torch.Tensor=None
     ):
-        print(node, node.id, node.input_shape, node.output_shape, node.is_non_symbolically_connected())
+        # print(node, node.id, node.input_shape, node.output_shape, node.is_non_symbolically_connected())
 
         # set interval propagation bounds
         bounds = self.ibp.calc_bounds(node)

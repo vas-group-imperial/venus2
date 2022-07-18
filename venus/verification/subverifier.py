@@ -88,9 +88,13 @@ class SubVerifier:
             if slv_report.result != SolveResult.UNDECIDED:
                 return slv_report
 
-        slv_report = self.verify_complete(prob)
-        slv_report.runtime = timer() - start
-        return slv_report
+        print(self.config.VERIFIER.MILP)
+        if self.config.VERIFIER.MILP is True:
+            slv_report = self.verify_complete(prob)
+            slv_report.runtime = timer() - start
+            return slv_report
+
+        return SolveReport(SolveResult.UNDECIDED, 0, None)
         
 
     def verify_incomplete(self, prob: VerificationProblem):

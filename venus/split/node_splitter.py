@@ -68,7 +68,8 @@ class NodeSplitter(object):
             avail = len(sn)
         else:
             relu_nd = [
-                i.id for _, i in self.initial_prob.nn.node.items() if isinstance(i, Relu)
+                i.id for _, i in self.initial_prob.nn.node.items() 
+                if isinstance(i, Relu) and i.from_node[0].grads is not None
             ]
             avail = self.initial_prob.nn.get_n_non_stabilised_nodes()
 
@@ -92,6 +93,7 @@ class NodeSplitter(object):
                         nd = random.choice(relu_nd)
 
                     node = self.initial_prob.nn.node[nd].from_node[0].grads.pop()
+ 
                     while self.initial_prob.nn.node[nd].get_unstable_flag()[node].item() is not True:
                         node = self.initial_prob.nn.node[nd].from_node[0].grads.pop()
 
@@ -154,13 +156,25 @@ class NodeSplitter(object):
             prob1.nn.node[node].set_lower_relaxation_slope(lower[idxs], upper[idxs])
             prob2.nn.node[node].set_lower_relaxation_slope(lower[idxs], upper[idxs])
 
-        prob1.nn.node[node].from_node[0].bounds.lower[index] = 0
-        prob1.nn.node[node].set_state(index, ReluState.ACTIVE)
-        prob2.nn.node[node].bounds.upper[index] = 0
-        prob2.nn.node[node].from_node[0].bounds.upper[index] = 0
-        prob2.nn.node[node].set_state(index, ReluState.INACTIVE)
-        prob1.last_split_strategy = SplitStrategy.NODE
-        prob2.last_split_strategy = SplitStrategy.NODE
+        if prob.nn.batched is True:
+            for i in range(prob.nn.node[node].output_shape[0]):
+                idx = (i,) + index[1:]
+                prob1.nn.node[node].from_node[0].bounds.lower[idx] = 0
+                prob1.nn.node[node].set_state(idx, ReluState.ACTIVE)
+                prob2.nn.node[node].bounds.upper[idx] = 0
+                prob2.nn.node[node].from_node[0].bounds.upper[idx] = 0
+                prob2.nn.node[node].set_state(idx, ReluState.INACTIVE)
+            prob1.last_split_strategy = SplitStrategy.NODE
+            prob2.last_split_strategy = SplitStrategy.NODE
+
+        else:
+            prob1.nn.node[node].from_node[0].bounds.lower[index] = 0
+            prob1.nn.node[node].set_state(index, ReluState.ACTIVE)
+            prob2.nn.node[node].bounds.upper[index] = 0
+            prob2.nn.node[node].from_node[0].bounds.upper[index] = 0
+            prob2.nn.node[node].set_state(index, ReluState.INACTIVE)
+            prob1.last_split_strategy = SplitStrategy.NODE
+            prob2.last_split_strategy = SplitStrategy.NODE
         
         return [prob1, prob2]
 

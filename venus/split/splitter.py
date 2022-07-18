@@ -23,6 +23,11 @@ from venus.verification.subverifier import SubVerifier
 from venus.solver.solve_result import SolveResult
 from venus.common.logger import get_logger
 
+import resource
+rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
+resource.setrlimit(resource.RLIMIT_NOFILE, (16384, rlimit[1]))
+
+
 class Splitter:
     
     process_count = 0

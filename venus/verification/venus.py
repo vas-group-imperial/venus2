@@ -79,6 +79,8 @@ class Venus:
                                  ' against ' +
                                  os.path.basename(query[1]) +
                                  '...')
+            if self.config.BENCHMARK == 'vgg16_2022':
+                self.config.PRECISION = torch.float64
             # load model
             nn = NeuralNetwork(query[0], self.config)
             nn.load()
@@ -140,12 +142,13 @@ class Venus:
                 unsafe += 1
                 total_unsafe_time += ver_report.runtime
                 
-                # import onnx
-                # import onnxruntime.backend as rt
-                # m = onnx.load(query[0])
-                # runnable = rt.prepare(m, 'CPU')
-                # pred = runnable.run(ver_report.cex.numpy())
-                # print(pred)
+                import onnx
+                import onnxruntime.backend as rt
+                m = onnx.load(query[0])
+                runnable = rt.prepare(m, 'CPU')
+                cex = np.expand_dims(ver_report.cex.numpy(), 0)
+                pred = runnable.run(cex)
+                print('*****', pred)
                 # import sys
                 # sys.exit()
 
@@ -157,16 +160,16 @@ class Venus:
             results.append(ver_report)
     
             with open(self.config.LOGGER.SUMFILE, 'a') as f:
-                if verification_report.result == SolveResult.UNSAFE:
+                if ver_report.result == SolveResult.UNSAFE:
                     res = 'sat\n' 
-                    cex = verification_report.cex.flatten()
+                    cex = ver_report.cex.flatten()
                     res += f'((X_0 {cex[0]})'
                     for i, j in enumerate(cex[1:]):
-                        res += f'\n (X_{i - 1} j)'
+                        res += f'\n (X_{i + 1} {j})'
                     res += ')'                        
-                elif verification_report.result == SolveResult.SAFE:
+                elif ver_report.result == SolveResult.SAFE:
                     res = 'sat\n' 
-                elif verification_report.result == SolveResult.TIMEOUT:
+                elif ver_report.result == SolveResult.TIMEOUT:
                     res = 'timeout\n'
                 else:
                     res = 'unknown'
@@ -183,64 +186,64 @@ class Venus:
 
                 # f.write('{:<12}{:6.4f}\n'.format(ver_report.result.value, ver_report.runtime))
      
-        avg_safe_time = 0 if safe == 0 else total_safe_time / safe
-        avg_unsafe_time = 0 if unsafe == 0 else total_unsafe_time / unsafe
+        # avg_safe_time = 0 if safe == 0 else total_safe_time / safe
+        # avg_unsafe_time = 0 if unsafe == 0 else total_unsafe_time / unsafe
     
-        with open(self.config.LOGGER.SUMFILE, 'a') as f:
-            f.write('\n\nVerified: {}\tSAFE: {}\tUNSAFE: {}\tUndecided: {}\tTimeouts: {}\n\n'.format(
-                safe + unsafe,
-                safe,
-                unsafe,
-                undecided,
-                timeout
-            ))
-            f.write(
-                'Total Time:       {:6.4f}\tAvg Time:       {:6.4f}\n'.format(
-                    total_time,
-                    total_time / len(self.queries)
-                )
-            )
-            f.write(
-                'Total SAFE Time:   {:6.4f}\tAvg SAFE Time:   {:6.4f}\n'.format(
-                    total_safe_time,
-                    avg_safe_time
-                )
-            )
-            f.write(
-                'Total UNSAFE Time: {:6.4f}\tAvg UNSAFE Time: {:6.4f}\n\n'.format(
-                    total_unsafe_time,
-                    avg_unsafe_time
-                )
-            )
+        # with open(self.config.LOGGER.SUMFILE, 'a') as f:
+            # f.write('\n\nVerified: {}\tSAFE: {}\tUNSAFE: {}\tUndecided: {}\tTimeouts: {}\n\n'.format(
+                # safe + unsafe,
+                # safe,
+                # unsafe,
+                # undecided,
+                # timeout
+            # ))
+            # f.write(
+                # 'Total Time:       {:6.4f}\tAvg Time:       {:6.4f}\n'.format(
+                    # total_time,
+                    # total_time / len(self.queries)
+                # )
+            # )
+            # f.write(
+                # 'Total SAFE Time:   {:6.4f}\tAvg SAFE Time:   {:6.4f}\n'.format(
+                    # total_safe_time,
+                    # avg_safe_time
+                # )
+            # )
+            # f.write(
+                # 'Total UNSAFE Time: {:6.4f}\tAvg UNSAFE Time: {:6.4f}\n\n'.format(
+                    # total_unsafe_time,
+                    # avg_unsafe_time
+                # )
+            # )
     
-        if self.config.VERIFIER.CONSOLE_OUTPUT:
-            print(
-                '\nVerified: {}\tSAFE: {}\tUNSAFE: {}\tUndecided: {}\tTimeouts: {}\n'.format(
-                    safe + unsafe,
-                    safe,
-                    unsafe,
-                    undecided,
-                    timeout
-                )
-            )
-            print(
-                'Total Time:       {:6.4f}\tAvg Time:       {:6.4f}'.format(
-                    total_time,
-                    total_time / len(self.queries)
-                )
-            )
-            print(
-                'Total SAFE Time:   {:6.4f}\tAvg SAFE Time:   {:6.4f}'.format(
-                    total_safe_time,
-                    avg_safe_time
-                )
-            )
-            print(
-                'Total UNSAFE Time: {:6.4f}\tAvg UNSAFE Time: {:6.4f}'.format(
-                    total_unsafe_time,
-                    avg_unsafe_time
-                )
-            )
+        # if self.config.VERIFIER.CONSOLE_OUTPUT:
+            # print(
+                # '\nVerified: {}\tSAFE: {}\tUNSAFE: {}\tUndecided: {}\tTimeouts: {}\n'.format(
+                    # safe + unsafe,
+                    # safe,
+                    # unsafe,
+                    # undecided,
+                    # timeout
+                # )
+            # )
+            # print(
+                # 'Total Time:       {:6.4f}\tAvg Time:       {:6.4f}'.format(
+                    # total_time,
+                    # total_time / len(self.queries)
+                # )
+            # )
+            # print(
+                # 'Total SAFE Time:   {:6.4f}\tAvg SAFE Time:   {:6.4f}'.format(
+                    # total_safe_time,
+                    # avg_safe_time
+                # )
+            # )
+            # print(
+                # 'Total UNSAFE Time: {:6.4f}\tAvg UNSAFE Time: {:6.4f}'.format(
+                    # total_unsafe_time,
+                    # avg_unsafe_time
+                # )
+            # )
     
         return results[0] if len(results) == 1 else results
 
@@ -285,6 +288,14 @@ class Venus:
             ver_report.runtime += sub_ver_report.runtime
             if sub_ver_report.result == SolveResult.UNSAFE:
                 ver_report.result = SolveResult.UNSAFE
+                for idx in range(until - i):
+                    if batch_spec.is_form_satisfied(
+                        batch_spec.output_formula[idx],
+                        sub_ver_report.cex[idx, ...].flatten(),
+                        sub_ver_report.cex[idx, ...].flatten()
+                    ) is not True:
+                        ver_report.cex = sub_ver_report.cex[idx, ...]
+
                 return ver_report
             else:
                 time_left = self.config.SOLVER.TIME_LIMIT - sub_ver_report.runtime

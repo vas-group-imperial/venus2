@@ -11,6 +11,8 @@
 
 import torch
 
+from venus.split.split_strategy import SplitStrategy
+
 class ProjectedGradientDescent:
     def __init__(self, config):
         self.config = config
@@ -103,13 +105,16 @@ class ProjectedGradientDescent:
 
         true_label = prob.spec.is_adversarial_robustness()
 
+        save_gradient = SplitStrategy.does_node_split(
+            self.config.SPLITTER.SPLIT_STRATEGY
+        )
         if true_label == -1:
-            output = prob.nn.forward(x, save_gradient=True).flatten()
+            output = prob.nn.forward(x, save_gradient=save_gradient).flatten()
             loss = prob.spec.get_mse_loss(output)
 
         else:
             output_flag =  prob.spec.get_output_flag(prob.nn.tail.output_shape)
-            output = prob.nn.forward(x, save_gradient=True)[output_flag].flatten()[None, :]
+            output = prob.nn.forward(x, save_gradient=save_gradient)[output_flag].flatten()[None, :]
             true_label = torch.sum(output_flag.flatten()[0: true_label])
             y = torch.tensor([true_label], device=device)
             loss_fn = torch.nn.CrossEntropyLoss()

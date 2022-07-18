@@ -74,6 +74,7 @@ class Node:
         self.device = device
         self.grads = None
         self._milp_var_indices = None, None, None, None
+        self.batched = False
 
     def cuda(self):
         """
@@ -131,8 +132,16 @@ class Node:
         return output
 
     def grad_hook(self, grad_output):
-        self.grads = grad_output.detach().clone()
-        self.grads = torch.argsort(self.grads, descending=True).tolist()
+        if self.has_relu_activation() is True:
+            outputs = self.get_outputs()
+            self.grads = grad_output.detach().clone()
+            self.grads = sorted(
+                outputs, 
+                key=lambda x: self.grads[x].item()
+            )
+        # if self.batched is True:
+            # self.grads = torch.mean(self.grads, dim=0)
+        # self.grads = torch.argsort(self.grads, descending=True).flatten().tolist()
 
     def set_batch_size(self, size: int=1):
         """
@@ -143,9 +152,9 @@ class Node:
         """
         self.input_shape = (size,) + self.input_shape[1:] 
         self.output_shape = (size,) + self.output_shape[1:]
-
         self.input_size = np.prod(self.input_shape)
         self.output_size = np.prod(self.output_shape)
+        self.batched = True
 
     def get_outputs(self):
         """
@@ -160,7 +169,6 @@ class Node:
             ]
             
         return list(range(self.output_size))
-
 
     def clean_vars(self):
         """
@@ -2447,13 +2455,13 @@ class MaxPool(Node):
         inp = self.from_node[0].output if inp is None else inp
 
         if isinstance(inp, torch.Tensor):
-            output = self._forward_torch(inp, return_indices, save_output)
+            output = self._forward_torch(inp, return_indices)
 
             if save_gradient is True:
                 output.register_hook(self.grad_hook)
 
         elif isinstance(inp, np.ndarray):
-            output = self._forward_numpy(inp, save_output)
+            output = self._forward_numpy(inp)
 
         else:
             raise TypeError("Forward supports only numpy arrays and torch.Tensors.")
@@ -2775,6 +2783,22 @@ class Relu(Node):
         relu._custom_relaxation_slope = self._custom_relaxation_slope
 
         return relu
+
+    def set_batch_size(self, size: int=1):
+        """
+        Sets the batch size.
+
+        Arguments:
+            size: the batch size.
+        """
+        super().set_batch_size(size) 
+        self.state = np.array(
+            [ReluState.UNSTABLE] * self.output_size, dtype=ReluState
+        ).reshape(self.output_shape)
+        self.dep_root = np.array(
+            [False] * self.output_size, dtype=bool
+        ).reshape(self.output_shape)
+
 
     def cuda(self):
         """

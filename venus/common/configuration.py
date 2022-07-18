@@ -72,6 +72,8 @@ class Solver():
 
     
 class Verifier():
+    # whether to use MLP
+    MILP: bool = True
     # complete or incomplete verification
     COMPLETE: bool = False
     # number of parallel processes solving subproblems
@@ -88,7 +90,7 @@ class Verifier():
     # pgd step size - The epsilon will be divided by this number.
     PGD_EPS: float = 1
     # pgd number of iterations
-    PGD_NUM_ITER: int = 100
+    PGD_NUM_ITER: int = 10
 
 class Splitter():
     # Maximum  depth for node splitting. 
@@ -106,7 +108,7 @@ class Splitter():
 
     NODE_SPLIT_STRATEGY: NodeSplitStrategy = NodeSplitStrategy.MULTIPLE_SPLITS 
     # branching heuristic, either deps or grad
-    BRANCHING_HEURISTIC: str = 'deps'
+    BRANCHING_HEURISTIC: str = 'grad'
     # the stability ratio weight for computing the difficulty of a problem
     STABILITY_RATIO_WEIGHT: float = 1
     # the value of fixed ratio above which the splitting can stop in any
@@ -116,7 +118,7 @@ class Splitter():
     # number of the parameter
     SPLIT_PROC_NUM: int = 2
     # maximum splitting depth
-    MAX_SPLIT_DEPTH: int = 7
+    MAX_SPLIT_DEPTH: int = 100
 
 class SIP():
 
@@ -180,6 +182,8 @@ class Config:
         self._user_set_params.add(param)
         if param == 'logfile':
             self.LOGGER.LOGFILE = value
+        elif param == 'benchmark':
+            self.BENCHMARK = value
         elif param == 'sumfile':
             self.LOGGER.SUMFILE = value
         elif param == 'time_limit':
@@ -314,6 +318,7 @@ class Config:
             self.set_param_if_not_set('split_strategy', 'none')
 
     def set_user(self, u_params):
+        self.set_param('benchmark', u_params.benchmark)
         self.set_param('logfile', u_params.logfile)
         self.set_param('sumfile', u_params.sumfile)
         self.set_param('time_limit', u_params.timeout)
@@ -373,7 +378,7 @@ class Config:
             self.SIP.ONE_STEP_SYMBOLIC = True
             self.SIP.EQ_CONCRETISATION = True
             self.SIP.SLOPE_OPTIMISATION = True
-            self.SPLITTER.STABILITY_RATIO_CUTOFF = 1
+            self.SPLITTER.STABILITY_RATIO_CUTOFF = 1.1
             self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.INPUT
             self.SPLITTER.MAX_SPLIT_DEPTH = 100
             self.SPLITTER.SPLIT_PROC_NUM = 2
@@ -465,10 +470,15 @@ class Config:
         elif self.BENCHMARK == 'vgg16_2022':
             self.VERIFIER.COMPLETE = True
             self.VERIFIER.PGD = True
+            self.VERIFIER.PGD_NUM_ITER = 1
+            self.VERIFIER.VER_PROC_NUM = 1
             self.SIP.SYMBOLIC = False
             self.SIP.ONE_STEP_SYMBOLIC = False
             self.SIP.EQ_CONCRETISATION = False
             self.PRECISION = torch.float64
+            self.MILP = False
+            self.SPLITTER.STABILITY_RATIO_CUTOFF = 1.1
+
 
         elif self.BENCHMARK == 'cifar100_tinyimagenet_resnet':
             self.SOLVER.IDEAL_CUTS = True
@@ -487,14 +497,16 @@ class Config:
         elif self.BENCHMARK == 'nn4sys':
             self.SPLITTER.BRANCHING_DEPTH = 10
             self.VERIFIER.COMPLETE = True
+            self.VERIFIER.MILP = False
             self.VERIFIER.PGD = True
             self.SIP.EQ_CONCRETISATION = True
-            self.SIP.SIMPLIFY_FORMULA = True
+            self.SIP.SIMPLIFY_FORMULA = False
             self.SIP.SLOPE_OPTIMISATION = False
             self.SPLITTER.BRANCHING_HEURISTIC = 'grad' 
             if batch > 1:
-                self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.INPUT
-                self.SPLITTER.STABILITY_RATIO_CUTOFF = 1
+                self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.NODE
+                self.SPLITTER.STABILITY_RATIO_CUTOFF = 1.1
+            self.SPLITTER.SPLIT_PROC_NUM: int = 0
 
         elif self.BENCHMARK == 'test':
             self.SOLVER.IDEAL_CUTS = True
@@ -511,5 +523,3 @@ class Config:
             self.SIP.SLOPE_OPTIMISATION = True
             self.SPLITTER.BRANCHING_HEURISTIC = 'grad' 
             self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.INPUT
-
-

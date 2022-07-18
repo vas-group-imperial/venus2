@@ -79,6 +79,9 @@ class VerificationReport:
             self.finished_jobs_count += 1
         elif report.result == SolveResult.TIMEOUT:
             self.timedout_jobs_count += 1
+        elif report.result == SolveResult.UNDECIDED:
+            self.finished_jobs_count += 1
+            self.result = report.result
         else:
             raise Exception(f'Unexpected result read from solve report {report.result}')
 

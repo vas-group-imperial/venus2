@@ -43,6 +43,7 @@ class NeuralNetwork:
         self.tail = None
         self.node = {}
         self.input_simplified = False
+        self.batched = False
 
     def load(self):
         """
@@ -98,8 +99,11 @@ class NeuralNetwork:
                 if isinstance(k, Input) is not True
             ]
             nn.node[i].to_node = [nn.node[k.id] for k in j.to_node]
+            nn.node[i].grads = self.node[i].grads
+
 
         nn.input_simplified = self.input_simplified
+        nn.batched = self.batched
 
 
         return nn
@@ -166,6 +170,8 @@ class NeuralNetwork:
         """
         for _, i in self.node.items():
             i.set_batch_size(size)
+
+        self.batched = True
 
     def cache_bounds(self):
         for _, i in self.node.items():
@@ -345,7 +351,12 @@ class NeuralNetwork:
         for i in range(self.tail.depth + 1):
             nodes = self.get_node_by_depth(i)
             for j in nodes:
-                j.forward(save_output=True, save_gradient=save_gradient)    
+                j.forward(save_output=True, save_gradient=save_gradient) 
+                # if save_gradient is True and j.grads is not None:
+                    # if self.batched is True:
+                        # j.grads = torch.mean(j.grads, dim=0).flatten()
+                    # j.grads = torch.argsort(j.grads, descending=True).tolist()
+
 
         output = self.tail.output
         self.clean_outputs()
