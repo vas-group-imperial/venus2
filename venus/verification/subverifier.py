@@ -1,6 +1,6 @@
 # ************
 # File: subverifier.py
-# Top contributors (to current version): 
+# Top contributors (to current version):
 # 	Panagiotis Kouvaros (panagiotis.kouvaros@gmail.com)
 # This file is part of the Venus  project.
 # Copyright: 2019-2021 by the authors listed in the AUTHORS file in the
@@ -32,7 +32,7 @@ class SubVerifier:
     def __init__(self, config, jobs_queue=None, reporting_queue=None):
         """
         Arguments:
-            config: 
+            config:
                 Configuration.
             jobs_queue:
                 Queue of verification problems to read from.
@@ -64,8 +64,8 @@ class SubVerifier:
                 slv_report = self.verify(prob)
                 SubVerifier.logger.info(
                     'SubVerifier {} finished job {}, result: {}, time: {:.2f}.'.format(
-                        self.id, 
-                        prob.id, 
+                        self.id,
+                        prob.id,
                         slv_report.result.value,
                         slv_report.runtime
                     )
@@ -81,7 +81,7 @@ class SubVerifier:
 
 
     def verify(self, prob):
-        start = timer() 
+        start = timer()
 
         if prob.inc_ver_done is not True:
             slv_report = self.verify_incomplete(prob)
@@ -94,7 +94,7 @@ class SubVerifier:
             return slv_report
 
         return SolveReport(SolveResult.UNDECIDED, 0, None)
-        
+
 
     def verify_incomplete(self, prob: VerificationProblem):
         """
@@ -105,7 +105,7 @@ class SubVerifier:
             SolveReport
         """
         start = timer()
-        
+
         prob.inc_ver_done = True
         slv_report = SolveReport(SolveResult.UNDECIDED, 0, None)
 
@@ -134,7 +134,7 @@ class SubVerifier:
         prob.spec.input_node.bounds.detach()
         slv_report.runtime = timer() - start
         return slv_report
-       
+
     def verify_pgd(self, prob: VerificationProblem):
         """
         Attempts to solve a verification problem using projected gradient
@@ -180,7 +180,7 @@ class SubVerifier:
         if prob.satisfies_spec():
             SubVerifier.logger.info(
                 f'Verification problem {prob.id} was solved via bound analysis')
-     
+
             return SolveReport(SolveResult.SAFE, timer() - start, None)
 
         SubVerifier.logger.info(
@@ -221,7 +221,7 @@ class SubVerifier:
                     f'Verification problem {prob.id} was solved via PGD on LP'
                 )
                 return SolveReport(SolveResult.UNSAFE, timer() - start, cex)
-     
+
         SubVerifier.logger.info(
             'LP analysis done. Verification problem could not be solved'
         )

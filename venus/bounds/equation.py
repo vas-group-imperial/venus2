@@ -71,7 +71,7 @@ class Equation():
             self.const + eq.const,
             self.config
         )
- 
+
     def get_plus_matrix(self) -> torch.Tensor:
         """
         Clips the coeffs to be only positive.
@@ -83,7 +83,7 @@ class Equation():
     def get_minus_matrix(self, keep_in_memory=True) -> torch.Tensor:
         """
         Clips the coeffs to be only negative.
-        """     
+        """
         return torch.clamp(self.matrix, -math.inf, 0)
 
 
@@ -92,26 +92,26 @@ class Equation():
     ) -> torch.Tensor:
         if bound == 'lower':
             return self.min_values(lower, upper)
-        
+
         elif bound == 'upper':
             return self.max_values(lower, upper)
-       
+
         else:
             raise ValueError(f'Bound {bound} is not recognised.')
-        
+
 
     def max_values(self, lower: torch.Tensor, upper: torch.Tensor) -> torch.Tensor:
         """
         Computes the upper bounds of the equations.
-    
+
         Arguments:
 
             lower:
-                The lower bounds for the variables in the equation. 
+                The lower bounds for the variables in the equation.
             upper:
                 The upper bounds for the variables in the equation.
-        
-        Returns: 
+
+        Returns:
 
             The upper bounds of the equation.
         """
@@ -125,7 +125,7 @@ class Equation():
         Arguments:
 
             lower:
-                The lower bounds for the variables in the equation. 
+                The lower bounds for the variables in the equation.
             upper:
                 The upper bounds for the variables in the equation.
 
@@ -149,7 +149,7 @@ class Equation():
         elif isinstance(lower, torch.Tensor) and isinstance(upper, torch.Tensor):
             return self._interval_dot_tensor(bound, lower, upper)
 
-        else: 
+        else:
             raise TypeError(f'Got {type(lower)} and {type(upper)} but expected either trensor or Equation')
 
     def _interval_dot_eq(
@@ -168,7 +168,7 @@ class Equation():
             matrix = plus @ lower.matrix + minus @ upper.matrix
             const = plus @ lower.const + minus @ upper.const + self.const
 
-        else: 
+        else:
             raise ValueError(f'Bound {bound} is not recognised.')
 
         return Equation(matrix, const, self.config)
@@ -190,11 +190,11 @@ class Equation():
                 self.get_minus_matrix() @ upper + \
                 self.const
 
-        else: 
+        else:
             raise ValueError(f'Bound {bound} is not recognised.')
 
     def get_relu_slope(
-        self, 
+        self,
         node: Node,
         slope_type: str,
         bound: str,
@@ -223,7 +223,7 @@ class Equation():
                     device=self.config.DEVICE
                 )
                 idxs = node.get_next_relu().get_unstable_flag().flatten()
-                lower = node.bounds.lower.flatten()[idxs] 
+                lower = node.bounds.lower.flatten()[idxs]
                 upper = node.bounds.upper.flatten()[idxs]
                 sl[idxs] =  upper / (upper - lower)
                 sl[node.get_next_relu().get_active_flag().flatten()] = 1
@@ -237,11 +237,11 @@ class Equation():
                     node.to_node[0].get_propagation_count(),
                     dtype=self.config.PRECISION,
                     device=self.config.DEVICE
-                ) 
+                )
                 upper = node.bounds.upper[out_flag].flatten()
                 lower = node.bounds.lower[out_flag].flatten()
                 if slopes is None:
-                    idxs = lower < 0 
+                    idxs = lower < 0
                     slopes = node.to_node[0].get_lower_relaxation_slope()
                     sl[idxs] = slopes[0] if bound == 'lower' else slopes[1]
                 else:
@@ -251,7 +251,7 @@ class Equation():
             elif slope_type == 'upper':
                 lower = node.bounds.lower[out_flag].flatten()
                 upper = node.bounds.upper[out_flag].flatten()
-                
+
                 sl = torch.ones(
                     node.to_node[0].get_propagation_count(),
                     dtype=self.config.PRECISION,
@@ -266,10 +266,10 @@ class Equation():
         return sl
 
     def get_relu_const(
-        self, 
-        node: Node, 
+        self,
+        node: Node,
         const: torch.tensor,
-        const_type :str,  
+        const_type :str,
         relu_slope: torch.Tensor,
         out_flag: torch.Tensor=None
     ) -> torch.Tensor:
@@ -307,7 +307,7 @@ class Equation():
         else:
             if const_type == 'lower':
                 relu_const = const * relu_slope
-            
+
             elif const_type == 'upper':
                 lower = node.bounds.lower.flatten()[out_flag]
                 idxs = lower < 0
@@ -318,10 +318,10 @@ class Equation():
 
     def get_max_pool_relaxation(self, node: Node) -> tuple:
         lower, indices = node.to_node[0].forward(node.bounds.lower, return_indices=True)
-        
+
         idx_correction = torch.tensor(
             [i * node.in_ch_sz() for i in range(node.in_ch())],
-            dtype=torch.long, 
+            dtype=torch.long,
             device=self.config.DEVICE
         ).reshape((node.in_ch(), 1, 1))
         if node.has_batch_dimension():
@@ -374,7 +374,7 @@ class Equation():
         zero_eq = Equation._zero_eq(node, out_flag)
         if zero_eq is not None:
             return zero_eq
-      
+
         else:
             return Equation(
                 Equation._derive_matrix(node, out_flag, in_flag, sparse),
@@ -382,7 +382,7 @@ class Equation():
                 config
             )
 
-    @staticmethod 
+    @staticmethod
     def _zero_eq(node: Node, flag: torch.Tensor) -> Equation:
         if isinstance(node.from_node[0], Relu) and \
         node.from_node[0].get_propagation_count() == 0:
@@ -404,7 +404,7 @@ class Equation():
             out_flag: torch.Tensor=None,
             in_flag: torch.Tensor=None,
             sparse: bool=False
-    ):    
+    ):
         if isinstance(node, Conv):
             return Equation._derive_conv_matrix(node, out_flag, in_flag, sparse)
 
@@ -413,9 +413,12 @@ class Equation():
 
         if isinstance(node, MatMul):
             return Equation._derive_matmul_matrix(node, out_flag, in_flag)
-        
+
         if isinstance(node, Add):
             return Equation._derive_add_matrix(node, out_flag)
+
+        if isinstance(node, Sub):
+            return Equation._derive_sub_matrix(node, out_flag)
 
         if isinstance(node, Flatten):
             return Equation._derive_flatten_matrix(node, out_flag, in_flag)
@@ -428,7 +431,7 @@ class Equation():
 
         raise NotImplementedError(f'{type(node)} equations')
 
-    @staticmethod 
+    @staticmethod
     def _derive_conv_matrix(
             node: Node,
             out_flag: torch.Tensor,
@@ -470,7 +473,7 @@ class Equation():
             torch.arange(node.out_ch, device=node.config.DEVICE), node.out_ch_sz, dim=0
         )[out_flag]
         conv_weights = node.kernels.permute(1, 2, 3, 0).reshape(-1, node.out_ch)[:, indices]
-       
+
         if sparse is True:
             matrix =[
                 {
@@ -480,7 +483,7 @@ class Equation():
                 }
                 for eq in range(flag_size)
             ]
-        
+
         else:
             matrix = torch.zeros(
                 (flag_size, max_index + 1),
@@ -492,12 +495,12 @@ class Equation():
 
         return matrix
 
-    @staticmethod 
+    @staticmethod
     def _derive_gemm_matrix(
             node: Node, out_flag: torch.Tensor, in_flag: torch.Tensor=None
     ):
         if in_flag is None:
-            # matrix = node.weights[:, out_flag].T 
+            # matrix = node.weights[:, out_flag].T
             matrix = torch.zeros(
                 (node.output_size, node.input_size),
                 dtype=node.config.PRECISION,
@@ -520,7 +523,7 @@ class Equation():
         return matrix[out_flag, :]
 
 
-    @staticmethod 
+    @staticmethod
     def _derive_matmul_matrix(
             node: Node, out_flag: torch.Tensor, in_flag:torch.Tensor=None
     ):
@@ -531,7 +534,7 @@ class Equation():
 
         return matrix
 
-    @staticmethod 
+    @staticmethod
     def _derive_batch_normalization_matrix(
             node: Node, out_flag: torch.Tensor, in_flag: torch.Tensor=None
     ):
@@ -552,13 +555,19 @@ class Equation():
 
         return matrix[out_flag, :]
 
-    @staticmethod 
+    @staticmethod
     def _derive_add_matrix(node: Node, flag: torch.Tensor):
         return  torch.eye(
             node.input_size, dtype=node.config.PRECISION, device=node.config.DEVICE
         )[flag, :]
 
-    @staticmethod 
+    @staticmethod
+    def _derive_sub_matrix(node: Node, flag: torch.Tensor):
+        return  torch.eye(
+            node.input_size, dtype=node.config.PRECISION, device=node.config.DEVICE
+        )[flag, :]
+
+    @staticmethod
     def _derive_flatten_matrix(
         node: Node, out_flag:torch.tensor, in_flag: torch.tensor=None
     ):
@@ -577,7 +586,7 @@ class Equation():
 
         return matrix
 
-    @staticmethod 
+    @staticmethod
     def _derive_slice_matrix(
         node: Node, out_flag:torch.tensor
     ):
@@ -606,14 +615,14 @@ class Equation():
 
         if isinstance(node, BatchNormalization):
             return Equation._derive_batch_normalization_const(node, flag)
-        
-        if type(node) in [Add, Flatten, Slice, MatMul]:
+
+        if type(node) in [Add, Sub, Flatten, Slice, MatMul]:
             return Equation._derive_zero_const(node, flag)
 
         raise NotImplementedError(f'{type(node)} equations')
 
-    @staticmethod 
-    def _derive_gemm_const(node: Node, flag: torch.Tensor): 
+    @staticmethod
+    def _derive_gemm_const(node: Node, flag: torch.Tensor):
         if node.has_bias() is True:
             const = torch.tile(node.bias, (int(np.prod(node.input_shape[:-1])),))
             const = const if flag is None else const[flag]
@@ -622,17 +631,17 @@ class Equation():
             const = torch.zeros(
                 size, dtype=node.config.PRECISION, device=node.config.DEVICE
             )
-     
+
         return const
 
-    @staticmethod 
+    @staticmethod
     def _derive_conv_const(node: Node, flag: torch.Tensor):
         if node.has_bias() is True:
             if flag is None:
                 const =  torch.tile(node.bias, (node.out_ch_sz, 1)).T.flatten()
             else:
                 const = torch.tile(node.bias, (node.out_ch_sz, 1)).T.flatten()[flag]
-        
+
         else:
             size = node.output_size if flag is None else torch.sum(flag)
             const = torch.zeros(
@@ -641,14 +650,14 @@ class Equation():
 
         return const
 
-    @staticmethod 
+    @staticmethod
     def _derive_convtranspose_const(node: Node, flag: torch.Tensor):
         if node.has_bias() is True:
             if flag is None:
                 const = torch.tile(node.bias, (node.out_ch_sz, 1)).T.flatten()
             else:
                 const = torch.tile(node.bias, (node.out_ch_sz, 1)).T.flatten()[flag]
-        
+
         else:
             size = node.output_size if flag is None else torch.sum(flag)
             const = torch.zeros(
@@ -657,7 +666,7 @@ class Equation():
 
         return const
 
-    @staticmethod 
+    @staticmethod
     def _derive_zero_const(node: Node, flag: torch.Tensor):
         if flag is None:
             const =  torch.zeros(

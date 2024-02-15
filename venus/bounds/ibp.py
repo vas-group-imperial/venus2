@@ -36,7 +36,7 @@ class IBP:
         self.config = config
         if IBP.logger is None and config.LOGGER.LOGFILE is not None:
             IBP.logger = get_logger(__name__, config.LOGGER.LOGFILE)
-        
+
     def calc_bounds(self, node: Node) -> Bounds:
         if type(node) in [
                 Relu, MaxPool, AveragePool, Slice, Unsqueeze, Reshape, Flatten, Pad,
@@ -58,13 +58,13 @@ class IBP:
 
         elif type(node) in [Gemm, Conv, ConvTranspose]:
             lower, upper = self._calc_affine_bounds(node)
-         
+
         elif isinstance(node, MatMul):
             lower, upper = self._calc_linear_bounds(node)
 
         else:
             raise TypeError(f"IA Bounds computation for {type(node)} is not supported")
-       
+
         bounds = Bounds(
             lower.reshape(node.output_shape), upper.reshape(node.output_shape)
         )
@@ -85,7 +85,7 @@ class IBP:
     def _calc_branching_bounds(self, node: Node):
         inp_lower = [i.bounds.lower for i in node.from_node]
         inp_upper = [i.bounds.upper for i in node.from_node]
-    
+
         return node.forward(inp_lower), node.forward(inp_upper)
 
     def _calc_sub_bounds(self, node: Node):
@@ -96,7 +96,7 @@ class IBP:
             const_upper = node.from_node[1].bounds.upper
         else:
             const_lower = node.const
-            const_upper = node.cons
+            const_upper = node.const
 
         return inp.lower - const_upper, inp.upper - const_lower
 
@@ -111,13 +111,13 @@ class IBP:
             const_upper = node.cons
 
         return inp.lower + const_lower, inp.upper + const_upper
-    
+
     def _calc_affine_bounds(self, node: Node):
         inp = node.from_node[0].bounds
 
         lower = node.forward(inp.lower, clip='+', add_bias=False)
         lower += node.forward(inp.upper, clip='-', add_bias=True)
-            
+
         upper = node.forward(inp.lower, clip='-', add_bias=False)
         upper += node.forward(inp.upper, clip='+', add_bias=True)
 
@@ -128,7 +128,7 @@ class IBP:
 
         lower = node.forward(inp.lower, clip='+')
         lower += node.forward(inp.upper, clip='-')
-            
+
         upper = node.forward(inp.lower, clip='-')
         upper += node.forward(inp.upper, clip='+')
 

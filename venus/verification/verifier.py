@@ -1,6 +1,6 @@
 # ************
 # File: main_verification_process.py
-# Top contributors (to current version): 
+# Top contributors (to current version):
 # 	Panagiotis Kouvaros (panagiotis.kouvaros@gmail.com)
 # This file is part of the Venus project.
 # Copyright: 2019-2021 by the authors listed in the AUTHORS file in the
@@ -42,7 +42,7 @@ def run_split_process(
     )
     proc.run()
 
-def run_subverifier( 
+def run_subverifier(
         jobs_queue: mp.Queue,
         reporting_queue: mp.Queue,
         config: Config
@@ -54,7 +54,7 @@ def run_subverifier(
     proc.run()
 
 class Verifier:
-    
+
     logger = None
 
     def __init__(self, nn, spec, config, batch=1):
@@ -76,7 +76,7 @@ class Verifier:
 
         self.prob.simplify_input()
         self.config = config
-        self.config.set_vnncomp_params(
+        self.config.set_params(
             self.prob.nn.get_n_relu_nodes(), self.prob.nn.head[0].input_size, batch=batch
         )
 
@@ -106,7 +106,7 @@ class Verifier:
         ver_report = VerificationReport(
             slv_report.result, slv_report.cex, slv_report.runtime
         )
-    
+
         if slv_report.result == SolveResult.UNDECIDED and \
         self.config.VERIFIER.COMPLETE is True:
             if self.config.SPLITTER.SPLIT_STRATEGY != SplitStrategy.NONE:
@@ -139,9 +139,9 @@ class Verifier:
         Verifier.logger.info(ver_report.to_string())
 
         return ver_report
-    
+
     def process_report_queue(self):
-        """ 
+        """
         Reads results from the reporting queue until encountered an UNSATISFIED
         result, or until all the splits have completed
 
@@ -194,12 +194,12 @@ class Verifier:
                 # Received terminating signal
                 ver_report.result = SolveResult.INTERRUPTED
                 break
-                    
+
         return ver_report
 
     def _process_split_report(self, ver_report: VerificationReport, split_report: SplitReport):
-        """ 
-        Updates the verification state with a split report. 
+        """
+        Updates the verification state with a split report.
 
         Returns:
             VerificationReport
@@ -207,8 +207,8 @@ class Verifier:
         ver_report.process_split_report(split_report)
 
     def _process_solve_report(self, ver_report: VerificationReport, solve_report: SolveReport):
-        """ 
-        Updates the verification state  with a solve report. 
+        """
+        Updates the verification state  with a solve report.
 
         Returns:
             VerificationReport
@@ -220,7 +220,7 @@ class Verifier:
             )
             self.config.SOLVER.MONITOR_SPLIT = False
             self.generate_procs()
-            
+
 
     def generate_procs(self):
         """
@@ -252,7 +252,7 @@ class Verifier:
                 )
             else:
                 splits = [self.prob]
-      
+
             for i in splits:
                 i.nn.detach()
 
@@ -268,10 +268,10 @@ class Verifier:
                 )
                 for i in range(len(splits))
             ]
-            
+
             for proc in self.split_procs:
                 proc.start()
-            
+
             Verifier.logger.info(f'Generated {len(self.split_procs)} split processes')
 
         else:
@@ -287,7 +287,7 @@ class Verifier:
             procs_to_gen = range(1)
         else:
             procs_to_gen = range(len(self.ver_procs), self.config.VERIFIER.VER_PROC_NUM)
-         
+
         ver_procs = [
             self._mp_context.Process(
                     target=run_subverifier,

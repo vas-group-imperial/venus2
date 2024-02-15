@@ -37,7 +37,7 @@ class OSSIP:
 
         self.lower_eq, self.upper_eq = {}, {}
         self.current_lower_eq, self.current_upper_eq = None, None
-    
+
     def calc_bounds(self, node: Node) -> Bounds:
         input_lower = self.prob.spec.input_node.bounds.lower.flatten()
         input_upper = self.prob.spec.input_node.bounds.upper.flatten()
@@ -88,7 +88,7 @@ class OSSIP:
             lower_eq = self._forward(node)
             upper_eq = lower_eq
 
-        else: 
+        else:
             if slopes is not None and isinstance(node, Relu):
                 l_slopes, u_slopes = slopes[0][node.id], slopes[1][node.id]
             else:
@@ -118,6 +118,9 @@ class OSSIP:
         elif isinstance(node, MatMul):
             f_equation = self._forward_matmul(equation, node)
 
+        elif isinstance(node, Sub):
+            f_equation = self._forward_sub(equation, node)
+
         elif isinstance(node, AveragePool):
             f_equation = self._forward_average_pool(equation, node)
 
@@ -138,13 +141,22 @@ class OSSIP:
             raise NotImplementedError(f'One step equation forward for {type(node)}')
 
         return f_equation
-    
+
+    def _forward_sub(self, equation: Equation, node: Node):
+        if node.const is None:
+          raise NotImplementedError("Forward SIP for substracting nodes.")
+        else:
+            matrix = equation.matrix.clone()
+            const = equation.const - node.const
+
+        return Equation(matrix, const, self.config)
+
     def _forward_gemm(self, equation: Equation, node: Node):
         shape = (equation.coeffs_size,) + node.input_shape_no_batch()
         matrix = node.forward(equation.matrix.T.reshape(shape), add_bias=False)
         matrix = matrix.reshape(equation.coeffs_size, -1).T
         const = node.forward(
-            equation.const.reshape(node.input_shape), 
+            equation.const.reshape(node.input_shape),
             add_bias=True
         ).flatten()
 
@@ -159,7 +171,7 @@ class OSSIP:
         ).flatten()
 
         return Equation(matrix, const, self.config)
-    
+
     def _forward_matmul(self, equation: Equation, node: Node):
         shape = (equation.coeffs_size,) + node.input_shape_no_batch()
         matrix = node.forward(equation.matrix.T.reshape(shape))
@@ -213,12 +225,12 @@ class OSSIP:
 
         return Equation(matrix, const, self.config)
 
-    def _int_forward(self,  node: Node, bound: str, slopes: tuple=None):         
+    def _int_forward(self,  node: Node, bound: str, slopes: tuple=None):
         lower = self.lower_eq[node.from_node[0].id]
         upper = self.upper_eq[node.from_node[0].id]
         in_equation = lower if bound == 'lower' else upper
 
-        if isinstance(node, Relu): 
+        if isinstance(node, Relu):
             equation = self._int_forward_relu(
                 in_equation, node, bound, slopes
             )
@@ -266,10 +278,10 @@ class OSSIP:
         elif type(node) in [Flatten, Reshape, Unsqueeze]:
             equation = in_equation
             # new_lower_eq  = self.lower_eq[node.from_node[0].id].forward(node)
- 
+
             # elif type(node) in [BatchNormalization, Conv, Gemm]:
                 # new_lower_eq  = Equation.interval_forward(
-                    # node, 
+                    # node,
                     # 'lower',
                     # self.lower_eq[node.from_node[0].id],
                     # self.upper_eq[node.from_node[0].id]
@@ -372,7 +384,7 @@ class OSSIP:
         self, lower_eq: Equation, upper_eq, node: Node, bound: str
     ):
         in_ch_sz = node.in_ch_sz()
-        
+
         scale = torch.tile(node.scale, (in_ch_sz, 1)).T.flatten()
         bias = torch.tile(node.bias, (in_ch_sz, 1)).T.flatten()
         input_mean = torch.tile(node.input_mean, (in_ch_sz, 1)).T.flatten()
@@ -398,7 +410,7 @@ class OSSIP:
             idxs = scale_var >= 0
             matrix[idxs, :] = (lower_eq.matrix[idxs, :].T * scale_var[idxs]).T
             const[idxs] = lower_eq.const[idxs] * scale_var[idxs]
-            
+
         elif bound == 'upper':
             idxs = scale_var < 0
             matrix[idxs, :] = (lower_eq.matrix[idxs, :].T * scale_var[idxs]).T
@@ -411,10 +423,10 @@ class OSSIP:
             raise ValueError(f"Bound type {bound} could not be recognised.")
 
         batch_const = - input_mean / var * scale + bias
-        const += batch_const 
+        const += batch_const
 
         return Equation(matrix, const, node.config)
- 
+
     def _int_forward_relu(
             self, equation: Equation, node: Node, bound: str, slopes: tuple=None
     ):
@@ -425,18 +437,18 @@ class OSSIP:
         )
 
         return Equation(matrix, const, self.config)
-    
+
     def _int_forward_max_pool(self, equation: Equation, node: Node, bound: str):
         lower, indices = node.forward(
             node.from_node[0].bounds.lower, return_indices=True
         )
         idx_correction = torch.tensor(
             [
-                i * node.from_node[0].in_ch_sz() 
+                i * node.from_node[0].in_ch_sz()
                 for i in range(node.from_node[0].in_ch())
             ],
             dtype=torch.long,
-            device=self.config.DEVICE    
+            device=self.config.DEVICE
         ).reshape((node.from_node[0].in_ch(), 1, 1))
         if node.has_batch_dimension():
             idx_correction = idx_correction[None, :]
@@ -449,7 +461,7 @@ class OSSIP:
 
         matrix = torch.zeros(
             (node.output_size, equation.coeffs_size),
-            dtype=node.config.PRECISION, 
+            dtype=node.config.PRECISION,
             device=node.config.DEVICE
         )
         const = torch.zeros(
@@ -470,7 +482,7 @@ class OSSIP:
             raise ValueError(f"Bound type {bound} could not be recognised.")
 
         return Equation(matrix, const, self.config)
-    
+
     def _int_forward_add(self, equation: Equation, node: Node, bound: str):
         if node.const is None:
             if bound == 'lower':
@@ -479,12 +491,30 @@ class OSSIP:
                 summand = self.upper_eq[node.from_node[1].id]
             else:
                 raise ValueError(f"Bound type {bound} could not be recognised.")
-            
+
             matrix = equation.matrix + summand.matrix
             const = equation.const + summand.const
 
         else:
-            matrix = equation.matrix.clone()  
+            matrix = equation.matrix.clone()
             const = equation.const + node.const
+
+        return Equation(matrix, const, self.config)
+
+    def _int_forward_sub(self, equation: Equation, node: Node, bound: str):
+        if node.const is None:
+            if bound == 'lower':
+                summand = self.upper_eq[node.from_node[1].id]
+            elif bound == 'upper':
+                summand = self.lower_eq[node.from_node[1].id]
+            else:
+                raise ValueError(f"Bound type {bound} could not be recognised.")
+
+            matrix = equation.matrix - summand.matrix
+            const = equation.const - summand.const
+
+        else:
+            matrix = equation.matrix.clone()
+            const = equation.const - node.const
 
         return Equation(matrix, const, self.config)

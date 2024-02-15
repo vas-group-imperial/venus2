@@ -1,6 +1,6 @@
 # ************
 # File: config.py
-# Top contributors (to current version): 
+# Top contributors (to current version):
 # 	Panagiotis Kouvaros (panagiotis.kouvaros@gmail.com)
 # This file is part of the Venus project.
 # Copyright: 2019-2021 by the authors listed in the AUTHORS file in the
@@ -29,7 +29,7 @@ class Solver():
     # Frequency of Gurobi callbacks for dependency cuts
     # Cuts are added every 1 in pow(milp_nodes_solved, DEP_FREQ)
     DEP_FREQ: float = 1
-    # Whether to use Gurobi's default cuts   
+    # Whether to use Gurobi's default cuts
     DEFAULT_CUTS: bool = False
     # Whether to use ideal cuts
     IDEAL_CUTS: bool = False
@@ -61,7 +61,7 @@ class Solver():
 
     def dep_cuts_enabled(self):
         """
-        Returns 
+        Returns
 
             True iff the MILP SOLVER is using dependency cuts.
         """
@@ -70,12 +70,12 @@ class Solver():
         else:
             return False
 
-    
+
 class Verifier():
     # whether to use MLP
     MILP: bool = True
     # complete or incomplete verification
-    COMPLETE: bool = False
+    COMPLETE: bool = True
     # number of parallel processes solving subproblems
     # VER_PROC_NUM: int = multiprocessing.cpu_count()
     VER_PROC_NUM: int = multiprocessing.cpu_count()
@@ -84,7 +84,7 @@ class Verifier():
     # whether to use lp relaxations
     LP: bool = False
     # whether to try verification via PGD
-    PGD: bool = False
+    PGD: bool = True
     # whether to try verification via PGD on the LP relaxation
     PGD_ON_LP: bool = False
     # pgd step size - The epsilon will be divided by this number.
@@ -93,7 +93,7 @@ class Verifier():
     PGD_NUM_ITER: int = 10
 
 class Splitter():
-    # Maximum  depth for node splitting. 
+    # Maximum  depth for node splitting.
     BRANCHING_DEPTH: int = 8
     # determinines when the splitting process can idle because there are
     # many unprocessed jobs in the jobs queue
@@ -104,16 +104,15 @@ class Splitter():
     # so that the best split can be chosen exhaustively
     SMALL_N_INPUT_DIMENSIONS: int = 16
     # splitting strategy
-    SPLIT_STRATEGY: SplitStrategy = SplitStrategy.NONE
-
-    NODE_SPLIT_STRATEGY: NodeSplitStrategy = NodeSplitStrategy.MULTIPLE_SPLITS 
+    SPLIT_STRATEGY: SplitStrategy = SplitStrategy.NODE
+    NODE_SPLIT_STRATEGY: NodeSplitStrategy = NodeSplitStrategy.MULTIPLE_SPLITS
     # branching heuristic, either deps or grad
     BRANCHING_HEURISTIC: str = 'deps'
     # the stability ratio weight for computing the difficulty of a problem
     STABILITY_RATIO_WEIGHT: float = 1
     # the value of fixed ratio above which the splitting can stop in any
     # case
-    STABILITY_RATIO_CUTOFF: float = 0.7
+    STABILITY_RATIO_CUTOFF: float = 0.8
     # the number of parallel splitting processes is 2^d where d is the
     # number of the parameter
     SPLIT_PROC_NUM: int = 2
@@ -190,9 +189,9 @@ class Config:
             self.SOLVER.TIME_LIMIT = int(value)
         elif param == 'intra_dep_constrs':
             self.SOLVER.INTRA_DEP_CONSTRS = value
-        elif param == 'intra_dep_cuts':  
+        elif param == 'intra_dep_cuts':
             self.SOLVER.INTRA_DEP_CUTS = value
-        elif param == 'inter_dep_constrs': 
+        elif param == 'inter_dep_constrs':
             self.SOLVER.INTER_DEP_CONSTRS = value
         elif param == 'inter_dep_cuts':
             self.SOLVER.INTER_DEP_CUTS = value
@@ -203,8 +202,8 @@ class Config:
         elif param == 'branching_threshold':
             self.SOLVER.BRANCHING_THRESHOLD = int(value)
         elif param == 'ver_proc_num':
-            self.VERIFIER.VER_PROC_NUM = int(value) 
-        elif param == 'split_proc_num': 
+            self.VERIFIER.VER_PROC_NUM = int(value)
+        elif param == 'split_proc_num':
             self.SPLITTER.SPLIT_PROC_NUM = int(value)
         elif param == 'branching_depth':
             self.SPLITTER.BRANCHING_DEPTH = int(value)
@@ -231,7 +230,7 @@ class Config:
             elif value == 'split':
                 self.SIP.OSIP_CONV = OSIPMode.SPLIT
         elif param == 'osip_conv_nodes':
-            self.SIP.OSIP_CONV_NODES = int(value) 
+            self.SIP.OSIP_CONV_NODES = int(value)
         elif param == 'osip_fc':
             if value == 'on':
                 self.SIP.OSIP_FC = OSIPMode.ON
@@ -240,7 +239,7 @@ class Config:
             elif value == 'split':
                 self.SIP.OSIP_FC = OSIPMode.SPLIT
         elif param == 'osip_fc_nodes':
-            self.SIP.OSIP_FC_NODES = int(value) 
+            self.SIP.OSIP_FC_NODES = int(value)
         elif param == 'osip_timelimit':
             self.SIP.OSIP_TIMELIMIT = int(value)
         elif param == 'relu_approximation':
@@ -268,7 +267,7 @@ class Config:
     def set_nn_defaults(self, nn):
         if nn.is_fc():
             self.set_fc_defaults(nn)
-        else: 
+        else:
             self.set_conv_defaults(nn)
 
     def set_fc_defaults(self, nn):
@@ -283,7 +282,7 @@ class Config:
             self.set_param_if_not_set('stability_ratio_cutoff', 0.75)
             self.set_param_if_not_set('split_strategy', 'input')
             self.set_param_if_not_set('split_proc_num', 2)
-        else:   
+        else:
             self.set_param_if_not_set('split_proc_num', 0)
             self.set_param_if_not_set('inter_dep_constrs', True)
             self.set_param_if_not_set('intra_dep_constrs', True)
@@ -309,7 +308,7 @@ class Config:
             self.set_param_if_not_set('relu_approximation', 'min_area')
         if relus > 4000:
             self.set_param_if_not_set('intra_dep_constrs', False)
-            self.set_param_if_not_set('inter_dep_cuts', False)  
+            self.set_param_if_not_set('inter_dep_cuts', False)
         if relus <= 10000:
             self.set_param_if_not_set('branching_depth', 2)
             self.set_param_if_not_set('branching_threshold', 50)
@@ -343,168 +342,35 @@ class Config:
         self.set_param('complete', u_params.complete)
         self.set_param('console_output', u_params.console_output)
 
-        
-    def set_vnncomp_params(self, n_relus, i_size, batch=1):
+
+    def set_params(self, n_relus, i_size, batch=1):
         if i_size > 10:
             self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.NODE
+            self.SOLVER.MONITOR_SPLIT = True
         else:
             self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.INPUT
-
-        if self.BENCHMARK == 'mnistfc':
-            self.SOLVER.IDEAL_CUTS = True
-            self.SOLVER.INTER_DEP_CUTS = True
-            self.SOLVER.INTER_DEP_CONSTRS = True
-            self.SOLVER.MONITOR_SPLIT = True
-            if n_relus < 1000:
-                self.SPLITTER.BRANCHING_DEPTH = 2
-                self.SOLVER.BRANCH_THRESHOLD = 10000
-            elif n_relus < 2000:
-                self.SPLITTER.BRANCHING_DEPTH = 2
-                self.SOLVER.BRANCH_THRESHOLD = 5000
-            else:
-                self.SPLITTER.BRANCHING_DEPTH = 7
-                self.SOLVER.BRANCH_THRESHOLD = 300
-            self.VERIFIER.COMPLETE = True
-            self.VERIFIER.PGD = True
-            self.SIP.ONE_STEP_SYMBOLIC = True
-            self.SIP.EQ_CONCRETISATION = True
-            self.SIP.SIMPLIFY_FORMULA = True
-            self.SIP.SLOPE_OPTIMISATION = True
-
-        elif self.BENCHMARK == 'cifar_biasfield':
-            self.SOLVER.INTER_DEP_CONSTRS = True
-            self.VERIFIER.COMPLETE = True
-            self.VERIFIER.PGD = True
-            self.SIP.SYMBOLIC = True
-            self.SIP.ONE_STEP_SYMBOLIC = True
-            self.SIP.EQ_CONCRETISATION = True
-            self.SIP.SLOPE_OPTIMISATION = True
-            self.SPLITTER.STABILITY_RATIO_CUTOFF = 1.1
-            self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.INPUT
-            self.SPLITTER.MAX_SPLIT_DEPTH = 100
-            self.SPLITTER.SPLIT_PROC_NUM = 1
-            self.VERIFIER.MILP = False
-
-        elif self.BENCHMARK == 'reach_prob_density':
-            self.SOLVER.IDEAL_CUTS = True
-            self.SOLVER.INTER_DEP_CUTS = True
-            self.SOLVER.INTER_DEP_CONSTRS = True
-            self.SOLVER.MONITOR_SPLIT = True
-            self.SPLITTER.BRANCHING_DEPTH = 2
-            self.SOLVER.BRANCH_THRESHOLD = 20000
-            self.VERIFIER.COMPLETE = True
-            self.VERIFIER.PGD = True
-            self.SIP.ONE_STEP_SYMBOLIC = True
-            self.SIP.EQ_CONCRETISATION = True
-            self.SIP.SIMPLIFY_FORMULA = True
-            self.SIP.SLOPE_OPTIMISATION = True
-            self.SPLITTER.STABILITY_RATIO_CUTOFF = 0.75
-
-        elif self.BENCHMARK == 'rl_benchmarks':
-            self.SOLVER.IDEAL_CUTS = True
-            self.SOLVER.INTER_DEP_CUTS = True
-            self.SOLVER.INTER_DEP_CONSTRS = True
-            self.SOLVER.MONITOR_SPLIT = True
-            if n_relus < 1000:
-                self.SPLITTER.BRANCHING_DEPTH = 2
-                self.SOLVER.BRANCH_THRESHOLD = 10000
-            elif n_relus < 2000:
-                self.SPLITTER.BRANCHING_DEPTH = 2
-                self.SOLVER.BRANCH_THRESHOLD = 5000
-            else:
-                self.SPLITTER.BRANCHING_DEPTH = 7
-                self.SOLVER.BRANCH_THRESHOLD = 300
-            self.VERIFIER.COMPLETE = True
-            self.VERIFIER.PGD = True
-            self.SIP.ONE_STEP_SYMBOLIC = True
-            self.SIP.EQ_CONCRETISATION = True
-            self.SIP.SIMPLIFY_FORMULA = True
-            self.SIP.SLOPE_OPTIMISATION = True
-            self.SPLITTER.STABILITY_RATIO_CUTOFF = 0.75
-
-        elif self.BENCHMARK in ['collins_rul_cnn', 'oval']:
-            self.SOLVER.IDEAL_CUTS = True
-            self.SOLVER.INTER_DEP_CUTS = True
-            self.SOLVER.INTER_DEP_CONSTRS = True
-            self.SOLVER.MONITOR_SPLIT = True
-            self.SPLITTER.BRANCHING_DEPTH = 3
-            self.SOLVER.BRANCH_THRESHOLD = 300
-            self.VERIFIER.COMPLETE = True
-            self.VERIFIER.PGD = True
-            self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.NODE
-            self.SIP.ONE_STEP_SYMBOLIC = True
-            self.SIP.EQ_CONCRETISATION = True
-            self.SIP.SIMPLIFY_FORMULA = True
-            self.SIP.SLOPE_OPTIMISATION = True
-            self.SPLITTER.BRANCHING_HEURISTIC = 'grad' 
-
-        elif self.BENCHMARK == 'sri_resnet_a':
-            self.VERIFIER.COMPLETE = True
-            self.VERIFIER.PGD = True
-            self.SIP.SYMBOLIC = True
-            self.SIP.ONE_STEP_SYMBOLIC = True
-            self.SIP.EQ_CONCRETISATION = True
-            self.SIP.SIMPLIFY_FORMULA = True
-            self.SIP.SLOPE_OPTIMISATION = False
-
-        elif self.BENCHMARK == 'tllverifybench':
-            self.SOLVER.IDEAL_CUTS = True
-            self.SOLVER.INTER_DEP_CUTS = True
-            self.SOLVER.INTER_DEP_CONSTRS = True
-            self.SOLVER.MONITOR_SPLIT = True
-            if n_relus < 1000:
-                self.SPLITTER.BRANCHING_DEPTH = 2
-                self.SOLVER.BRANCH_THRESHOLD = 10000
-            elif n_relus < 2000:
-                self.SPLITTER.BRANCHING_DEPTH = 2
-                self.SOLVER.BRANCH_THRESHOLD = 5000
-            else:
-                self.SPLITTER.BRANCHING_DEPTH = 7
-                self.SOLVER.BRANCH_THRESHOLD = 300
-            self.VERIFIER.COMPLETE = True
-            self.VERIFIER.PGD = True
-            self.SIP.ONE_STEP_SYMBOLIC = True
-            self.SIP.EQ_CONCRETISATION = True
-            self.SIP.SIMPLIFY_FORMULA = True
-            self.SIP.SLOPE_OPTIMISATION = True
-            self.SPLITTER.STABILITY_RATIO_CUTOFF = 0.75
-        
-        elif self.BENCHMARK == 'vgg16_2022':
-            self.VERIFIER.COMPLETE = True
-            self.VERIFIER.PGD = True
-            self.VERIFIER.PGD_NUM_ITER = 1
-            self.VERIFIER.VER_PROC_NUM = 1
-            self.SIP.SYMBOLIC = False
-            self.SIP.ONE_STEP_SYMBOLIC = False
-            self.SIP.EQ_CONCRETISATION = False
-            self.PRECISION = torch.float64
-            self.VERIFIER.MILP = False
-            self.SPLITTER.STABILITY_RATIO_CUTOFF = 1.1
-
-        elif self.BENCHMARK == 'cifar100_tinyimagenet_resnet':
-            self.SOLVER.IDEAL_CUTS = True
-            self.SOLVER.INTER_DEP_CUTS = True
-            self.SOLVER.INTER_DEP_CONSTRS = True
             self.SOLVER.MONITOR_SPLIT = False
-            self.SPLITTER.BRANCHING_DEPTH = 4
-            self.VERIFIER.COMPLETE = True
-            self.VERIFIER.PGD = True
-            self.SIP.EQ_CONCRETISATION = True
-            self.SIP.SIMPLIFY_FORMULA = True
-            self.SIP.SLOPE_OPTIMISATION = True
-            self.SPLITTER.BRANCHING_HEURISTIC = 'grad' 
-            self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.NONE
 
-        elif self.BENCHMARK == 'nn4sys':
-            self.SPLITTER.BRANCHING_DEPTH = 10
-            self.VERIFIER.COMPLETE = True
-            self.VERIFIER.MILP = False
-            self.VERIFIER.PGD = True
-            self.SIP.EQ_CONCRETISATION = True
-            self.SIP.SIMPLIFY_FORMULA = False
-            self.SIP.SLOPE_OPTIMISATION = False
-            self.SPLITTER.BRANCHING_HEURISTIC = 'grad' 
-            if batch > 1:
-                self.SPLITTER.SPLIT_STRATEGY = SplitStrategy.NODE
-                self.SPLITTER.STABILITY_RATIO_CUTOFF = 1.1
-            self.SPLITTER.SPLIT_PROC_NUM: int = 0
+        self.SOLVER.IDEAL_CUTS = True
+        self.SOLVER.INTER_DEP_CUTS = True
+        self.SOLVER.INTER_DEP_CONSTRS = True
+        if n_relus < 1000:
+            self.SPLITTER.BRANCHING_DEPTH = 2
+            self.SOLVER.BRANCH_THRESHOLD = 10000
+        elif n_relus < 2000:
+          self.SPLITTER.BRANCHING_DEPTH = 2
+          self.SOLVER.BRANCH_THRESHOLD = 5000
+        else:
+          self.SPLITTER.BRANCHING_DEPTH = 7
+          self.SOLVER.BRANCH_THRESHOLD = 300
+        self.VERIFIER.COMPLETE = True
+        self.VERIFIER.PGD = True
+        self.SIP.ONE_STEP_SYMBOLIC = True
+        self.SIP.EQ_CONCRETISATION = False
+        self.SIP.SIMPLIFY_FORMULA = True
+        if n_relus < 10000:
+          self.SIP.SLOPE_OPTIMISATION = True
+        else:
+          self.SIP.SLOPE_OPTIMISATION = False
+        self.SPLITTER.BRANCHING_HEURISTIC = 'deps'
+

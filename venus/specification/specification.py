@@ -1,6 +1,6 @@
 # ************
 # File: specification.py
-# Top contributors (to current version): 
+# Top contributors (to current version):
 # 	Panagiotis Kouvaros (panagiotis.kouvaros@gmail.com)
 # This file is part of the Venus project.
 # Copyright: 2019-2021 by the authors listed in the AUTHORS file in the
@@ -48,7 +48,7 @@ class Specification:
         if self.output_formula is None:
             return []
 
-        if isinstance(self.output_formula, list): 
+        if isinstance(self.output_formula, list):
             negated_output_formula = NegationFormula(self.output_formula[idx]).to_NNF()
             return self.get_constrs(negated_output_formula, gmodel, output_vars)
         else:
@@ -65,7 +65,7 @@ class Specification:
             gmodel:
                 gurobi model.
             output_vars:
-                list of gurobi variables of the output of the network. 
+                list of gurobi variables of the output of the network.
         Returns:
             list of gurobi constraints encoding the given formula.
         """
@@ -116,7 +116,7 @@ class Specification:
             op2 = constraint.op2
         else:
             raise Exception("Unexpected type of atomic constraint", constraint)
-        
+
         if sense == Formula.Sense.GE:
             return op1 >= op2
         elif sense == Formula.Sense.LE:
@@ -155,7 +155,7 @@ class Specification:
             gmodel:
                 gurobi model.
             output_vars:
-                list of gurobi variables of the output of the network. 
+                list of gurobi variables of the output of the network.
         Returns:
             list of gurobi constraints encoding the given formula
         """
@@ -177,7 +177,7 @@ class Specification:
             gmodel:
                 gurobi model.
             output_vars:
-                list of gurobi variables of the output of the network. 
+                list of gurobi variables of the output of the network.
         Returns:
             list of gurobi constraints encoding the given formula
         """
@@ -226,7 +226,7 @@ class Specification:
             gmodel:
                 gurobi model.
             output_vars:
-                list of gurobi variables of the output of the network. 
+                list of gurobi variables of the output of the network.
         Returns:
             list of gurobi constraints encoding the given formula
         """
@@ -298,7 +298,7 @@ class Specification:
 
         # exactly one variable must be true
         constrs.append(quicksum(split_vars) == 1)
-            
+
         return constrs
 
 
@@ -321,7 +321,7 @@ class Specification:
 
         clauses = formula.clauses
         split_vars = gmodel.addVars(len(clauses), vtype=GRB.BINARY)
-        clause_vars = [gmodel.addVars(len(output_vars), lb=-GRB.INFINITY) 
+        clause_vars = [gmodel.addVars(len(output_vars), lb=-GRB.INFINITY)
                        for _ in range(len(clauses))]
         constr_sets = []
         constrs = []
@@ -335,7 +335,7 @@ class Specification:
 
         # exactly one variable must be true
         constrs.append(quicksum(split_vars) == 1)
-            
+
         return constrs
 
     def copy(self, inp_node=None):
@@ -441,9 +441,9 @@ class Specification:
             raise Exception("Unexpected type of formula", type(formula))
 
 
-    def _get_mse_loss(self, output):
+    def get_mse_loss(self, output):
         """
-        Computes the mean squared error of the output. 
+        Computes the mean squared error of the output.
 
         Arguments:
             output:
@@ -453,10 +453,10 @@ class Specification:
         """
         if isinstance(self.output_formula, list):
             loss = torch.mean(
-                self._get_formula_mse_loss(output[i, ...], j) 
+                self._get_formula_mse_loss(output[i, ...], j)
                 for i, j in enumerate(self.output_formula)
             )
-        
+
         else:
             loss  = self._get_formula_mse_loss(output, self.output_formula)
 
@@ -576,10 +576,10 @@ class Specification:
         elif type(formula) in [ConjFormula, DisjFormula]:
             label1 = self._is_adversarial_robustness(formula.left)
             if label1 == -1:
-                return -1 
+                return -1
             label2 = self._is_adversarial_robustness(formula.right)
             if label2 == -1:
-                return -1 
+                return -1
             return -1 if label1 != label2 else label1
         elif type(formula) in [NAryConjFormula, NAryDisjFormula]:
             label1 = self._is_adversarial_robustness(formula.clauses[0])
@@ -604,7 +604,7 @@ class Specification:
             output_shape:
                 the output shape of the network.
             formula:
-                the formula for which to get the output flag. 
+                the formula for which to get the output flag.
         Returns:
             Boolean flag of whether each output concerns the specification.
         """
@@ -638,7 +638,7 @@ class Specification:
             output_shape:
                 the output shape of the network.
             formula:
-                the formula for which to get the output flag. 
+                the formula for which to get the output flag.
         Returns:
             Boolean flag of whether each output concerns the specification.
         """

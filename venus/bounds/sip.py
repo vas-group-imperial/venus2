@@ -48,7 +48,7 @@ class SIP:
         self.ibp = IBP(self.prob, self.config)
         self.os_sip = OSSIP(self.prob, self.config)
         self.bs_sip = BSSIP(self.prob, self.config)
-       
+
     def init(self):
         self.ibp = IBP(self.prob, self.config)
         self.os_sip = OSSIP(self.prob, self.config)
@@ -71,7 +71,7 @@ class SIP:
 
         # set bounds using area approximations
         self._set_bounds(slopes, depth=1)
- 
+
         # print(
             # self.prob.id,
             # self.prob.nn.tail.bounds.lower,
@@ -139,7 +139,7 @@ class SIP:
             for j in nodes:
                 delta = self._get_delta_for_node(j, delta_flags)
                 self._set_bounds_for_node(j, slopes, delta)
- 
+
     def _set_bounds_for_node(
         self, node: Node, slopes: tuple=None, delta_flag: torch.Tensor=None
     ):
@@ -150,7 +150,7 @@ class SIP:
         slopes = self._update_bounds(node, bounds, slopes, delta_flag)
         if node.has_relu_activation():
             ia_count = node.to_node[0].get_unstable_count()
-     
+
         # print('ia', node, torch.mean(node.bounds.lower))
         # check eligibility for symbolic equations
         symb_elg = self.is_symb_eq_eligible(node)
@@ -165,11 +165,12 @@ class SIP:
                 slopes = self._update_bounds(node, bounds, slopes, delta_flag)
                 if node.has_relu_activation():
                     os_count = node.to_node[0].get_unstable_count()
- 
+
+
         # recheck eligibility for symbolic equations
         non_linear_depth = self.prob.nn.get_non_linear_starting_depth()
         symb_elg = self.is_symb_eq_eligible(node) and node.depth >= non_linear_depth
-        
+
         if self.config.BENCHMARK == 'vgg16_2022' and node.depth >= 13:
             return
 
@@ -186,13 +187,11 @@ class SIP:
                     concretisations = None
             else:
                 concretisations = None
-
             bounds, flag = self.bs_sip.calc_bounds(
                 node, slopes, concretisations
             )
             slopes = self._update_bounds(node, bounds, slopes=slopes, out_flag=flag)
 
-        # print(node, 'bs', torch.mean(node.bounds.lower))
 
     def _update_bounds(
         self,
@@ -228,7 +227,7 @@ class SIP:
                     if delta_flags is not None:
                         bounds.lower[delta_flags[0]] = 0.0
                         bounds.upper[delta_flags[0]] = 0.0
-        
+
                         bounds.lower[delta_flags[1]] = torch.clamp(
                             bounds.lower[delta_flags[1]], 0.0, math.inf
                         )
@@ -245,11 +244,12 @@ class SIP:
                     slopes[1][node.get_next_relu().id] = \
                         slopes[1][node.get_next_relu().id][new_fl]
 
+
                 else:
                     if delta_flags is not None:
                         bounds.lower[delta_flags[0][out_flag]] = 0.0
                         bounds.upper[delta_flags[0][out_flag]] = 0.0
-        
+
                         bounds.lower[delta_flags[1][out_flag]] = torch.clamp(
                             bounds.lower[delta_flags[1][out_flag]], 0.0, math.inf
                         )
@@ -268,7 +268,7 @@ class SIP:
                         slopes[0][node.get_next_relu().id][idxs]
                     slopes[1][node.get_next_relu().id] = \
                         slopes[1][node.get_next_relu().id][idxs]
-            
+
         if slopes is not None and node.has_relu_activation():
             node_slopes = [
                 slopes[0][node.get_next_relu().id], slopes[1][node.get_next_relu().id]
@@ -283,7 +283,7 @@ class SIP:
     def _get_delta_for_node(self, node: Node, delta_flags: torch.Tensor) -> torch.Tensor:
         if delta_flags is not None and node.has_relu_activation() is True:
             return delta_flags[node.to_node[0].id]
-            
+
         return None
 
     def _get_slopes_for_node(self, node: Node, slopes: tuple[dict]) -> torch.Tensor:
@@ -296,7 +296,7 @@ class SIP:
         """
         Determines whether the node implements function requiring a symbolic
         equation for bound calculation.
-        """ 
+        """
         if node.depth <= 1 or node.is_non_symbolically_connected() is True:
             return False
 
@@ -311,7 +311,7 @@ class SIP:
 
         if node.has_relu_activation() and node.to_node[0].get_unstable_count() > 0:
             return True
-    
+
         return False
 
 
@@ -363,14 +363,14 @@ class SIP:
         states of the nodes as per the branching procedure.
 
         Arguments:
-            
+
             relu_states:
                 Relu states of a layer
             bounds:
                 Concrete bounds of the layer
-            
+
         Returns:
-            
+
             a pair of the lower and upper bounds resulting from stablising
             nodes as per the relu states.
         """

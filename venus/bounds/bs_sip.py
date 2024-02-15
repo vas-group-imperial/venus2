@@ -54,7 +54,7 @@ class BSSIP:
         )
 
         if lower_bounds is None:
-            return
+            return Bounds(node.bounds.lower[out_flag], node.bounds.upper[out_flag]), lower_flag
 
         # reduce symbolic equation if instability was reduced by
         # back_substitution.
@@ -79,9 +79,9 @@ class BSSIP:
         )
 
         if upper_bounds is None:
-            return
-        
-        if os_sip is not None: 
+            return Bounds(node.bounds.lower[out_flag], node.bounds.upper[out_flag]), upper_flag
+
+        if os_sip is not None:
             upper_bounds = torch.min(node.bounds.upper[upper_flag], upper_bounds)
             lower_bounds = lower_bounds[upper_flag[lower_flag]]
 
@@ -90,7 +90,6 @@ class BSSIP:
                 node.bounds.upper[out_flag].flatten(), upper_bounds
             )
             upper_flag = out_flag
-        
         return Bounds(lower_bounds, upper_bounds), upper_flag
 
     # def _set_bounds(
@@ -104,7 +103,7 @@ class BSSIP:
         # if node.has_fwd_relu_activation() and slopes is not None:
             # # relu node with custom slope - leave slope as is but remove from
             # # it newly stable nodes.
-            # old_fl = node.get_next_relu().get_unstable_flag() 
+            # old_fl = node.get_next_relu().get_unstable_flag()
             # new_fl = out_flag[old_fl]
 
             # slopes[0][node.get_next_relu().id] = \
@@ -121,15 +120,15 @@ class BSSIP:
         elif len(node.to_node) == 0:
             return self.prob.spec.get_output_flag(
                 node.output_shape, device = self.config.DEVICE
-            )        
+            )
 
-        return None 
+        return None
 
     def _get_stability_flag(self, node: Node):
         stability = node.get_propagation_count()
         if stability / node.output_size >= self.config.SIP.STABILITY_FLAG_THRESHOLD:
             return  None
-            
+
         return node.get_propagation_flag()
 
     def _derive_symb_eq(self, node: Node):
@@ -146,7 +145,7 @@ class BSSIP:
         self,
         equation: Equation,
         node: None,
-        bound: str, 
+        bound: str,
         i_flag: torch.Tensor=None,
         slopes: dict=None,
         os_sip: OSSIP=None
@@ -259,10 +258,10 @@ class BSSIP:
         non_linear_cond = cur_node.has_relu_activation() or \
             type(cur_node) in [MaxPool, BatchNormalization]
         tranposed = False
- 
+
         if type(cur_node) in [Relu, Flatten, Unsqueeze, Reshape]:
             pass
-        
+
         else:
             in_flag = self._get_stability_flag(cur_node.from_node[0])
             out_flag = self._get_stability_flag(cur_node)
@@ -280,10 +279,10 @@ class BSSIP:
                 equation = self._backward(
                     equation,
                     cur_node,
-                    out_flag=out_flag, 
+                    out_flag=out_flag,
                     in_flag=in_flag
                 )
- 
+
             tranposed = True
 
         if os_sip is not None and tranposed is True:
@@ -318,16 +317,16 @@ class BSSIP:
     ):
         """
         Helper function for back_substitution
-        """ 
+        """
         if isinstance(cur_node, Add):
             if base_node is cur_node:
                 add_eq = equation
             else:
                 if cur_node.has_relu_activation() is True:
                     add_eq = self._int_backward_relu(
-                        equation, 
-                        cur_node, 
-                        bound, 
+                        equation,
+                        cur_node,
+                        bound,
                         slopes=slopes
                     )
                 else:
@@ -421,10 +420,10 @@ class BSSIP:
         if base_node.has_relu_activation() is not True \
         or isinstance(input_node, Input):
             return equation, instability_flag
-     
+
         if bound == 'lower':
             if input_node.id not in os_sip.lower_eq:
-                return equation, instability_flag 
+                return equation, instability_flag
 
             concr_bounds = equation.interval_dot(
                 'lower', os_sip.lower_eq[input_node.id], os_sip.upper_eq[input_node.id]
@@ -445,7 +444,7 @@ class BSSIP:
 
         elif bound == 'upper':
             if input_node.id not in os_sip.upper_eq:
-                return equation, instability_flag 
+                return equation, instability_flag
 
             concr_bounds = equation.interval_dot(
                 'upper', os_sip.lower_eq[input_node.id], os_sip.upper_eq[input_node.id]
@@ -465,7 +464,7 @@ class BSSIP:
             # base_node.get_next_relu().reset_state_flags()
         else:
             raise Exception(f"Bound type {bound} not recognised.")
-  
+
         flag = torch.zeros(
             base_node.output_shape, dtype=torch.bool, device=self.config.DEVICE
         )
@@ -513,7 +512,7 @@ class BSSIP:
         matmul_layer = MatMul(
             [self.prob.nn.tail],
             [],
-            self.prob.nn.tail.output_shape, 
+            self.prob.nn.tail.output_shape,
             (1,),
             coeffs,
             self.config,
@@ -528,11 +527,11 @@ class BSSIP:
         else:
             lr = -self.config.SIP.GD_LR
             current, best = -math.inf, self.prob.nn.tail.bounds.upper.flatten()[target]
-        
+
         for i in range(self.config.SIP.GD_STEPS):
             bounds, _ = self.back_substitution(
                 equation, matmul_layer, bound, slopes=slopes
-            ) 
+            )
 
             if bound == 'lower' and bounds.item() > current and bounds.item() - current < 10e-3:
                 self.prob.detach()
@@ -541,11 +540,11 @@ class BSSIP:
             elif bound == 'upper' and bounds.item() < current and current - bounds.item() < 10e-4:
                 self.prob.detach()
                 return best_slopes
-            
+
             current = bounds.item()
 
             bounds.backward()
- 
+
             if bound == 'lower' and current >= best or \
             bound == 'upper' and current <= best:
                 best = current
@@ -554,14 +553,14 @@ class BSSIP:
             for j in slopes:
                 if slopes[j].grad is not None:
                     # step = lr * (slopes[j].grad.data / torch.mean(slopes[j].grad.data))
-                    step = lr * slopes[j].grad.data 
+                    step = lr * slopes[j].grad.data
                     if bound == 'lower':
-                        slopes[j].data += step 
+                        slopes[j].data += step
                         # slopes[j].data -= step - torch.mean(slopes[j].data)
                     else:
                         slopes[j].data += step
                         # slopes[j].data -= step - torch.mean(slopes[j].data)
-                        
+
                     slopes[j].data = torch.clamp(slopes[j].data, 0, 1)
 
             if bound == 'lower' and current >= best or bound == 'upper' and current <= best:
@@ -593,7 +592,7 @@ class BSSIP:
         matmul_layer = MatMul(
             [self.prob.nn.tail],
             [],
-            self.prob.nn.tail.output_shape, 
+            self.prob.nn.tail.output_shape,
             (1,),
             coeffs,
             self.config,
@@ -606,20 +605,20 @@ class BSSIP:
         current = -math.inf
         best = self.prob.nn.tail.bounds.lower.flatten()[label] - \
             self.prob.nn.tail.bounds.lower.flatten()[target]
-        
+
         for i in range(self.config.SIP.GD_STEPS):
             bounds, _ = self.back_substitution(
                 equation, matmul_layer, 'lower', slopes=slopes
-            ) 
+            )
 
             if bounds.item() > current and bounds.item() - current < 10e-3:
                 self.prob.nn.detach()
                 return best_slopes
-            
+
             current = bounds.item()
 
             bounds.backward()
- 
+
             if current >= best:
                 best = current
                 best_slopes = {i: slopes[i].detach().clone() for i in slopes}
@@ -636,7 +635,7 @@ class BSSIP:
                     i: slopes[i].detach().clone() for i in slopes
                 }
 
-        self.prob.detach() 
+        self.prob.detach()
 
         return best_slopes
 
@@ -647,7 +646,7 @@ class BSSIP:
             out_flag = torch.ones(
                 node.output_shape, dtype=torch.bool, device=self.config.DEVICE
             )
-            
+
         equation = Equation.derive(node, self.config, out_flag, None)
 
         best_slopes = slopes
@@ -657,11 +656,11 @@ class BSSIP:
         else:
             lr = self.config.SIP.GD_LR
             current_mean, best_mean = math.inf, torch.mean(node.bounds.upper)
-        
+
         for i in range(self.config.SIP.GD_STEPS):
             bounds, _ = self.back_substitution(
                 equation, node, bound, slopes=slopes
-            ) 
+            )
             bounds = torch.mean(bounds)
             if bound == 'lower' and bounds.item() > current_mean and bounds.item() - current_mean < 10e-3:
                 return best_slopes
@@ -671,7 +670,7 @@ class BSSIP:
             current_mean = bounds.item()
 
             bounds.backward()
- 
+
             if (bound == 'lower' and bounds.item() >= best_mean) or \
             (bound == 'upper' and bounds.item() <= best_mean):
                 best_mean = bounds.item()
@@ -680,13 +679,14 @@ class BSSIP:
             for j in slopes:
                 if slopes[j].grad is not None:
                     step = lr * (slopes[j].grad.data / torch.mean(slopes[j].grad.data))
+                    mean = torch.mean(slopes[j].data)
+                    if torch.isnan(mean) is not True and torch.sum(torch.isnan(step)) == 0:
+                      if bound == 'upper':
+                          slopes[j].data -= step + mean
+                      else:
+                        slopes[j].data += step - mean
 
-                    if bound == 'upper':
-                        slopes[j].data -= step + torch.mean(slopes[j].data)
-                    else:
-                        slopes[j].data += step - torch.mean(slopes[j].data)
-
-                    slopes[j].data = torch.clamp(slopes[j].data, 0, 1)
+                      slopes[j].data = torch.clamp(slopes[j].data, 0, 1)
 
             if (bound == 'lower' and bounds.item() >= best_mean) or \
             (bound == 'upper' and bounds.item() <= best_mean):
@@ -695,7 +695,7 @@ class BSSIP:
                     i: slopes[i].detach().clone() for i in slopes
                 }
 
-        self.prob.nn.detach() 
+        self.prob.nn.detach()
         return best_slopes
 
     def _backward_matrix(
@@ -707,7 +707,7 @@ class BSSIP:
     ) -> torch.Tensor:
         if type(node) in [Conv, ConvTranspose]:
             b_matrix =  self._backward_conv_matrix(matrix, node, out_flag, in_flag)
-        
+
         elif isinstance(node, Gemm):
             b_matrix = self._backward_gemm_matrix(matrix, node, out_flag, in_flag)
 
@@ -775,10 +775,10 @@ class BSSIP:
         if node.const is None:
             b_matrix = torch.hstack([matrix, -matrix])
         else:
-            b_matrix = matrix.clone()
+            b_matrix = matrix.clone() - node.const.flatten()
 
         return b_matrix
- 
+
     def _backward_add_matrix(self, matrix: torch.Tensor, node:Node) -> torch.Tensor:
         # if node.const is None:
             # b_matrix = torch.hstack([matrix, matrix])
@@ -809,7 +809,7 @@ class BSSIP:
             b_matrix = matrix[:, prop_flag] * scale_var[prop_flag]
 
         return b_matrix
-    
+
     def _backward(
         self,
         equation: Equation,
@@ -841,7 +841,7 @@ class BSSIP:
         else:
             raise NotImplementedError(f'Equation backward for {type(node)}')
 
-        return b_equation 
+        return b_equation
 
 
     def _backward_gemm(
@@ -880,7 +880,7 @@ class BSSIP:
         matrix = self._backward_matmul_matrix(equation.matrix, node, out_flag, in_flag)
 
         return Equation(matrix, equation.const, self.config)
- 
+
     def _backward_slice(self, equation: Equation, node: Node):
         matrix = torch.zeros(
             (equation.size,) + node.input_shape,
@@ -892,16 +892,16 @@ class BSSIP:
         matrix = matrix.reshape(equation.size, -1)
 
         return Equation(matrix, equation.const, self.config)
- 
+
     def _backward_sub(self, equation: Equation, node: Node):
         matrix = self._backward_sub_matrix(equation.matrix, node)
         if node.const is None:
             const = equation.const.clone()
         else:
-            const = node.const.flatten() + equation.const
+            const = equation.const
 
         return Equation(matrix, const, self.config)
- 
+
     def _backward_add(self, equation: Equation, node: Node):
         matrix = self._backward_add_matrix(equation.matrix, node)
         if node.const is None:
@@ -956,7 +956,7 @@ class BSSIP:
 
     def _int_backward_relu(
         self,
-        equation: Equation, 
+        equation: Equation,
         node: Node,
         bound: str,
         out_flag: torch.tensor=None,
@@ -1030,14 +1030,14 @@ class BSSIP:
         lower, indices = node.forward(
             node.from_node[0].bounds.lower, return_indices=True
         )
-        
+
         idx_correction = torch.tensor(
             [
-                i * node.from_node[0].in_ch_sz() 
+                i * node.from_node[0].in_ch_sz()
                 for i in range(node.from_node[0].in_ch())
             ],
             dtype=torch.long,
-            device=self.config.DEVICE    
+            device=self.config.DEVICE
         ).reshape((node.from_node[0].in_ch(), 1, 1))
         if node.has_batch_dimension():
             idx_correction = idx_correction[None, :]
@@ -1100,7 +1100,7 @@ class BSSIP:
             raise ValueError(f'Bound {bound} is not recognised.')
 
         return Equation(matrix, const, self.config)
-     
+
     def _get_flags(self, node: Node):
         stab = node.from_node[0].get_propagation_count()
         if stab / node.input_size >= self.config.SIP.STABILITY_FLAG_THRESHOLD:
@@ -1136,7 +1136,7 @@ class BSSIP:
             matmul_layer = MatMul(
                 [self.prob.nn.tail],
                 [],
-                self.prob.nn.tail.output_shape, 
+                self.prob.nn.tail.output_shape,
                 (1,),
                 coeffs,
                 self.config,
@@ -1191,7 +1191,7 @@ class BSSIP:
 
             return NAryConjFormula(clauses)
 
-        return formula 
+        return formula
 
 
 
@@ -1219,7 +1219,7 @@ class BSSIP:
                 base_node.output_shape, dtype=torch.bool, device=self.config.DEVICE
             )
             flag[instability_flag] = stable_idxs
-            base_node.bounds.lower[flag] = concr_bounds[stable_idxs] 
+            base_node.bounds.lower[flag] = concr_bounds[stable_idxs]
             # print('l', base_node.to_node[0].get_unstable_count())
             base_node.to_node[0].reset_state_flags()
             # print('l', base_node.to_node[0].get_unstable_count())
@@ -1242,7 +1242,7 @@ class BSSIP:
             # input()
         else:
             raise Exception(f"Bound type {bound} not recognised.")
-  
+
         flag = torch.zeros(
             base_node.output_shape, dtype=torch.bool, device=self.config.DEVICE
         )

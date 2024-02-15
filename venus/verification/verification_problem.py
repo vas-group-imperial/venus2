@@ -1,6 +1,6 @@
 # ************
 # File: verification_problem.py
-# Top contributors (to current version): 
+# Top contributors (to current version):
 # 	Panagiotis Kouvaros (panagiotis.kouvaros@gmail.com)
 # This file is part of the Venus project.
 # Copyright: 2019-2021 by the authors listed in the AUTHORS file in the
@@ -121,7 +121,7 @@ class VerificationProblem(object):
         self.bound_analysis()
         lower_bounds = self.nn.layers[-1].post_bounds.lower
         upper_bounds = self.nn.layers[-1].post_bounds.upper
-        if self.satisfies_spec(self.spec.output_formula, lower_bounds, upper_bounds):  
+        if self.satisfies_spec(self.spec.output_formula, lower_bounds, upper_bounds):
             ver_report.result = SolveResult.SAFE
 
     def satisfies_spec(self):
@@ -129,7 +129,7 @@ class VerificationProblem(object):
             return True
         if not self._sip_bounds_computed:
             raise Exception('Bounds not computed')
-        
+
         return self.spec.is_satisfied(
             self.nn.tail.bounds.lower,
             self.nn.tail.bounds.upper
@@ -141,7 +141,7 @@ class VerificationProblem(object):
         layer.
 
         Arguments:
-                
+
             nodeid:
                 the id of the node for which to retrieve the indices of the
                 MILP variables.
@@ -150,7 +150,7 @@ class VerificationProblem(object):
                 variables.
 
         Returns:
-        
+
             pair of ints indicating the start and end positions of the indices
         """
         assert nodeid in self.nn.node or nodeid == self.spec.input_npde.id, \
@@ -194,7 +194,7 @@ class VerificationProblem(object):
         """
         self.nn.clean_vars()
         self.spec.clean_vars()
-        
+
     def cuda(self):
         """
         Moves all data to gpu memory
@@ -227,16 +227,20 @@ class VerificationProblem(object):
         return self.nn.model_path  + ' against ' + self.spec.to_string()
 
     def simplify_input(self):
+
+      if self.spec.input_node.output_size < 20:
+        return
+
         pert_idxs =  self.spec.input_node.bounds.lower != \
             self.spec.input_node.bounds.upper
         unpert_idxs =  self.spec.input_node.bounds.lower == \
             self.spec.input_node.bounds.upper
         pert_inputs = torch.sum(pert_idxs)
         org_input_shape =  self.nn.head[0].input_shape
-        
+
         if pert_inputs > 8 and isinstance(self.spec.output_formula, list) is not True:
             return self
-    
+
         # new head node
         matrix = torch.zeros(
             (pert_inputs, self.spec.input_node.output_size),
@@ -251,7 +255,7 @@ class VerificationProblem(object):
         )
         const[unpert_idxs.flatten()] = self.spec.input_node.bounds.lower[unpert_idxs].flatten()
 
-        if len(org_input_shape) > 2: 
+        if len(org_input_shape) > 2:
             gemm = Gemm(
                 [],
                 [],
@@ -277,7 +281,7 @@ class VerificationProblem(object):
             # update depths
             for _, i in self.nn.node.items():
                 i.depth += 2
-            # insert node into the network 
+            # insert node into the network
             self.nn.node[gemm.id] = gemm
             self.nn.node[reshape.id] = reshape
 
@@ -299,12 +303,12 @@ class VerificationProblem(object):
             # update depths
             for _, i in self.nn.node.items():
                 i.depth += 1
-            # insert node into the network 
+            # insert node into the network
             self.nn.node[gemm.id] = gemm
 
         # update head
         self.nn.head = [gemm]
-        
+
         for i in self.nn.head:
             i.from_node = [self.spec.input_node]
 
@@ -323,9 +327,9 @@ class VerificationProblem(object):
         self.spec.input_node.input_size = pert_inputs.item()
         self.spec.input_node.output_shape = (pert_inputs.item(),)
         self.spec.input_node.output_size = pert_inputs.item()
-            
 
-        
+
+
 
 
 

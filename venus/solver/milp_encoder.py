@@ -1,6 +1,6 @@
 # ************
 # File: milp_encoder.py
-# Top contributors (to current version): 
+# Top contributors (to current version):
 # 	Panagiotis Kouvaros (panagiotis.kouvaros@gmail.com)
 # This file is part of the Venus project.
 # Copyright: 2019-2021 by the authors listed in the AUTHORS file in the
@@ -25,12 +25,12 @@ from timeit import default_timer as timer
 class MILPEncoder:
 
     logger = None
-    
+
     def __init__(self, prob: VerificationProblem, config: Config):
         """
         Arguments:
             nn:
-                NeuralNetwork. 
+                NeuralNetwork.
             spec:
                 Specification.
             config:
@@ -47,9 +47,9 @@ class MILPEncoder:
     def encode(self, linear_approx=False):
         """
         Builds a Gurobi Model encoding the  verification problem.
-   
+
         Arguments:
-            linear_approx: 
+            linear_approx:
                 whether to use linear approximation for Relu nodes.
         Returns:
             Gurobi Model.
@@ -81,7 +81,7 @@ class MILPEncoder:
 
             MILPEncoder.logger.info(
                 'Encoded verification problem {} into {}, time: {:.2f}'.format(
-                    self.prob.id, 
+                    self.prob.id,
                     "LP" if linear_approx is True else "MILP",
                     timer() - start
                 )
@@ -97,7 +97,7 @@ class MILPEncoder:
         Arguments:
             gmodel:
                 The gurobi model
-            linear_approx: 
+            linear_approx:
                 whether to use linear approximation for Relu nodes.
         """
         self.add_output_vars(self.prob.spec.input_node, gmodel)
@@ -123,29 +123,30 @@ class MILPEncoder:
                     j.out_vars = j.forward([k.out_vars for k in j.from_node])
 
                 elif type(j) in [
-                    Gemm, MatMul, Conv, ConvTranspose, Add, Sub, BatchNormalization, 
+                    Gemm, MatMul, Conv, ConvTranspose, Add, Sub, BatchNormalization,
                     MaxPool, AveragePool
                 ]:
                     self.add_output_vars(j, gmodel)
 
                 else:
                     raise TypeError(f'The MILP encoding of node {j} is not supported')
- 
+
     def add_output_vars(self, node: Node, gmodel: Model):
         """
         Creates a real-valued MILP variable for each of the outputs of a given
         node.
-   
-        Arguments: 
+
+        Arguments:
             node:
                 The node.
             gmodel:
                 The gurobi model
-        """ 
+        """
         if node.bounds.size() > 0:
+
             node.out_vars = np.array(
                 gmodel.addVars(
-                    node.output_size.item(),
+                    int(node.output_size),
                     lb=node.bounds.lower.flatten(),
                     ub=node.bounds.upper.flatten()
                 ).values()
@@ -163,27 +164,27 @@ class MILPEncoder:
                         (node.output_size.item(),), lb=-GRB.INFINITY, ub=GRB.INFINITY
                     ).values()
                 ).reshape(node.output_shape)
-        
-        new_idx = self._idx_count + node.output_size.item()
+
+        new_idx = self._idx_count + int(node.output_size)
         node.set_milp_var_indices(out_start=self._idx_count, out_end=new_idx)
         self._idx_count = new_idx
-        
- 
+
+
     def add_relu_delta_vars(self, node: Relu, gmodel: Model):
         """
         Creates a binary MILP variable for encoding each of the units in a given
         ReLU node. The variables are prioritised for branching according to the
         depth of the node.
-   
-        Arguments: 
-        
+
+        Arguments:
+
             node:
-                The Relu node. 
+                The Relu node.
             gmodel:
                 The gurobi model
         """
         assert(isinstance(node, Relu)), "Cannot add delta variables to non-relu nodes."
-   
+
         node.delta_vars = np.empty(shape=node.output_size, dtype=Var)
         if node.get_unstable_count() > 0:
             node.delta_vars[node.get_unstable_flag().flatten()] = np.array(
@@ -206,7 +207,7 @@ class MILPEncoder:
 
             gmodel:
                 The gurobi model.
-            linear_approx: 
+            linear_approx:
                 whether to use linear approximation for Relu nodes.
         """
         for i in range(self.prob.nn.tail.depth + 1):
@@ -214,7 +215,7 @@ class MILPEncoder:
             for j in nodes:
                 if j.has_relu_activation() is True:
                     continue
-                
+
                 elif isinstance(j, Relu):
                     self.add_relu_constrs(j, gmodel, linear_approx)
 
@@ -233,16 +234,16 @@ class MILPEncoder:
                 else:
                     raise TypeError(f'The MILP encoding of node {j} is not supported')
 
-    
+
     def add_affine_constrs(self, node: Gemm, gmodel: Model):
         """
         Computes the output constraints of an affine node given the MILP
         variables of its inputs. It assumes that variables have already been
         added.
-    
+
         Arguments:
-            node: 
-                The node. 
+            node:
+                The node.
             gmodel:
                 Gurobi model.
         """
@@ -253,27 +254,27 @@ class MILPEncoder:
             output = node.forward(
                 node.from_node[0].out_vars, node.from_node[1].out_vars
             )
- 
+
         else:
             output = node.forward(node.from_node[0].out_vars)
 
         for i in node.get_outputs():
             gmodel.addConstr(node.out_vars[i] == output[i])
- 
+
 
     def add_relu_constrs(self, node: Relu, gmodel: Model, linear_approx=False):
         """
         Computes the output constraints of a relu node given the MILP variables
         of its inputs.
 
-        Arguments:  
-            node: 
-                Relu node. 
+        Arguments:
+            node:
+                Relu node.
             gmodel:
                 Gurobi model.
         """
         assert(isinstance(node, Relu)), "Cannot compute relu constraints for non-relu nodes."
-        
+
         if type(node.from_node[0]) in [Add, Sub] and \
         node.from_node[0].const is None:
             inp = node.from_node[0].forward(
@@ -338,14 +339,14 @@ class MILPEncoder:
         Computes the output constraints of a maxpool node given the MILP variables
         of its inputs.
 
-        Arguments:  
-            node: 
-                MaxPool node. 
+        Arguments:
+            node:
+                MaxPool node.
             gmodel:
                 Gurobi model.
         """
         assert(isinstance(node, MaxPool)), "Cannot compute maxpool constraints for non-maxpool nodes."
-  
+
         inp = node.from_node[0].out_vars
         padded_inp = Conv.pad(inp, node.pads).reshape((node.in_ch(), 1) + inp.shape[-2:])
         im2col = Conv.im2col(
@@ -381,9 +382,9 @@ class MILPEncoder:
     def add_output_constrs(self, node: Node, gmodel: Model):
         """
         Creates MILP constraints for the output of the output layer.
-   
+
         Arguments:
-            
+
             node:
                 The output node.
             gmodel:

@@ -1,6 +1,6 @@
 # ************
 # File: pgd.py
-# Top contributors (to current version): 
+# Top contributors (to current version):
 # 	Panagiotis Kouvaros (panagiotis.kouvaros@gmail.com)
 # This file is part of the Venus project.
 # Copyright: 2019-2021 by the authors listed in the AUTHORS file in the
@@ -20,7 +20,7 @@ class ProjectedGradientDescent:
     def start(self, prob, init_adv: torch.tensor=None, device=torch.device('cpu')):
         """
         PGD (see Madry et al. 2017): https://arxiv.org/pdf/1706.06083.pdf
-        
+
         Arguments:
             prob:
                 Verification Problem.
@@ -59,6 +59,7 @@ class ProjectedGradientDescent:
             output = prob.nn.forward(adv)
             # to edit code
             if prob.spec.is_satisfied(output, output) is not True:
+                print('effsfd')
                 return adv.detach()
 
             i += 1
@@ -89,7 +90,7 @@ class ProjectedGradientDescent:
         """
         Fast Gradient Signed Method.
 
-        Arguments: 
+        Arguments:
             prob:
                 Verification Problem.
             x:
@@ -98,7 +99,7 @@ class ProjectedGradientDescent:
                 Epsilon.
             targeted:
                 Whether or not the attack is targeted.
-        Returns: 
+        Returns:
             A tensor for the adversarial example.
         """
         x = x.clone().detach().to(self.config.PRECISION).requires_grad_(True)
@@ -126,7 +127,7 @@ class ProjectedGradientDescent:
 
         # compute perturbation
         perturbation = eps * torch.sign(x.grad)
-        
+
         if torch.all(perturbation == 0):
             adv = self.generate_random_adv(prob.spec.input_node.bounds)
 

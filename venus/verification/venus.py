@@ -1,5 +1,5 @@
 # ************
-# File: venus# Top contributors (to current version): 
+# File: venus# Top contributors (to current version):
 # 	Panagiotis Kouvaros (panagiotis.kouvaros@gmail.com)
 # This file is part of the Venus project.
 # Copyright: 2019-2021 by the authors listed in the AUTHORS file in the
@@ -33,7 +33,7 @@ import math
 class Venus:
 
     def __init__(
-        self, 
+        self,
         queries=None,
         nn=None,
         spec=None,
@@ -46,11 +46,11 @@ class Venus:
 
             nn:
                 network file or folder of networks.
-            
+
             spec:
                 specification file or folder of specifications.
 
-            config: 
+            config:
                 Configuration.
         """
         if queries is not  None:
@@ -85,30 +85,15 @@ class Venus:
             nn = NeuralNetwork(query[0], self.config)
             nn.load()
 
-            # import numpy as np
-            # from venus.bounds.bounds import Bounds
-            # import torch
-            # from venus.specification.specification import Specification
-            # from venus.specification.formula import VarVarConstraint, Formula, StateCoordinate
-            # from venus.network.node import Input
-            # lb = np.random.uniform(0, 1, nn.head.input_shape)
-            # ub = lb + 0.00001
-            # bounds = Bounds(torch.tensor(lb,dtype=self.config.PRECISION), torch.tensor(ub,dtype=self.config.PRECISION))
-            # spec = [Specification(
-                # Input(bounds, self.config),
-                # VarVarConstraint(StateCoordinate((0,0,0,0)), Formula.Sense.LT, StateCoordinate((0,0,0,1))),
-                # "adsa"
-            # )]
-
             # load spec
             vnn_parser = VNNLIBParser(
                 query[1],
                 nn.head[0].input_shape,
                 self.config
-            )  
+            )
             spec = vnn_parser.parse()
 
-            
+
             if self.config.BENCHMARK == 'carvana':
                 head_id = nn.head[0].id
                 nn.head[0] = nn.head[0].to_node[0]
@@ -123,7 +108,7 @@ class Venus:
                 nn.head[0].input_shape = shape
 
 
-            # spec[0].input_node.bounds.upper = spec[0].input_node.bounds.lower.clone()           
+            # spec[0].input_node.bounds.upper = spec[0].input_node.bounds.lower.clone()
             # import onnx
             # import onnxruntime.backend as rt
             # m = onnx.load('vnncomp2022_benchmarks-main/benchmarks/collins_rul_cnn/onnx/NN_rul_full_window_20.onnx')
@@ -141,12 +126,13 @@ class Venus:
             elif ver_report.result == SolveResult.UNSAFE:
                 unsafe += 1
                 total_unsafe_time += ver_report.runtime
-                
+
                 # import onnx
                 # import onnxruntime.backend as rt
                 # m = onnx.load(query[0])
                 # runnable = rt.prepare(m, 'CPU')
                 # cex = np.expand_dims(ver_report.cex.numpy(), 0)
+                # cex = ver_report.cex.numpy()
                 # pred = runnable.run(cex)
                 # print('*****', pred)
                 # import sys
@@ -158,23 +144,24 @@ class Venus:
                 timeout += 1
             total_time += ver_report.runtime
             results.append(ver_report)
-    
+
             with open(self.config.LOGGER.SUMFILE, 'w') as f:
                 if ver_report.result == SolveResult.UNSAFE:
-                    res = 'sat\n' 
+                    res = 'sat\n'
                     cex = ver_report.cex.flatten()
                     res += f'((X_0 {cex[0]})'
                     for i, j in enumerate(cex[1:]):
                         res += f'\n (X_{i + 1} {j})'
-                    res += ')'                        
+                    res += ')'
                 elif ver_report.result == SolveResult.SAFE:
-                    res = 'unsat\n' 
+                    res = 'unsat\n'
                 elif ver_report.result == SolveResult.TIMEOUT:
                     res = 'timeout\n'
                 else:
                     res = 'unknown'
-                
+
                 f.write(res)
+
                 # if res == SolveResult.SATISFIED:
                     # if.write('holds\n')
                 # elif res == SolveResult.UNSATISFIED:
@@ -185,10 +172,10 @@ class Venus:
                     # f.write('unknown\n')
 
                 # f.write('{:<12}{:6.4f}\n'.format(ver_report.result.value, ver_report.runtime))
-     
+
         # avg_safe_time = 0 if safe == 0 else total_safe_time / safe
         # avg_unsafe_time = 0 if unsafe == 0 else total_unsafe_time / unsafe
-    
+
         # with open(self.config.LOGGER.SUMFILE, 'a') as f:
             # f.write('\n\nVerified: {}\tSAFE: {}\tUNSAFE: {}\tUndecided: {}\tTimeouts: {}\n\n'.format(
                 # safe + unsafe,
@@ -215,17 +202,18 @@ class Venus:
                     # avg_unsafe_time
                 # )
             # )
-    
-        # if self.config.VERIFIER.CONSOLE_OUTPUT:
-            # print(
-                # '\nVerified: {}\tSAFE: {}\tUNSAFE: {}\tUndecided: {}\tTimeouts: {}\n'.format(
-                    # safe + unsafe,
-                    # safe,
-                    # unsafe,
-                    # undecided,
-                    # timeout
-                # )
-            # )
+
+        if self.config.VERIFIER.CONSOLE_OUTPUT:
+            print(
+              '\nVerified: {}\tSAFE: {}\tUNSAFE: {}\tUndecided: {}\tTimeouts: {}\t Total Time: {}\n'.format(
+                    safe + unsafe,
+                    safe,
+                    unsafe,
+                    undecided,
+                    timeout,
+                    total_time
+                )
+            )
             # print(
                 # 'Total Time:       {:6.4f}\tAvg Time:       {:6.4f}'.format(
                     # total_time,
@@ -244,7 +232,7 @@ class Venus:
                     # avg_unsafe_time
                 # )
             # )
-    
+
         return results[0] if len(results) == 1 else results
 
     def verify_query(self, nn, spec):
@@ -253,7 +241,7 @@ class Venus:
 
         return self.verify_sequence(nn, spec)
 
-            
+
 
 
     def verify_batch(self, nn, spec):
@@ -269,7 +257,7 @@ class Venus:
                 tuple(
                     j.input_node.bounds.lower for j in spec[i: until]
                 )
-            ) 
+            )
             batch_upper = torch.vstack(
                 tuple(
                     j.input_node.bounds.upper for j in spec[i: until]
@@ -282,7 +270,7 @@ class Venus:
             batch_spec = Specification(
                 spec[0].input_node, batch_formula, self.config
             )
-           
+
             verifier = Verifier(nn, batch_spec, self.config, batch=until-i)
             sub_ver_report = verifier.verify()
             ver_report.runtime += sub_ver_report.runtime
