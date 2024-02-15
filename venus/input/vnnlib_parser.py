@@ -47,6 +47,7 @@ class VNNLIBParser:
                 Specification(
                     Input(bounds, self.config),
                     NegationFormula(o_f).to_NNF(),
+                    self.config,
                     os.path.basename(self.pf)[1]
                 )
             )
@@ -60,11 +61,16 @@ class VNNLIBParser:
                     f = clause[1]
                 else:
                     raise Exception('No output constraints found')
-
+                
+                bounds = Bounds(
+                    clause[0][0].reshape(self.input_shape),
+                    clause[0][1].reshape(self.input_shape)
+                )
                 specs.append(
                     Specification(
-                        Input(clause[0][0], clause[0][1]),
+                        Input(bounds, self.config),
                         NegationFormula(f).to_NNF(),
+                        self.config,
                         os.path.basename(self.pf)[1]
                     )
                 )
@@ -115,16 +121,12 @@ class VNNParser(Parser):
         self.X_SZ = X_SZ
         self.config = config
         self.i_b = [
-            torch.ones(
-                self.X_SZ,
-                dtype=config.PRECISION,
-                device=config.DEVICE
-            ) * -math.inf, 
-            torch.ones(
-                self.X_SZ,
-                dtype=config.PRECISION,
-                device=config.DEVICE
-            ) * math.inf
+            torch.full(
+                (self.X_SZ,), -math.inf, dtype=config.PRECISION, device='cpu'
+            ),
+            torch.full(
+                (self.X_SZ,), math.inf, dtype=config.PRECISION, device='cpu'
+            )
         ]
         self.o_f = None
         self.i_cl = []
@@ -145,8 +147,10 @@ class VNNParser(Parser):
     def statement(self, p):
         if self.o_f is None:
             self.o_f = p.output_statement
+        elif isinstance(self.o_f, NAryConjFormula):
+            self.o_f = NAryConjFormula(self.o_f.clauses + [p.output_statement])
         else:
-            self.o_f = ConjFormula(self.o_f, p.output_statement)
+            self.o_f = NAryConjFormula([self.o_f, p.output_statement])
 
     @_('LPAR CONST input_id REAL RPAR')
     def statement(self, p):
@@ -178,12 +182,12 @@ class VNNParser(Parser):
             torch.ones(
                 self.X_SZ,
                 dtype=self.config.PRECISION,
-                device=self.config.DEVICE
+                device='cpu'
             ) * -math.inf,  
             torch.ones(
                 self.X_SZ,
                 dtype=self.config.PRECISION,
-                device=self.config.DEVICE
+                device='cpu'
             ) * math.inf
         ]
         o_f_terms =  []

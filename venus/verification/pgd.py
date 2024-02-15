@@ -1,6 +1,6 @@
 # ************
 # File: pgd.py
-# Top contributors (to current version): 
+# Top contributors (to current version):
 # 	Panagiotis Kouvaros (panagiotis.kouvaros@gmail.com)
 # This file is part of the Venus project.
 # Copyright: 2019-2021 by the authors listed in the AUTHORS file in the
@@ -11,40 +11,35 @@
 
 import torch
 
+from venus.split.split_strategy import SplitStrategy
+
 class ProjectedGradientDescent:
     def __init__(self, config):
         self.config = config
 
-    def start(self, prob):
+    def start(self, prob, init_adv: torch.tensor=None, device=torch.device('cpu')):
         """
         PGD (see Madry et al. 2017): https://arxiv.org/pdf/1706.06083.pdf
-        
+
         Arguments:
             prob:
                 Verification Problem.
+            init_adv:
+                Initial candidate adversarial example.
         Returns:
            A tensor for the adversarial example.
         """
-        true_label = prob.spec.is_adversarial_robustness()
-        if true_label == -1:
-            return None
-
-
         # Step size to attack iterations.
-        eps_iter = prob.spec.input_node.bounds.get_range() / self.config.VERIFIER.PGD_EPS
+        eps_iter = prob.spec.input_node.bounds.get_range() / \
+            self.config.VERIFIER.PGD_EPS
         # Number of attack iterations
         num_iter = self.config.VERIFIER.PGD_NUM_ITER
 
         # Generate a uniformly random tensor within the specification bounds.
-        distribution = torch.distributions.uniform.Uniform(
-            prob.spec.input_node.bounds.lower,
-            prob.spec.input_node.bounds.upper
-        )
-        adv = distribution.sample(torch.Size([1]))
-        adv = torch.squeeze(adv, 0)
-    
-        # untargeted output
-        y = torch.tensor([true_label])
+        if init_adv is None:
+            adv = self.generate_random_adv(prob.spec.input_node.bounds)
+        else:
+            adv = init_adv
 
         i = 0
         while i < num_iter:
@@ -52,8 +47,7 @@ class ProjectedGradientDescent:
                 prob,
                 adv,
                 eps_iter,
-                y=y,
-                targeted=False
+                device
             )
 
             adv = torch.clamp(
@@ -62,64 +56,87 @@ class ProjectedGradientDescent:
                 prob.spec.input_node.bounds.upper
             )
 
-            logits = prob.nn.forward(adv)
-            if prob.spec.is_satisfied(logits, logits) is not True:
+            output = prob.nn.forward(adv)
+            # to edit code
+            if prob.spec.is_satisfied(output, output) is not True:
+                print('effsfd')
                 return adv.detach()
 
             i += 1
 
         return None
 
+    def generate_random_adv(self, bounds):
+        adv = torch.zeros_like(bounds.lower)
+        idxs = bounds.lower < bounds.upper
+        distribution = torch.distributions.uniform.Uniform(
+            bounds.lower[idxs], bounds.upper[idxs]
+        )
+        partial_adv = distribution.sample(torch.Size([1]))
+        partial_adv = torch.squeeze(partial_adv, 0)
+
+        adv[idxs] = partial_adv
+
+        return adv
+
     def fast_gradient_signed(
         self,
         prob,
         x,
         eps,
-        y=None,
-        targeted=False
+        device=torch.device('cpu'),
+        specs=None
     ):
         """
         Fast Gradient Signed Method.
 
-        Arguments: 
+        Arguments:
             prob:
                 Verification Problem.
             x:
                 Input tensor.
             eps:
                 Epsilon.
-            y:
-                The true output or the targeted output if targeted is set to true. 
             targeted:
                 Whether or not the attack is targeted.
-        Returns: 
+        Returns:
             A tensor for the adversarial example.
         """
+        x = x.clone().detach().to(self.config.PRECISION).requires_grad_(True)
 
         true_label = prob.spec.is_adversarial_robustness()
+
+        save_gradient = SplitStrategy.does_node_split(
+            self.config.SPLITTER.SPLIT_STRATEGY
+        )
         if true_label == -1:
-            raise NotImplementedError("PGD is supported only for Linf adversarial robustness")
+            output = prob.nn.forward(x, save_gradient=save_gradient).flatten()
+            loss = prob.spec.get_mse_loss(output)
 
-        assert torch.all(eps <= prob.spec.input_node.bounds.get_range())
+        else:
+            output_flag =  prob.spec.get_output_flag(prob.nn.tail.output_shape)
+            output = prob.nn.forward(x, save_gradient=save_gradient)[output_flag].flatten()[None, :]
+            true_label = torch.sum(output_flag.flatten()[0: true_label])
+            y = torch.tensor([true_label], device=device)
+            loss_fn = torch.nn.CrossEntropyLoss()
+            loss = loss_fn(output, y)
 
-        x = x.clone().detach().to(torch.float).requires_grad_(True)
-        if y is None:
-            y = torch.tensor([true_label])
-       
         # Compute gradient
-        loss_fn = torch.nn.CrossEntropyLoss()
-        loss = loss_fn(prob.nn.forward(x)[None, :], y)
-        if targeted:
-            loss = -loss
+        # loss = -loss
         loss.backward()
 
         # compute perturbation
         perturbation = eps * torch.sign(x.grad)
 
-        adv = torch.clamp(
-            x + perturbation,
-            prob.spec.input_node.bounds.lower,
-            prob.spec.input_node.bounds.upper
-        )
+        if torch.all(perturbation == 0):
+            adv = self.generate_random_adv(prob.spec.input_node.bounds)
+
+        else:
+            adv = torch.clamp(
+                x + perturbation,
+                prob.spec.input_node.bounds.lower,
+                prob.spec.input_node.bounds.upper
+            )
+
 
         return adv

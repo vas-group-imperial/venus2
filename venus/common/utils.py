@@ -54,8 +54,7 @@ class ReluApproximation(Enum):
     IDENTITY = 1
     PARALLEL = 2
     MIN_AREA = 3
-    VENUS_HEURISTIC = 4
-    OPT_HEURISTIC = 5
+    VENUS = 4
 
 class OSIPMode(Enum):
     """

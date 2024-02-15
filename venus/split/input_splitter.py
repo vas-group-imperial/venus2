@@ -11,8 +11,10 @@
 """
 
 import random
+import numpy as np
 
 from venus.verification.verification_problem import VerificationProblem
+from venus.split.split_strategy import SplitStrategy
 from venus.network.node import Input
 from venus.bounds.bounds import Bounds
 
@@ -47,13 +49,18 @@ class InputSplitter:
         Returns:
             list of VerificationProblem
         """
-        if self.prob.stability_ratio < self.config.SPLITTER.STABILITY_RATIO_CUTOFF:
+        # if self.prob.stability_ratio <= self.config.SPLITTER.STABILITY_RATIO_CUTOFF:
+        try:
             subprobs = self.soft_split()
-            worth = self.prob.worth_split(subprobs, self.init_st_ratio)
-            if worth is True:
-                return subprobs
+        except Exception as error:
+            raise error
 
-        return []
+        return subprobs
+            # worth = self.worth_split(subprobs)
+            # if worth is True:
+                # return subprobs
+
+        # return []
 
 
     def soft_split(self, prob=None):
@@ -78,7 +85,18 @@ class InputSplitter:
             # If the number of input dimensions is not big, choose the best
             # dimension to split
             for dim in prob.spec.input_node.get_outputs():
-                prob1, prob2 = self.split_dimension(prob, dim)
+                if isinstance(prob.spec.output_formula, list):
+                    idx = np.prod(dim)
+                    if prob.spec.is_form_satisfied(
+                        prob.spec.output_formula[idx],
+                        prob.nn.tail.bounds.lower[idx, ...],
+                        prob.nn.tail.bounds.lower[idx, ...]
+                    ) is True:
+                        continue
+                try:
+                    prob1, prob2 = self.split_dimension(prob, dim)
+                except Exception as error:
+                    raise error
                 ratio = (prob1.stability_ratio + prob2.stability_ratio) / 2
                 if ratio >= best_ratio:
                     best_ratio = ratio
@@ -86,8 +104,24 @@ class InputSplitter:
                     best_prob2 = prob2
         else:
             # Otherwise split randomly
-            dim = random.choice(prob.spec.input_node.get_outputs())
+            if isinstance(prob.spec.output_formula, list):
+                dim = random.choice(prob.spec.input_node.get_outputs())
+                idx = np.prod(dim)
+                while prob.spec.is_form_satisfied(
+                    prob.spec.output_formula[idx],
+                    prob.nn.tail.bounds.lower[idx, ...],
+                    prob.nn.tail.bounds.lower[idx, ...]
+                ) is True:
+                    dim = random.choice(prob.spec.input_node.get_outputs())
+                    idx = np.prod(dim)
+            else:
+                dim = (prob.split_dim + 1) % prob.spec.input_node.output_size
+                dim = prob.spec.input_node.get_outputs()[dim]
+
+            # try:
             best_prob1, best_prob2 =  self.split_dimension(prob, dim)
+            # except Exception as error:
+                # raise error
 
         return [best_prob1, best_prob2]
 
@@ -115,20 +149,35 @@ class InputSplitter:
         l[dim] = split_point
         prob1 = VerificationProblem(
             prob.nn.copy(),
-            prob.spec.copy(Input(Bounds(l, u), self.config)),
+            prob.spec.copy(
+                Input(Bounds(l, u), self.config)
+            ),
             prob.depth + 1,
             self.config
         )
-        prob1.bound_analysis()
+        prob1.split_dim = dim
+        prob1.last_split_strategy = SplitStrategy.INPUT
+        try:
+            prob1.bound_analysis()
+            prob1.detach()
+        except Exception as error:
+            raise error
 
         u[dim] = split_point
         prob2 = VerificationProblem(
             prob.nn.copy(),
-            prob.spec.copy(Input(Bounds(l, u), self.config)),
+            prob.spec.copy(
+                Input(Bounds(l, u), self.config)
+            ),
             prob.depth + 1,
             self.config
         )
-        prob2.bound_analysis()
+        prob1.last_split_strategy = SplitStrategy.INPUT
+        try:
+            prob2.bound_analysis()
+            prob2.detach()
+        except Exception as error:
+            raise error
 
         return prob1, prob2
 
@@ -156,9 +205,34 @@ class InputSplitter:
         while split_depth < split_depth_cutoff:
             subprobs = []
             for p in probs:
-                subprobs.extend(self.soft_split(p))
+                splits = []
+                try:
+                    splits = self.soft_split(p)
+                except Exception as error:
+                    splits = []
+                subprobs.extend(splits)
             split_depth += 1
             probs = subprobs
 
         return probs
 
+    def worth_split(self, subprobs):
+        pscore0 = self.score(self.prob)
+        pscore1 = self.score(subprobs[0])
+        pscore2 = self.score(subprobs[1])
+
+        _max = max(pscore1, pscore2)
+        _min = min(pscore1, pscore2) 
+
+        if pscore0 >= _max:
+            return False
+        elif _min > pscore0:
+            return True
+        elif  (pscore1 + pscore2)/2 > pscore0:
+            return True
+        else:
+            return False
+ 
+    def score(self, prob):        
+        return (prob.stability_ratio - self.init_st_ratio)
+ 

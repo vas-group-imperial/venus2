@@ -1,5 +1,5 @@
 # ************
-# File: split_process.py
+# File: splitter.py
 # Top contributors (to current version): 
 # 	Panagiotis Kouvaros (panagiotis.kouvaros@gmail.com)
 # This file is part of the Venus  project.
@@ -9,43 +9,44 @@
 # Description: Split process managing input and node splits.
 # ************
 
-from torch.multiprocessing import Process
+import time
+import itertools
+
+
 from venus.split.split_report import SplitReport
 from venus.split.node_splitter import NodeSplitter
 from venus.split.input_splitter import InputSplitter
 from venus.split.split_strategy import SplitStrategy
 from venus.verification.verification_problem import VerificationProblem
 from venus.common.utils import ReluApproximation
+from venus.verification.subverifier import SubVerifier
+from venus.solver.solve_result import SolveResult
 from venus.common.logger import get_logger
-import time
 
-class SplitProcess(Process):
+import resource
+rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
+resource.setrlimit(resource.RLIMIT_NOFILE, (16384, rlimit[1]))
+
+
+class Splitter:
     
     process_count = 0
     logger = None
+    id_iter = itertools.count()
 
-    def __init__(self, id, prob, jobs_queue, reporting_queue, config):
+    def __init__(self, prob, jobs_queue, reporting_queue, config):
         """
         Arguments:
-            
-            id: 
-                int of the identity of the process.
-
             prob:
                 VerificationProblem.
-
             jobs_queue:
                 queue to enqueue the resulting subproblems.
-
             reporting_queue:
                 queue not enqueue the splitting report.
-
             config:
                 configuration.
-
         """
-        super(SplitProcess, self).__init__()
-        self.id = id
+        self.id = next(Splitter.id_iter)
         self.initial_prob = prob
         self.config = config
         self.jobs_queue = jobs_queue
@@ -56,13 +57,13 @@ class SplitProcess(Process):
         self.depth=0
         self.split_queue = [self.initial_prob]
         self.process_count += 1
-        if SplitProcess.logger is None:
-            SplitProcess.logger = get_logger(__name__, config.LOGGER.LOGFILE)
+        if Splitter.logger is None:
+            Splitter.logger = get_logger(__name__, config.LOGGER.LOGFILE)
 
     def run(self):        
-        SplitProcess.logger.info(f'Running split process {self.id}')
+        Splitter.logger.info(f'Running split process {self.id}')
         self.split()
-        SplitProcess.logger.info(f'Split process {self.id} finished')
+        Splitter.logger.info(f'Split process {self.id} finished')
         self.process_count -= 1
         self.reporting_queue.put(SplitReport(
             self.id, self.jobs_count, self.node_split_count, self.input_split_count
@@ -80,12 +81,15 @@ class SplitProcess(Process):
                 time.sleep(self.config.SPLITTER.SLEEPING_INTERVAL)
             else:
                 prob  = self.split_queue.pop()
-                split_method = self._select_split_method(prob)
-                subprobs = split_method(prob)
-                if len(subprobs) > 0:
-                    self.process_subprobs(subprobs)
-                else:
+                if prob.depth > self.config.SPLITTER.MAX_SPLIT_DEPTH:
                     self.add_to_job_queue(prob)
+                else:
+                    split_method = self._select_split_method(prob)
+                    subprobs = split_method(prob)
+                    if len(subprobs) > 0:
+                        self.process_subprobs(subprobs)
+                    else:
+                        self.add_to_job_queue(prob)
 
     def _select_split_method(self, prob=None):
         """
@@ -108,13 +112,12 @@ class SplitProcess(Process):
         elif self.config.SPLITTER.SPLIT_STRATEGY == SplitStrategy.INPUT_NODE:
             return self.input_node_split
         elif self.config.SPLITTER.SPLIT_STRATEGY == SplitStrategy.INPUT_NODE_ALT:
-            if prob.split_strategy == SplitStrategy.INPUT:
-                return self.node_input_split
-            else:
+            if prob.last_split_strategy == SplitStrategy.NODE:
                 return self.input_node_split
+            else:
+                return self.node_input_split
         elif self.config.SPLITTER.STRATEGY == SplitStrategy.NONE:
             return self.no_split
-
 
     def no_split(self, prob):
         """
@@ -180,7 +183,7 @@ class SplitProcess(Process):
         """
         nsplitter = NodeSplitter(prob, self.config)
         subprobs = nsplitter.split()
-        SplitProcess.logger.info(f"Finished node splitting - {len(subprobs)} subproblems")
+        Splitter.logger.info(f"Finished node splitting - {len(subprobs)} subproblems")
         if len(subprobs) > 0:
             self.node_split_count += 1
 
@@ -204,9 +207,14 @@ class SplitProcess(Process):
             self.config
         )
 
-        subprobs = isplitter.split()
+        try:
+            subprobs = isplitter.split()
+        except Exception as error:
+            Splitter.logger.info(f"{str(error)}")
+            self.add_to_split_queue(prob)
+            return []
 
-        SplitProcess.logger.info(f"Finished input splitting - {len(subprobs)} subproblems")
+        Splitter.logger.info(f"Finished input splitting - {len(subprobs)} subproblems")
         if len(subprobs) > 0:
             self.input_split_count += 1
         
@@ -229,7 +237,7 @@ class SplitProcess(Process):
         # opt_prob = self.osip_optimise(prob)
         self.jobs_queue.put(prob)
         self.jobs_count += 1
-        SplitProcess.logger.info(f"Added verification subproblem {prob.id} to job queue")
+        Splitter.logger.info(f"Added verification subproblem {prob.id} to job queue")
 
     # def osip_optimise(self, prob):
         # if self.config.SIP.is_split_osip_enabled():
@@ -245,7 +253,7 @@ class SplitProcess(Process):
                 # cf
             # )
             # osip_prob.bound_analysis()
-            # SplitProcess.logger.info(
+            # Splitter.logger.info(
                 # 'SIP bounds {:.4f} - OSIP bounds {:.4f}'
                 # .format(prob.output_range, osip_prob.output_range))
             # if osip_prob.output_range < prob.output_range:
@@ -268,7 +276,7 @@ class SplitProcess(Process):
             None
         """
         self.split_queue = [prob] + self.split_queue
-        SplitProcess.logger.info(f"Added verification subproblem {prob.id} to split queue")
+        Splitter.logger.info(f"Added verification subproblem {prob.id} to split queue")
 
     def process_subprobs(self, probs):
         """
@@ -286,10 +294,21 @@ class SplitProcess(Process):
             None
         """
         for prob in probs:
-            if prob.satisfies_spec(): 
-                SplitProcess.logger.info(f'Verfication subproblem {prob.id} discarded as it already satisfies the specification')
+            slv_report = SubVerifier(self.config).verify_incomplete(prob)
+            if slv_report.result == SolveResult.SAFE:
+                Splitter.logger.info(
+                    f'Verification subproblem {prob.id} satisfies the specification'
+                )
+
+            elif slv_report.result == SolveResult.UNSAFE:
+                Splitter.logger.info(
+                    f'Verfication subproblem {prob.id} does not satisfy the specification'
+                )
+                self.reporting_queue.put(slv_report)
+
             elif prob.stability_ratio >= self.config.SPLITTER.STABILITY_RATIO_CUTOFF: 
                 self.add_to_job_queue(prob)
+
             else:
                 self.add_to_split_queue(prob)
 
@@ -301,6 +320,6 @@ class SplitProcess(Process):
             bool expresssing whether or not there are currently running
             splitting processs
         """
-        return SplitProcess.process_count > 0 
+        return Splitter.process_count > 0
         
 

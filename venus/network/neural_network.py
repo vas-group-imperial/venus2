@@ -42,9 +42,8 @@ class NeuralNetwork:
         self.head = None
         self.tail = None
         self.node = {}
-        self.mean = 0
-        self.std = 1
-
+        self.input_simplified = False
+        self.batched = False
 
     def load(self):
         """
@@ -65,9 +64,20 @@ class NeuralNetwork:
         
         onnx_parser = ONNXParser(self.config)
         self.head, self.tail, self.node = onnx_parser.load(self.model_path)
-        self.mean = onnx_parser.mean
-        self.std = onnx_parser.std
- 
+
+        # print(self.head.input_shape)
+        # s = 0
+        # for i in range(self.tail.depth):
+            # nodes = self.get_node_by_depth(i)
+            # for j in nodes:
+                # if j.has_relu_activation() or j.has_max_pool():
+                    # s += j.output_size
+                # print(i, j, j.output_size)
+        # print(s)
+        
+        # import sys
+        # sys.exit()
+
     def copy(self):
         """
         Copies the calling object.
@@ -76,22 +86,27 @@ class NeuralNetwork:
 
         for i in self.node:
             nn.node[i] = self.node[i].copy()
+            # to edit
+            nn.node[i].grads = self.node[i].grads
 
-        nn.head = nn.node[self.head.id]
+        nn.head =  [nn.node[i.id] for i in self.head]
         nn.tail = nn.node[self.tail.id]
+ 
+        for i, j in self.node.items():
+            nn.node[i].from_node = [
+                nn.node[k.id]
+                for k in j.from_node
+                if isinstance(k, Input) is not True
+            ]
+            nn.node[i].to_node = [nn.node[k.id] for k in j.to_node]
+            nn.node[i].grads = self.node[i].grads
 
-        for i in self.node:
-            nn.node[i].from_node = [nn.node[j.id] for j in self.node[i].from_node if isinstance(j, Input) is not True]
-            nn.node[i].to_node = [nn.node[j.id] for j in self.node[i].to_node]
+
+        nn.input_simplified = self.input_simplified
+        nn.batched = self.batched
+
 
         return nn
-
-    def detach(self):
-        """
-        Detaches the tensors of the network.
-        """
-        for _, i in self.node.items():
-            i.detach()
 
     def get_node_by_depth(self, depth: int) -> list:
         """
@@ -119,10 +134,53 @@ class NeuralNetwork:
         """
         Nulls out all outputs of the nodes of the network.
         """
-        del self.head.from_node[0].output 
+        for i in self.head:
+            i.from_node[0].output = None
 
         for _, i in self.node.items():
-            del i.output
+            i.output = None
+
+    def detach(self):
+        """
+        Detaches and clones potentially gradient required tensors. 
+        """
+        for _, i in self.node.items():
+            i.detach()
+
+    def cuda(self):
+        """
+        Moves all data to gpu memory
+        """
+        for _, i in self.node.items():
+            i.cuda()
+
+    def cpu(self):
+        """
+        Moves all data to cpu memory
+        """
+        for _, i in self.node.items():
+            i.cpu()
+
+    def set_batch_size(self, size: int=1):
+        """
+        Sets the batch size.
+
+        Arguments:
+            size: the batch size.
+        """
+        for _, i in self.node.items():
+            i.set_batch_size(size)
+
+        self.batched = True
+
+    def cache_bounds(self):
+        for _, i in self.node.items():
+            i.set_cache_bounds()
+
+    def use_cache_bounds(self):
+        for _, i in self.node.items():
+            i.use_cache_bounds()
+
 
     def predict(self, inp: np.array, mean: float=0, std: float=1):
         """
@@ -191,7 +249,6 @@ class NeuralNetwork:
             self.node[i].output_size for i in self.node if isinstance(self.node[i], Relu)
         ])
 
-
     def get_n_stabilised_nodes(self):
         """
         Computes the number of stabilised ReLU nodes in the network.
@@ -201,7 +258,21 @@ class NeuralNetwork:
             int of the number of stabilised ReLU nodes.
         """
         return sum([
-            self.node[i].get_stable_count() for i in self.node if isinstance(self.node[i], Relu)
+            self.node[i].get_stable_count() 
+            for i in self.node if isinstance(self.node[i], Relu)
+        ])
+
+    def get_n_non_stabilised_nodes(self):
+        """
+        Computes the number of non-stabilised ReLU nodes in the network.
+
+        Returns:
+
+            int of the number of stabilised ReLU nodes.
+        """
+        return sum([
+            self.node[i].get_unstable_count() 
+            for i in self.node if isinstance(self.node[i], Relu)
         ])
 
     def get_stability_ratio(self):
@@ -237,7 +308,7 @@ class NeuralNetwork:
         Arguments:
             p_node:
                 the preceding node.
-            n_node:
+            s_node:
                 the subsequent node.
             index: 
                 the index of the node.
@@ -248,36 +319,123 @@ class NeuralNetwork:
             return p_node.get_outputs()
 
         elif isinstance(s_node, Conv):
-            height_start = index[0] * s_node.strides[0] - s_node.padding[0]
+            height_start = index[-2] * s_node.strides[-2] - s_node.pads[0]
             height_rng = range(height_start, height_start + s_node.krn_height)
             height = [i for i in height_rng if i >= 0 and i < s_node.krn_height]
-            width_start = index[1] * s_node.strides[1] - s_node.padding[1]
+            width_start = index[-1] * s_node.strides[-1] - s_node.pads[1]
             width_rng = range(width_start, width_start + s_node.krn_width)
             width = [i for i in width_rng if i >= 0 and i < s_node.krn_width]
-            ch = [i for i in range(s_node.in_ch)]
+            channel = list(range(s_node.in_ch))
 
-            shape = [ch, height, width] if len(p_node.output_shape) == 3 else [[0], ch, height, width]
+            if len(p_node.output_shape) == 3:
+                shape = [channel, height, width]
+            else:
+                shape = [[0], channel, height, width]
 
-            return [i for i in itertools.product(*shape)]
+            return list(itertools.product(*shape))
 
-    def forward(self, inp):
+    def forward(self, inp, save_gradient: bool=False):
         """
         Computes the output of the network given an input.
 
         Arguments:
             inp:
                 The input.
+            save_gradient:
+                whether to save the gradients of the nodes.
         Returns
             The output given inp.
         """
-        self.head.from_node[0].output = inp
-
+        for i in self.head:
+            i.from_node[0].output = inp
         for i in range(self.tail.depth + 1):
             nodes = self.get_node_by_depth(i)
             for j in nodes:
-                j.forward(save_output=True)
+                j.forward(save_output=True, save_gradient=save_gradient) 
+                # if save_gradient is True and j.grads is not None:
+                    # if self.batched is True:
+                        # j.grads = torch.mean(j.grads, dim=0).flatten()
+                    # j.grads = torch.argsort(j.grads, descending=True).tolist()
+
 
         output = self.tail.output
         self.clean_outputs()
 
         return output
+
+    def has_custom_relaxation_slope(self):
+        """
+        Returns whether any relu relaxation slope in the network is not the
+        default.
+        """
+        for _, i in self.node.items():
+            if isinstance(i, Relu) and i.has_custom_relaxation_slope():
+                return True
+
+        return False
+
+    def reset_relaxation_slope(self):
+        """
+        Resets to default the relu relaxation slopes in the network.
+        """
+        for _, i in self.node.items():
+            if isinstance(i, Relu) and i.has_custom_relaxation_slope():
+                i.set_lower_relaxation_slope(
+                    approx=self.config.SIP.RELU_APPROXIMATION
+                )
+
+    def clear_relaxation_slope(self):
+        """
+        Clears the relu relaxation slope.
+        """
+        for _, i in self.node.items():
+            if isinstance(i, Relu) and i.has_custom_relaxation_slope():
+                i.clear_lower_relaxation_slope()
+
+    def get_non_linear_starting_depth(self):
+        """
+        Returns the shallowest depth with a non linear activation function.
+        """
+        for i in range(self.tail.depth):
+            nodes = self.get_node_by_depth(i)
+            for j in nodes:
+                if j.has_relu_activation() or j.has_max_pool():
+                    return i
+        return i
+
+
+    def get_lower_relaxation_slopes(self, gradient=False):
+        """
+        Builds a dictionary of the lower relaxation slopes of the relu nodes.
+
+        Arguments:
+        
+            gradient:
+                Whether the slopes require gradient.
+        """
+        lower, upper = {}, {}
+        for _, i in self.node.items():
+            if isinstance(i, Relu):
+                slope = i.get_lower_relaxation_slope()
+                if slope[0] is not None:
+                    lower[i.id] = slope[0].detach().clone().requires_grad_(gradient)
+                if slope[1] is not None:
+                    upper[i.id] = slope[1].detach().clone().requires_grad_(gradient)
+
+        return [lower, upper]
+
+    def set_lower_relaxation_slopes(
+            self, lower_slopes: torch.Tensor, upper_slopes: torch.Tensor
+    ):
+        """
+        Sets the lower relaxation slopes of the relu nodes.
+
+        Arguments:
+        
+            slopes:
+                A dictionary of the lower relaxation slopes of the relu nodes.
+        """
+        for i in lower_slopes:
+            self.node[i].set_lower_relaxation_slope(
+                lower_slopes[i], upper_slopes[i]
+            )

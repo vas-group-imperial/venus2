@@ -10,8 +10,10 @@ tqdm = "*"
 sly = "*"
 gurobipy = "*"
 torch = "*"
+torchvision = "*"
+protobuf = "~=3.20"
 
 [dev-packages]
 
 [requires]
-python_version = "3.9"
+python_version = "3"

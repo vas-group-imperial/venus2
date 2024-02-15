@@ -9,15 +9,18 @@
 # Description: Dependency graph class.
 # ************
 
+import numpy as np
+import itertools
+import math
+import torch
+
+
 from venus.dependency.dependency_graph_node import DependencyGraphNode
 from venus.dependency.dependency_type import DependencyType
 from venus.network.node import Gemm
 from venus.common.logger import get_logger
 from venus.common.utils import ReluState, DFSState
 from timeit import default_timer as timer
-import numpy as np
-import itertools
-import math
 
 class DependencyGraph:
     """
@@ -25,7 +28,7 @@ class DependencyGraph:
     """
 
     logger = None
-    DEP_DEGREE_THRESHOLD = 3
+    DEP_DEGREE_THRESHOLD = 2
 
     def __init__(self, nn, intra, inter, config):
         """
@@ -127,10 +130,8 @@ class DependencyGraph:
 
             None
         """ 
-        for j in n_n.get_outputs():
+        for j in n_n.to_node[0].get_unstable_indices():
             d = None if n_v is None else n_v[j]
-            if n_n.to_node[0].is_stable(j, d): 
-                continue
             for i in self.nn.calc_neighbouring_units(n, n_n, j):
                 d = None if v is None else v[i]
                 if n.to_node[0].is_stable(i, d):
@@ -216,11 +217,9 @@ class DependencyGraph:
 
             None
         """ 
-        for (i,j) in list(itertools.combinations(n.get_outputs(), 2)):
+        for (i,j) in list(itertools.combinations(n.to_node[0].get_unstable_indices(), 2)):
             d_i = None if v is None else v[i]
             d_j = None if v is None else v[j]
-            if n.to_node[0].is_stable(i, d_i) or n.to_node[0].is_stable(j, d_j):
-                continue
             dep = self._node_intra_dep(n, i, j)
             if dep is None:
                 continue 
@@ -247,8 +246,11 @@ class DependencyGraph:
             None
         """ 
         bounds = n.from_node[0].bounds
-        w = (n.weights[idx1, :], n.weights[idx2, :])
-        b = (n.bias[idx1], n.bias[idx2])
+        w = (n.weights[:, idx1].flatten(), n.weights[:, idx2].flatten())
+        if n.has_bias() is True:
+            b = (n.bias[idx1], n.bias[idx2])
+        else:
+            b = (0, 0)
 
         min0, max0 = self._node_intra_dep_helper(w[0], w[1], b[0], b[1], bounds)
         if min0 is None:
@@ -306,8 +308,24 @@ class DependencyGraph:
         weights_plus = np.clip(wp, 0, math.inf)
         weights_minus = np.clip(wp, -math.inf, 0)
         _min = _max = 0
-        _min +=  weights_plus.dot(bounds.lower) + weights_minus.dot(bounds.upper) + bp
-        _max +=  weights_plus.dot(bounds.upper) + weights_minus.dot(bounds.lower) + bp
+        _min +=  torch.tensordot(
+            bounds.lower, weights_plus, dims=([len(bounds.lower.shape) - 1], [0])
+        )
+        _min += torch.tensordot(
+            bounds.upper, weights_minus, dims=([len(bounds.upper.shape) - 1], [0])
+        )
+        _min += bp
+        _max +=  torch.tensordot(
+            bounds.upper, weights_plus, dims=([len(bounds.upper.shape) - 1], [0])
+        )
+        _max +=  torch.tensordot(
+            bounds.lower, weights_minus, dims=([len(bounds.upper.shape) - 1], [0])
+        )
+        _max += bp
+
+        
+        # _min +=  weights_plus.dot(bounds.lower) + weights_minus.dot(bounds.upper) + bp
+        # _max +=  weights_plus.dot(bounds.upper) + weights_minus.dot(bounds.lower) + bp
 
         return _min, _max
 
