@@ -143,13 +143,14 @@ class MILPEncoder:
                 The gurobi model
         """
         if node.bounds.size() > 0:
-
             node.out_vars = np.array(
-                gmodel.addVars(
-                    int(node.output_size),
-                    lb=node.bounds.lower.flatten(),
-                    ub=node.bounds.upper.flatten()
-                ).values()
+                list(
+                    gmodel.addVars(
+                        int(node.output_size),
+                        lb=node.bounds.lower.flatten(),
+                        ub=node.bounds.upper.flatten()
+                    ).values()
+                )
             ).reshape(node.output_shape)
         else:
             if isinstance(node, Relu):
@@ -188,9 +189,11 @@ class MILPEncoder:
         node.delta_vars = np.empty(shape=node.output_size, dtype=Var)
         if node.get_unstable_count() > 0:
             node.delta_vars[node.get_unstable_flag().flatten()] = np.array(
-                gmodel.addVars(
-                    node.get_unstable_count().item(), vtype=GRB.BINARY
-                ).values()
+                list(
+                    gmodel.addVars(
+                        node.get_unstable_count().item(), vtype=GRB.BINARY
+                    ).values()
+                )
             )
         node.delta_vars = node.delta_vars.reshape(node.output_shape)
 
