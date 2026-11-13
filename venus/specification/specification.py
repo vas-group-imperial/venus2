@@ -192,10 +192,10 @@ class Specification:
             np.empty(output_vars.shape, dtype=Var)
         ]
         clause_vars[0][index_flag] = np.array(
-            gmodel.addVars(len(index_flag_len), lb=-GRB.INFINITY).values()
+            list(gmodel.addVars(len(index_flag_len), lb=-GRB.INFINITY).values())
         )
         clause_vars[1][index_flag] = np.array(
-            gmodel.addVars(len(index_flag_len), lb=-GRB.INFINITY).values()
+            list(gmodel.addVars(len(index_flag_len), lb=-GRB.INFINITY).values())
         )
 
         constr_sets = [
@@ -282,7 +282,7 @@ class Specification:
 
             clause_vars = np.empty(output_vars.shape, dtype=Var)
             clause_vars[index_flag] = np.array(
-                gmodel.addVars(index_flag_len, lb=-GRB.INFINITY).values()
+                list(gmodel.addVars(index_flag_len, lb=-GRB.INFINITY).values())
             )
 
             constr_sets = self.get_constrs(j, gmodel, clause_vars)

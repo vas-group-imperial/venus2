@@ -11,6 +11,7 @@
 
 import torch
 import numpy as np
+import gurobipy
 from gurobipy import *
 
 from venus.network.node import *
