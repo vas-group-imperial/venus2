@@ -257,7 +257,7 @@ class NodeSplitter(object):
             return True
 
         if prob.nn.node[dgnode.nodeid].state[dgnode.index] == ReluState.inverse(state):
-            self.logger.warning(f'Inconsisteny in setting states, layer {l}, node {n}.')
+            self.logger.warning(f'Inconsisteny in setting states, layer {dgnode.nodeid}, node {dgnode.index}.')
             return False
         
         prob.nn.node[dgnode.nodeid].set_state(dgnode.index, state)
